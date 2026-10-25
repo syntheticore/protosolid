@@ -141,10 +141,18 @@ and scene when comparing changes; verify an ordinary application load separately
 
 ## Certified publication set
 
+Every body is certified by integrating its exact trimmed boundary with the
+divergence theorem. Two closed-form shortcuts run first because they are much
+cheaper: regular analytic primitives (right cylinders, cones, spheres and ring
+tori) and right prisms, whose sections are integrated in their plane. Planar,
+straight-edged bodies additionally check every face pair for self-intersection
+and that cavity shells are disjoint and contained, since Euler-built bodies are
+not nested at construction.
+
 The current publisher certifies:
 
 - arbitrary closed planar, linear-edge manifold shells, including cavities and
-  genus introduced by through-holes;
+  genus introduced by through-holes, whatever their p-curve representation;
 - analytical BREP Boolean union, intersection, and difference, including curved
   supports, disconnected material bodies, and fully enclosed cavity shells;
 - exact right cylinders, cones, spheres, and regular ring tori, with closed-form

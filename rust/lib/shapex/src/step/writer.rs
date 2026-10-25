@@ -243,7 +243,7 @@ impl Writer<'_> {
                     continue;
                 };
                 let regularity = value.du.cross(value.dv).magnitude();
-                if best.map_or(true, |(current, ..)| regularity > current) {
+                if best.is_none_or(|(current, ..)| regularity > current) {
                     best = Some((regularity, value.point, normal));
                 }
             }

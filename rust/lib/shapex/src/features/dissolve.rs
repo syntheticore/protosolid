@@ -135,6 +135,5 @@ pub(crate) fn dissolve_faces(source: &Compound, faces: &[FaceHandle]) -> KernelR
     for patch in patches.values_mut().flatten() {
         patch.loops.retain(|loop_| !loop_.segments.is_empty());
     }
-    commit_support_patches(source, patches, changed)?
-        .with_feature_parent(source, crate::DerivationRole::DissolveFaces)
+    commit_support_patches(source, patches, changed, Some(crate::DerivationRole::DissolveFaces))
 }

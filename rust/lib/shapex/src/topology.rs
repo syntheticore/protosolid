@@ -25,6 +25,17 @@ pub enum EntityId {
     Body(BodyId),
 }
 
+macro_rules! entity_from_handle {
+    ($($kind:ident),*) => {$(
+        impl From<Handle<$kind>> for EntityId {
+            fn from(id: Handle<$kind>) -> Self {
+                Self::$kind(id)
+            }
+        }
+    )*};
+}
+entity_from_handle!(Vertex, Edge, Coedge, Loop, Face, Shell, Body);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaceOrientation {
     Forward,
@@ -65,7 +76,6 @@ pub struct Vertex {
     pub(crate) name: PersistentId,
     pub(crate) point: Point3,
     pub(crate) tolerance: f64,
-    pub(crate) outgoing: Option<CoedgeId>,
 }
 
 impl Vertex {
@@ -77,9 +87,6 @@ impl Vertex {
     }
     pub fn tolerance(&self) -> f64 {
         self.tolerance
-    }
-    pub fn outgoing(&self) -> Option<CoedgeId> {
-        self.outgoing
     }
 }
 
@@ -390,7 +397,6 @@ impl Topology {
                 name: value.name,
                 point: value.point,
                 tolerance: value.tolerance,
-                outgoing: None,
             });
             vertices.insert(old, new);
         }
@@ -487,12 +493,6 @@ impl Topology {
                 .map(|coedge| coedges[coedge])
                 .collect();
         }
-        for (old, new) in &vertices {
-            self.vertices.get_mut(*new)?.outgoing = source
-                .vertex(*old)?
-                .outgoing
-                .and_then(|coedge| coedges.get(&coedge).copied());
-        }
         for (old, new) in &faces {
             self.faces.get_mut(*new)?.loops = source
                 .face(*old)?
@@ -517,47 +517,44 @@ impl Topology {
         Ok(body)
     }
 
+    /// Every live entity with its persistent name, in kind order from vertices
+    /// to bodies.
+    pub(crate) fn entities(&self) -> impl Iterator<Item = (PersistentId, EntityId)> + '_ {
+        self.vertices.iter().map(|(id, value)| (value.name, id.into()))
+            .chain(self.edges.iter().map(|(id, value)| (value.name, id.into())))
+            .chain(self.coedges.iter().map(|(id, value)| (value.name, id.into())))
+            .chain(self.loops.iter().map(|(id, value)| (value.name, id.into())))
+            .chain(self.faces.iter().map(|(id, value)| (value.name, id.into())))
+            .chain(self.shells.iter().map(|(id, value)| (value.name, id.into())))
+            .chain(self.bodies.iter().map(|(id, value)| (value.name, id.into())))
+    }
+
+    pub(crate) fn names(&self) -> impl Iterator<Item = PersistentId> + '_ {
+        self.entities().map(|(name, _)| name)
+    }
+
     /// Resolve a persistent parametric name to the current generational handle.
     pub fn entity(&self, name: PersistentId) -> Option<EntityId> {
-        self.vertices()
-            .find_map(|(id, value)| (value.name == name).then_some(EntityId::Vertex(id)))
-            .or_else(|| {
-                self.edges()
-                    .find_map(|(id, value)| (value.name == name).then_some(EntityId::Edge(id)))
-            })
-            .or_else(|| {
-                self.coedges()
-                    .find_map(|(id, value)| (value.name == name).then_some(EntityId::Coedge(id)))
-            })
-            .or_else(|| {
-                self.loops()
-                    .find_map(|(id, value)| (value.name == name).then_some(EntityId::Loop(id)))
-            })
-            .or_else(|| {
-                self.faces()
-                    .find_map(|(id, value)| (value.name == name).then_some(EntityId::Face(id)))
-            })
-            .or_else(|| {
-                self.shells()
-                    .find_map(|(id, value)| (value.name == name).then_some(EntityId::Shell(id)))
-            })
-            .or_else(|| {
-                self.bodies()
-                    .find_map(|(id, value)| (value.name == name).then_some(EntityId::Body(id)))
-            })
+        self.entities().find_map(|(value, id)| (value == name).then_some(id))
     }
 
     /// Every live entity by persistent name, for batches of lookups.
     pub(crate) fn entity_index(&self) -> BTreeMap<PersistentId, EntityId> {
-        let mut index = BTreeMap::new();
-        index.extend(self.vertices().map(|(id, value)| (value.name, EntityId::Vertex(id))));
-        index.extend(self.edges().map(|(id, value)| (value.name, EntityId::Edge(id))));
-        index.extend(self.coedges().map(|(id, value)| (value.name, EntityId::Coedge(id))));
-        index.extend(self.loops().map(|(id, value)| (value.name, EntityId::Loop(id))));
-        index.extend(self.faces().map(|(id, value)| (value.name, EntityId::Face(id))));
-        index.extend(self.shells().map(|(id, value)| (value.name, EntityId::Shell(id))));
-        index.extend(self.bodies().map(|(id, value)| (value.name, EntityId::Body(id))));
-        index
+        self.entities().collect()
+    }
+
+    /// Replace the persistent name of one entity, returning the old name.
+    pub(crate) fn rename(&mut self, id: EntityId, name: PersistentId) -> KernelResult<PersistentId> {
+        let slot = match id {
+            EntityId::Vertex(id) => &mut self.vertices.get_mut(id)?.name,
+            EntityId::Edge(id) => &mut self.edges.get_mut(id)?.name,
+            EntityId::Coedge(id) => &mut self.coedges.get_mut(id)?.name,
+            EntityId::Loop(id) => &mut self.loops.get_mut(id)?.name,
+            EntityId::Face(id) => &mut self.faces.get_mut(id)?.name,
+            EntityId::Shell(id) => &mut self.shells.get_mut(id)?.name,
+            EntityId::Body(id) => &mut self.bodies.get_mut(id)?.name,
+        };
+        Ok(std::mem::replace(slot, name))
     }
 
     /// The edges incident to each vertex, from one pass over the edges.
@@ -688,15 +685,7 @@ impl Topology {
         let index = self.entity_index();
         for (local, old) in names.into_iter().enumerate() {
             let new = PersistentId { namespace, local: local as u64 };
-            match index[&old] {
-                EntityId::Vertex(id) => self.vertices.get_mut(id)?.name = new,
-                EntityId::Edge(id) => self.edges.get_mut(id)?.name = new,
-                EntityId::Coedge(id) => self.coedges.get_mut(id)?.name = new,
-                EntityId::Loop(id) => self.loops.get_mut(id)?.name = new,
-                EntityId::Face(id) => self.faces.get_mut(id)?.name = new,
-                EntityId::Shell(id) => self.shells.get_mut(id)?.name = new,
-                EntityId::Body(id) => self.bodies.get_mut(id)?.name = new,
-            }
+            self.rename(index[&old], new)?;
             history.changed(old, super::ChangeKind::Modified, [new]);
             history.derived(new, [old], super::DerivationRole::Transform);
         }
@@ -711,7 +700,6 @@ impl Vertex {
             name,
             point,
             tolerance,
-            outgoing: None,
         }
     }
 }

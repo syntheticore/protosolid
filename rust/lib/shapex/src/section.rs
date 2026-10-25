@@ -335,7 +335,7 @@ fn publish(source: &Compound, mut patches: Vec<BrepPatch>, side: SplitKeep,
     transaction.unify_same_domain_edges()?;
     transaction.kernel.tolerance = source.tolerance();
     let committed = transaction.finish()?;
-    Compound::from_operation(kernel, committed, [source])?.with_feature_parent(source,
+    Compound::from_operation_with_parents(kernel, committed, &[source],
         super::DerivationRole::Boolean(if side == SplitKeep::Left { BooleanKind::Difference } else { BooleanKind::Intersection }))
 }
 

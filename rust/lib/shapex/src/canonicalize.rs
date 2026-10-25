@@ -517,17 +517,6 @@ impl Transaction<'_> {
         let vertex_name = self.working.vertex(vertex)?.name;
         self.working.vertices.remove(vertex)?;
         self.history.changed(vertex_name, ChangeKind::Deleted, []);
-        let edge = self.working.edge(survivor)?;
-        let endpoints = edge.vertices;
-        let uses = edge.coedges.clone();
-        for endpoint in endpoints {
-            let outgoing = uses.iter().copied().find(|id| {
-                self.working
-                    .coedge_vertices(*id)
-                    .is_ok_and(|vertices| vertices[0] == endpoint)
-            });
-            self.working.vertices.get_mut(endpoint)?.outgoing = outgoing;
-        }
-        Ok(endpoints)
+        Ok(self.working.edge(survivor)?.vertices)
     }
 }

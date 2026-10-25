@@ -5,7 +5,7 @@ use cgmath::prelude::*;
 use crate::{Point2, Point3, Vec2, Vec3};
 
 use super::brep_classification::{BrepClassifier, PointClassification};
-use super::integration::{adaptive_gauss_kronrod_partitioned, adaptive_simpson};
+use super::integration::{adaptive_gauss_kronrod, adaptive_gauss_kronrod_partitioned};
 use super::polygon::{on_polygon_boundary, point_in_polygon, point_segment_distance};
 use super::{
     BodyId, Curve2, Curve3, Diagnostic, DiagnosticKind, DomainBounds, FaceId, KernelError,
@@ -204,62 +204,49 @@ fn certify_body(
             return Ok(certificate);
         }
     }
-    let requires_general_integration = edge_ids.iter().any(|edge_id| {
+    // Every remaining body integrates its exact boundary. A planar shell can
+    // additionally cross itself between faces without any loop failing, and
+    // Euler-built cavities are not nested at construction, so planar bodies
+    // keep their face-pair and cavity checks.
+    let planar = edge_ids.iter().all(|edge_id| {
         topology
             .edge(*edge_id)
-            .map(|edge| !matches!(edge.curve(), Curve3::Line(_)))
-            .unwrap_or(true)
-    }) || face_ids.iter().any(|face_id| {
+            .is_ok_and(|edge| matches!(edge.curve(), Curve3::Line(_)))
+    }) && face_ids.iter().all(|face_id| {
         topology
             .face(*face_id)
-            .map(|face| !matches!(face.surface(), Surface3::Plane(_)))
-            .unwrap_or(true)
+            .is_ok_and(|face| matches!(face.surface(), Surface3::Plane(_)))
     });
-    if requires_general_integration {
-        let mut shell_properties = Vec::new();
-        for shell_id in body.shells() {
-            validate_shell_connected(topology, *shell_id)?;
-            shell_properties.push(brep_shell_properties(
-                topology,
-                *shell_id,
-                physical_tolerance,
-                body_scale,
-            )?);
-        }
-        let properties = combine_signed_shell_properties(shell_properties, physical_tolerance)?;
-        validate_supplied_properties(properties, physical_tolerance, body_scale)?;
-        return Ok(PhysicalCertificate { properties });
-    }
-    for edge_id in &edge_ids {
-        let edge = topology.edge(*edge_id)?;
-        if !matches!(edge.curve(), Curve3::Line(_)) {
-            return Err(unsupported("certified physical publication currently requires linear edges"));
-        }
-        for coedge_id in edge.coedges() {
-            let coedge = topology.coedge(*coedge_id)?;
-            let face = topology.loop_(coedge.loop_id())?.face();
-            if face_ids.contains(&face) && !matches!(coedge.pcurve(), Curve2::Line(_)) {
-                return Err(unsupported("certified polyhedral publication requires linear p-curves"));
-            }
-        }
-    }
-    for face_id in face_ids {
-        if !matches!(topology.face(face_id)?.surface(), Surface3::Plane(_)) {
-            return Err(unsupported("certified physical publication currently requires planar faces"));
-        }
-    }
-
     let mut shell_properties = Vec::new();
     for shell_id in body.shells() {
         validate_shell_connected(topology, *shell_id)?;
-        validate_polyhedral_shell_intersections(topology, *shell_id, physical_tolerance)?;
-        let properties = polyhedral_shell_properties(topology, *shell_id, physical_tolerance)?;
+        if planar {
+            validate_polyhedral_shell_intersections(topology, *shell_id, physical_tolerance)?;
+        }
+        let properties = brep_shell_properties(topology, *shell_id, physical_tolerance, body_scale)?;
         if properties.volume <= physical_tolerance.linear.powi(3) {
             return Err(geometry_error("shell volume does not exceed the model tolerance volume"));
         }
         shell_properties.push((*shell_id, properties));
     }
+    if planar {
+        validate_polyhedral_cavities(topology, &shell_properties, physical_tolerance)?;
+    }
+    let properties = combine_signed_shell_properties(
+        shell_properties.into_iter().map(|(_, properties)| properties),
+        physical_tolerance,
+    )?;
+    validate_supplied_properties(properties, physical_tolerance, body_scale)?;
+    Ok(PhysicalCertificate { properties })
+}
 
+/// One connected positive outer shell; all other shells are disjoint,
+/// negatively oriented cavities inside it.
+fn validate_polyhedral_cavities(
+    topology: &Topology,
+    shell_properties: &[(ShellId, MassProperties)],
+    physical_tolerance: ModelTolerance,
+) -> KernelResult<()> {
     // One connected positive outer shell; all other shells are negatively oriented cavities.
     let positive: Vec<_> = shell_properties
         .iter()
@@ -269,7 +256,7 @@ fn certify_body(
         return Err(geometry_error("a body must contain exactly one outward-oriented outer shell"));
     }
     let outer_shell = positive[0].0;
-    for (shell_id, properties) in &shell_properties {
+    for (shell_id, properties) in shell_properties {
         if *shell_id == outer_shell {
             continue;
         }
@@ -315,17 +302,7 @@ fn certify_body(
             }
         }
     }
-
-    let properties = combine_signed_shell_properties(
-        shell_properties
-            .into_iter()
-            .map(|(_, properties)| properties),
-        physical_tolerance,
-    )?;
-    if properties.signed_volume <= physical_tolerance.linear.powi(3) {
-        return Err(geometry_error("body has no positive physical volume after subtracting cavities"));
-    }
-    Ok(PhysicalCertificate { properties })
+    Ok(())
 }
 
 /// Integrate surface quantities over one exact trimmed parametric face.
@@ -727,7 +704,7 @@ fn brep_shell_properties(
             let point = Point3::from_vec(point - reference);
             let parametric_normal = du.cross(dv);
             let jacobian = parametric_normal.magnitude();
-            if jacobian <= f64::EPSILON * scale.powi(2) {
+            if jacobian <= f64::EPSILON * du.magnitude() * dv.magnitude() {
                 return Err(geometry_error("physical integration encountered a singular surface point"));
             }
             let normal = parametric_normal * orientation;
@@ -801,118 +778,6 @@ fn brep_shell_properties(
     })
 }
 
-fn polyhedral_shell_properties(
-    topology: &Topology,
-    shell_id: ShellId,
-    tolerance: ModelTolerance,
-) -> KernelResult<MassProperties> {
-    let shell = topology.shell(shell_id)?;
-    let mut signed_volume = 0.0;
-    let mut surface_area = 0.0;
-    let mut first_moment = Vec3::new(0.0, 0.0, 0.0);
-    let mut second_moment = [[0.0; 3]; 3];
-    for face_id in shell.faces() {
-        let face = topology.face(*face_id)?;
-        let Surface3::Plane(plane) = face.surface() else {
-            return Err(unsupported("analytical polyhedral integration requires planar faces"));
-        };
-        let effective_normal = match face.orientation() {
-            super::FaceOrientation::Forward => plane.normal(),
-            super::FaceOrientation::Reversed => -plane.normal(),
-        };
-        let mut face_area = 0.0;
-        for loop_id in face.loops() {
-            let points = loop_points3(topology, *loop_id)?;
-            if points.len() < 3 {
-                return Err(geometry_error("polyhedral face loop needs at least three vertices"));
-            }
-            let anchor = points[0];
-            for index in 1..points.len() - 1 {
-                let a = anchor;
-                let b = points[index];
-                let c = points[index + 1];
-                let cross = (b - a).cross(c - a);
-                face_area += cross.dot(effective_normal) * 0.5;
-                let tetrahedron = a.to_vec().dot(b.to_vec().cross(c.to_vec())) / 6.0;
-                signed_volume += tetrahedron;
-                first_moment += (a.to_vec() + b.to_vec() + c.to_vec()) * (tetrahedron / 4.0);
-                let coordinates = [[a.x, a.y, a.z], [b.x, b.y, b.z], [c.x, c.y, c.z]];
-                for (axis, moments) in second_moment.iter_mut().enumerate() {
-                    let values = [
-                        coordinates[0][axis],
-                        coordinates[1][axis],
-                        coordinates[2][axis],
-                    ];
-                    moments[axis] += tetrahedron / 10.0
-                        * (values[0] * values[0]
-                            + values[1] * values[1]
-                            + values[2] * values[2]
-                            + values[0] * values[1]
-                            + values[0] * values[2]
-                            + values[1] * values[2]);
-                }
-                for first in 0..3 {
-                    for second in first + 1..3 {
-                        let diagonal_products = (0..3)
-                            .map(|vertex| coordinates[vertex][first] * coordinates[vertex][second])
-                            .sum::<f64>();
-                        let cross_products = coordinates[0][first] * coordinates[1][second]
-                            + coordinates[0][second] * coordinates[1][first]
-                            + coordinates[0][first] * coordinates[2][second]
-                            + coordinates[0][second] * coordinates[2][first]
-                            + coordinates[1][first] * coordinates[2][second]
-                            + coordinates[1][second] * coordinates[2][first];
-                        let value = tetrahedron / 20.0 * (2.0 * diagonal_products + cross_products);
-                        second_moment[first][second] += value;
-                        second_moment[second][first] += value;
-                    }
-                }
-            }
-        }
-        if face_area <= tolerance.linear.powi(2) {
-            return Err(geometry_error("polyhedral face has zero or inconsistent oriented area"));
-        }
-        surface_area += face_area;
-    }
-    if !signed_volume.is_finite() || signed_volume.abs() <= tolerance.linear.powi(3) {
-        return Err(geometry_error("polyhedral shell has zero or non-finite signed volume"));
-    }
-    let centroid = Point3::from_vec(first_moment / signed_volume);
-    let inertia_origin = [
-        [
-            second_moment[1][1] + second_moment[2][2],
-            -second_moment[0][1],
-            -second_moment[0][2],
-        ],
-        [
-            -second_moment[1][0],
-            second_moment[0][0] + second_moment[2][2],
-            -second_moment[1][2],
-        ],
-        [
-            -second_moment[2][0],
-            -second_moment[2][1],
-            second_moment[0][0] + second_moment[1][1],
-        ],
-    ];
-    let center = [centroid.x, centroid.y, centroid.z];
-    let center_squared = center.iter().map(|value| value * value).sum::<f64>();
-    let mut inertia = inertia_origin;
-    for row in 0..3 {
-        for column in 0..3 {
-            inertia[row][column] -= signed_volume
-                * (if row == column { center_squared } else { 0.0 } - center[row] * center[column]);
-        }
-    }
-    Ok(MassProperties {
-        volume: signed_volume.abs(),
-        signed_volume,
-        surface_area,
-        centroid,
-        inertia,
-    })
-}
-
 fn combine_signed_shell_properties(
     components: impl IntoIterator<Item = MassProperties>,
     tolerance: ModelTolerance,
@@ -958,17 +823,6 @@ fn combine_signed_shell_properties(
         centroid,
         inertia,
     })
-}
-
-fn loop_points3(topology: &Topology, loop_id: super::LoopId) -> KernelResult<Vec<Point3>> {
-    topology
-        .loop_coedges(loop_id)?
-        .into_iter()
-        .map(|coedge| {
-            let vertex = topology.coedge_vertices(coedge)?[0];
-            Ok(topology.vertex(vertex)?.point())
-        })
-        .collect()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1294,7 +1148,7 @@ fn adaptive_curve_integrals(
         .linear_at_scale(scale)
         .max(f64::EPSILON * scale * 256.0);
     let targets = [absolute; 6];
-    adaptive_simpson(
+    adaptive_gauss_kronrod(
         start,
         end,
         terms,

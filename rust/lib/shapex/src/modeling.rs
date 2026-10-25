@@ -5,6 +5,7 @@ use cgmath::prelude::*;
 
 use crate::{Point3, Vec3};
 
+use super::edge_blend::{BlendOutcome, BlendStaging};
 use super::transaction::CommittedOperation;
 use super::physical::PhysicalCertificate;
 use super::{
@@ -211,8 +212,6 @@ pub struct FaceHandle {
     face: FaceId,
     name: PersistentId,
     revision: uuid::Uuid,
-    surface: super::Surface3,
-    orientation: super::FaceOrientation,
     surface_properties: Arc<OnceLock<KernelResult<super::SurfaceProperties>>>,
 }
 
@@ -220,11 +219,15 @@ impl FaceHandle {
     pub fn persistent_id(&self) -> PersistentId {
         self.name
     }
+    // A published kernel is never mutated, so its faces outlive every handle.
+    fn entity(&self) -> &super::Face {
+        self.state.topology().face(self.face).expect("handle references its own immutable snapshot")
+    }
     pub fn surface(&self) -> &super::Surface3 {
-        &self.surface
+        self.entity().surface()
     }
     pub fn orientation(&self) -> super::FaceOrientation {
-        self.orientation
+        self.entity().orientation()
     }
     pub fn surface_properties(&self) -> KernelResult<super::SurfaceProperties> {
         self.surface_properties.get_or_init(|| {
@@ -282,7 +285,6 @@ pub struct EdgeHandle {
     edge: EdgeId,
     name: PersistentId,
     revision: uuid::Uuid,
-    curve: super::Curve3,
 }
 
 impl EdgeHandle {
@@ -290,7 +292,7 @@ impl EdgeHandle {
         self.name
     }
     pub fn curve(&self) -> &super::Curve3 {
-        &self.curve
+        self.state.topology().edge(self.edge).expect("handle references its own immutable snapshot").curve()
     }
     pub fn range(&self) -> KernelResult<super::ParameterRange> {
         Ok(self.state.topology().edge(self.edge)?.range())
@@ -729,9 +731,8 @@ impl Compound {
                 continue;
             }
             match self.history.origin(name) {
-                Some(Origin::Created { role: Some(role) }) => {
-                    if !roles.contains(role) { roles.push(role.clone()); }
-                }
+                Some(Origin::Created { role: Some(role) })
+                    if !roles.contains(role) => { roles.push(role.clone()); }
                 Some(Origin::Derived { sources, .. }) => pending.extend(sources),
                 _ => {},
             }
@@ -904,77 +905,37 @@ impl Compound {
                 BooleanKind::Difference => self.clone(),
                 BooleanKind::Intersection => combine_compounds(Vec::new(), self.tolerance())?,
             };
-            return result.with_boolean_parents(self, other, DerivationRole::Boolean(kind));
+            return result.with_operation_parents(&[self, other], DerivationRole::Boolean(kind));
         }
         super::boolean::boolean_brep(self, other, kind)
     }
 
-    /// Consume operator-authored correspondence; never match output geometry.
-    fn with_operation_parents(&self, parents: &[&Self], role: DerivationRole) -> KernelResult<Self> {
+    /// Publish a committed operation attributed to the compounds it consumed.
+    pub(crate) fn from_operation_with_parents(
+        kernel: Kernel,
+        committed: CommittedOperation,
+        parents: &[&Compound],
+        role: DerivationRole,
+    ) -> KernelResult<Self> {
+        let CommittedOperation {
+            operation,
+            bodies,
+            history,
+            certificates,
+        } = committed;
+        let history = attribute_to_parents(&kernel, &bodies, &history, parents, role)?;
+        Self::from_parts(kernel, operation, bodies, history, certificates, parents.iter().copied())
+    }
+
+    /// Attribute an already published compound to `parents`, for results built
+    /// without a transaction.
+    pub(crate) fn with_operation_parents(&self, parents: &[&Self], role: DerivationRole) -> KernelResult<Self> {
         let bodies = self
             .solids
             .iter()
             .map(|solid| solid.body)
             .collect::<Vec<_>>();
-        let outputs = body_entities(&self.state, &bodies)?;
-        let mut sources = BTreeMap::new();
-        for parent in parents {
-            for solid in &parent.solids {
-                sources.extend(body_entities(&parent.state, &[solid.body])?);
-            }
-        }
-        let mut descendants = BTreeMap::<PersistentId, BTreeMap<PersistentId, bool>>::new();
-        let mut history = OperationHistory::default();
-        history.construction_roles = self.history.construction_roles.clone();
-        for (output, kind) in &outputs {
-            let mut records = self
-                .history
-                .construction
-                .get(output)
-                .cloned()
-                .unwrap_or_default();
-            if sources.get(output) == Some(kind) && !records.iter().any(|r| r.name == *output) {
-                let unchanged = matches!(
-                    self.history.change(*output),
-                    None | Some((ChangeKind::Unchanged, _))
-                );
-                records.push(super::history::EntitySource {
-                    name: *output,
-                    unchanged,
-                });
-            }
-            records.retain(|record| sources.get(&record.name) == Some(kind));
-            for record in &records {
-                descendants
-                    .entry(record.name)
-                    .or_default()
-                    .insert(*output, record.unchanged);
-            }
-            if records.is_empty() {
-                history.created(*output);
-            } else {
-                history.derived(*output, records.iter().map(|r| r.name), role);
-                history.record_construction(*output, records);
-            }
-        }
-        for source in sources.keys() {
-            let outputs = descendants.remove(source).unwrap_or_default();
-            let kind = match outputs.len() {
-                0 => ChangeKind::Deleted,
-                1 => {
-                    let (output, unchanged) = outputs.first_key_value().unwrap();
-                    if *unchanged {
-                        ChangeKind::Unchanged
-                    } else if history.construction[output].len() > 1 {
-                        ChangeKind::Merged
-                    } else {
-                        ChangeKind::Modified
-                    }
-                }
-                _ => ChangeKind::Split,
-            };
-            history.changed(*source, kind, outputs.keys().copied());
-        }
+        let history = attribute_to_parents(&self.state, &bodies, &self.history, parents, role)?;
         let certificates = bodies
             .iter()
             .copied()
@@ -992,19 +953,6 @@ impl Compound {
         )
     }
 
-    pub(crate) fn with_boolean_parents(
-        &self,
-        first: &Self,
-        second: &Self,
-        role: DerivationRole,
-    ) -> KernelResult<Self> {
-        self.with_operation_parents(&[first, second], role)
-    }
-
-    pub(crate) fn with_feature_parent(&self, parent: &Self, role: DerivationRole) -> KernelResult<Self> {
-        self.with_operation_parents(&[parent], role)
-    }
-
     pub(crate) fn with_creation_roles(
         self,
         roles: impl IntoIterator<Item = (PersistentId, super::CreationRole)>,
@@ -1017,22 +965,7 @@ impl Compound {
     }
 
     pub(crate) fn with_patch_roles(self, tokens: &BTreeMap<PersistentId, super::CreationRole>) -> Self {
-        self.edit_history(|history| {
-            let roles = history
-                .construction
-                .iter()
-                .filter_map(|(output, records)| {
-                    let mut roles = Vec::new();
-                    for role in records.iter().filter_map(|record| tokens.get(&record.name)) {
-                        if !roles.contains(role) {
-                            roles.push(role.clone());
-                        }
-                    }
-                    (!roles.is_empty()).then_some((*output, roles))
-                })
-                .collect::<Vec<_>>();
-            history.construction_roles.extend(roles);
-        })
+        self.edit_history(|history| history.record_patch_roles(tokens))
     }
 
     pub fn union(&self, other: &Self) -> KernelResult<Self> {
@@ -1102,7 +1035,7 @@ impl Compound {
     /// Remove a feature and extend its surviving support surfaces to close it.
     pub fn dissolve_faces(&self, faces: &[FaceHandle]) -> KernelResult<Self> {
         let groups = self.partition_selection(faces, false, "dissolve needs distinct faces from this compound revision")?;
-        self.per_solid(groups, true, |body, local| super::features::dissolve_faces(body, local))
+        self.per_solid(groups, true, super::features::dissolve_faces)
     }
 
     /// Offset selected faces along their outward normals, extending adjacent
@@ -1185,10 +1118,9 @@ impl Compound {
             .collect::<BTreeSet<_>>();
 
         let mut kernel = Kernel::new(self.tolerance())?;
-        kernel
-            .topology
-            .import_body(self.state.topology(), self.solids[0].body)?;
-        let index = kernel.topology.entity_index();
+        let mut transaction = kernel.begin_operation();
+        transaction.import_body(self.state.topology(), self.solids[0].body)?;
+        let index = transaction.working.entity_index();
         let imported_edges = selected
             .iter()
             .map(|name| match index.get(name) {
@@ -1196,31 +1128,25 @@ impl Compound {
                 _ => Err(topology_error("imported edge blend edge could not be reidentified")),
             })
             .collect::<KernelResult<Vec<_>>>()?;
-        let mut transaction = kernel.begin_operation();
-        if let Err(error) =
-            transaction.blend_edges(&imported_edges, size, follow_tangent_edges, kind, chamfer)
-        {
-            let mixed_trihedral = error.diagnostics().iter().find(|diagnostic| {
-                diagnostic.operation.as_deref() == Some(super::edge_blend::MIXED_TRIHEDRAL_SETBACK)
-            });
-            if let Some(diagnostic) = mixed_trihedral {
-                return self.blend_setback_network(edges, size, &diagnostic.entities, kind, chamfer);
+        match transaction.blend_edges(&imported_edges, size, follow_tangent_edges, kind, chamfer)? {
+            BlendOutcome::Built => {}
+            BlendOutcome::Staged(BlendStaging::MixedTrihedral { concave_edges }) => {
+                return self.blend_setback_network(edges, size, &concave_edges, kind, chamfer);
             }
-            let crossing_corner = error.diagnostics().iter().find(|diagnostic| {
-                diagnostic.operation.as_deref() == Some(super::edge_blend::CROSSING_CORNER_SEQUENCE)
-                    && diagnostic.entities.iter().all(|name| selected.contains(name))
-            });
-            if let Some(diagnostic) = crossing_corner {
-                return self.blend_crossing_corner(
-                    edges,
-                    size,
-                    follow_tangent_edges,
-                    &diagnostic.entities,
-                    kind,
-                    chamfer,
-                );
+            // Sequencing is only honored for a corner the user selected entirely.
+            BlendOutcome::Staged(BlendStaging::CrossingCorner { pair }) => {
+                if !pair.iter().all(|name| selected.contains(name)) {
+                    return Err(KernelError::from_diagnostic(
+                        super::Diagnostic::new(
+                            super::DiagnosticKind::UnsupportedGeometry,
+                            "blends crossing a four-face corner must be built in sequence",
+                        )
+                        .with_entity(pair[0])
+                        .with_entity(pair[1]),
+                    ));
+                }
+                return self.blend_crossing_corner(edges, size, follow_tangent_edges, &pair, kind, chamfer);
             }
-            return Err(error);
         }
         let committed = transaction.finish()?;
         Self::from_operation(kernel, committed, [self])
@@ -1669,11 +1595,7 @@ fn build_face_handle(
     face: FaceId,
     revisions: Arc<BTreeMap<PersistentId, uuid::Uuid>>,
 ) -> KernelResult<FaceHandle> {
-    let topology = state.topology();
-    let entity = topology.face(face)?;
-    let name = entity.name();
-    let surface = entity.surface().clone();
-    let orientation = entity.orientation();
+    let name = state.topology().face(face)?.name();
     let revision = revisions[&name];
     Ok(FaceHandle {
         state,
@@ -1681,8 +1603,6 @@ fn build_face_handle(
         face,
         name,
         revision,
-        surface,
-        orientation,
         surface_properties: Arc::new(OnceLock::new()),
     })
 }
@@ -1692,10 +1612,7 @@ fn build_edge_handle(
     edge: EdgeId,
     revisions: Arc<BTreeMap<PersistentId, uuid::Uuid>>,
 ) -> KernelResult<EdgeHandle> {
-    let topology = state.topology();
-    let entity = topology.edge(edge)?;
-    let name = entity.name();
-    let curve = entity.curve().clone();
+    let name = state.topology().edge(edge)?.name();
     let revision = revisions[&name];
     Ok(EdgeHandle {
         state,
@@ -1703,8 +1620,77 @@ fn build_edge_handle(
         edge,
         name,
         revision,
-        curve,
     })
+}
+
+/// Attribute an operation's outputs to the parent compounds it consumed.
+/// Consumes operator-authored correspondence; never matches output geometry.
+fn attribute_to_parents(
+    kernel: &Kernel,
+    bodies: &[BodyId],
+    history: &OperationHistory,
+    parents: &[&Compound],
+    role: DerivationRole,
+) -> KernelResult<OperationHistory> {
+    let outputs = body_entities(kernel, bodies)?;
+    let mut sources = BTreeMap::new();
+    for parent in parents {
+        for solid in &parent.solids {
+            sources.extend(body_entities(&parent.state, &[solid.body])?);
+        }
+    }
+    let mut descendants = BTreeMap::<PersistentId, BTreeMap<PersistentId, bool>>::new();
+    let mut attributed = OperationHistory::default();
+    attributed.construction_roles = history.construction_roles.clone();
+    for (output, kind) in &outputs {
+        let mut records = history
+            .construction
+            .get(output)
+            .cloned()
+            .unwrap_or_default();
+        if sources.get(output) == Some(kind) && !records.iter().any(|r| r.name == *output) {
+            let unchanged = matches!(
+                history.change(*output),
+                None | Some((ChangeKind::Unchanged, _))
+            );
+            records.push(super::history::EntitySource {
+                name: *output,
+                unchanged,
+            });
+        }
+        records.retain(|record| sources.get(&record.name) == Some(kind));
+        for record in &records {
+            descendants
+                .entry(record.name)
+                .or_default()
+                .insert(*output, record.unchanged);
+        }
+        if records.is_empty() {
+            attributed.created(*output);
+        } else {
+            attributed.derived(*output, records.iter().map(|r| r.name), role);
+            attributed.record_construction(*output, records);
+        }
+    }
+    for source in sources.keys() {
+        let outputs = descendants.remove(source).unwrap_or_default();
+        let kind = match outputs.len() {
+            0 => ChangeKind::Deleted,
+            1 => {
+                let (output, unchanged) = outputs.first_key_value().unwrap();
+                if *unchanged {
+                    ChangeKind::Unchanged
+                } else if attributed.construction[output].len() > 1 {
+                    ChangeKind::Merged
+                } else {
+                    ChangeKind::Modified
+                }
+            }
+            _ => ChangeKind::Split,
+        };
+        attributed.changed(*source, kind, outputs.keys().copied());
+    }
+    Ok(attributed)
 }
 
 fn body_entities(

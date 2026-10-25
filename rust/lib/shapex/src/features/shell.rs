@@ -158,11 +158,11 @@ pub(crate) fn offset_faces(
         .collect();
     // Rebuild only the offset skin; shelling additionally adds the source skin
     // and opening rims to create a wall.
-    let (result, _) = offset_body(source, &retained, distance, true)?;
+    let (result, _) = offset_body(source, &retained, distance, true, Some(crate::DerivationRole::OffsetFaces))?;
     if result.solids().len() != 1 || result.volume() <= source.tolerance().linear.powi(3) {
         return Err(invalid("face offset must preserve a nonempty solid"));
     }
-    result.with_feature_parent(source, crate::DerivationRole::OffsetFaces)
+    Ok(result)
 }
 
 pub(super) fn rounded_join_center(
@@ -782,25 +782,21 @@ pub(crate) fn shell(
         // support envelope directly at those topology transitions.
         let raw_offset = if disjoint_contacts || crossed_caps {
             offset_regions_with_joins(source, None, &divergent_edges, &opening_ids, distance.abs(), true)?
-        } else { offset_body(source, &opening_ids, distance, false)?.0 };
-        return assemble_shell_boundary(source, &raw_offset, &opening_ids, distance)?
-            .with_feature_parent(source, crate::DerivationRole::Shell);
+        } else { offset_body(source, &opening_ids, distance, false, None)?.0 };
+        return assemble_shell_boundary(source, &raw_offset, &opening_ids, distance);
     }
     if distance < 0.0 && curved_open_join {
         let rounded = offset_regions_with_joins(source, None, &divergent_edges, &opening_ids, distance.abs(), false)?;
-        return assemble_shell_boundary(source, &rounded, &opening_ids, distance)?
-            .with_feature_parent(source, crate::DerivationRole::Shell);
+        return assemble_shell_boundary(source, &rounded, &opening_ids, distance);
     }
-    let (raw_offset, has_vanished_blends) = offset_body(source, &opening_ids, distance, false)?;
+    let (raw_offset, has_vanished_blends) = offset_body(source, &opening_ids, distance, false, None)?;
     if distance < 0.0 && has_vanished_blends && closed_joins
         && !divergent_edges.is_empty()
     {
         let rounded = offset_regions_with_joins(source, Some(&raw_offset), &divergent_edges, &opening_ids, distance.abs(), false)?;
-        return assemble_shell_boundary(source, &rounded, &opening_ids, distance)?
-            .with_feature_parent(source, crate::DerivationRole::Shell);
+        return assemble_shell_boundary(source, &rounded, &opening_ids, distance);
     }
-    let shell = assemble_shell_boundary(source, &raw_offset, &opening_ids, distance)?
-        .with_feature_parent(source, crate::DerivationRole::Shell)?;
+    let shell = assemble_shell_boundary(source, &raw_offset, &opening_ids, distance)?;
     let offset_surfaces = raw_offset
         .faces()
         .filter(|face| {

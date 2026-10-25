@@ -198,9 +198,6 @@ impl Transaction<'_> {
             }
             self.history.modified(old.name);
         }
-        for vertex in [edge.vertices[0], vertex, edge.vertices[1]] {
-            self.repair_outgoing(vertex)?;
-        }
         self.history
             .changed(edge.name, ChangeKind::Split, [edge.name, name]);
         Ok(vertex)

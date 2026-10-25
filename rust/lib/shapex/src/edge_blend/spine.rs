@@ -112,18 +112,13 @@ impl Transaction<'_> {
                 .iter()
                 .any(|edge| spines[edge].concave != first_concavity)
             {
-                let diagnostic = spines
-                    .keys()
-                    .filter(|edge| spines[edge].concave)
-                    .fold(
-                        Diagnostic::new(
-                            DiagnosticKind::UnsupportedGeometry,
-                            "mixed convex-concave three-edge blends require a setback corner patch",
-                        )
-                        .with_operation(super::MIXED_TRIHEDRAL_SETBACK),
-                        |diagnostic, edge| diagnostic.with_entity(spines[edge].edge.name),
-                    );
-                return Err(KernelError::from_diagnostic(diagnostic));
+                return Ok(SpineEnd::Staged(BlendStaging::MixedTrihedral {
+                    concave_edges: spines
+                        .values()
+                        .filter(|spine| spine.concave)
+                        .map(|spine| spine.edge.name)
+                        .collect(),
+                }));
             }
             return Ok(junction(BlendJunctionKind::Trihedral, None));
         }
@@ -137,15 +132,9 @@ impl Transaction<'_> {
             if !faces[0].iter().any(|face| faces[1].contains(face)) {
                 // Opposite edges of a four-face corner do not blend each other's
                 // supports. Each blend can end on the other one in sequence.
-                let mut diagnostic = Diagnostic::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "blends crossing a four-face corner must be built in sequence",
-                )
-                .with_operation(super::CROSSING_CORNER_SEQUENCE);
-                for edge in pair {
-                    diagnostic = diagnostic.with_entity(self.working.edge(edge)?.name);
-                }
-                return Err(KernelError::from_diagnostic(diagnostic));
+                return Ok(SpineEnd::Staged(BlendStaging::CrossingCorner {
+                    pair: [self.working.edge(pair[0])?.name, self.working.edge(pair[1])?.name],
+                }));
             }
         }
         Err(unsupported("selected blend edges do not define a supported local corner transition"))
@@ -330,9 +319,6 @@ impl Transaction<'_> {
                 self.working.coedges.remove(old_use_id)?;
                 self.history
                     .changed(old_use.name, ChangeKind::Deleted, std::iter::empty());
-            }
-            for vertex in vertices.into_iter().take(4) {
-                self.repair_outgoing(vertex)?;
             }
             self.history
                 .changed(source_name, ChangeKind::Modified, [source_name]);

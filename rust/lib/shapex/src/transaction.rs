@@ -10,7 +10,7 @@ use crate::Point3;
 use super::history::ChangeKind;
 use super::naming::NameSource;
 use super::physical::PhysicalCertificate;
-use super::topology::{Coedge, Edge, Face, Loop, Vertex};
+use super::topology::{Coedge, Edge, EntityId, Face, Loop, Vertex};
 use super::{
     geometry_error, topology_error, BodyId, CoedgeId, Curve2, Curve3, EdgeId, FaceId,
     FaceOrientation, Kernel, KernelError, KernelResult, LoopId, LoopKind, OperationHistory,
@@ -38,6 +38,8 @@ pub(crate) struct Transaction<'kernel> {
     pub(super) touched_bodies: Vec<BodyId>,
     namespace: Uuid,
     pub(super) composes_imported_topology: bool,
+    // Names imported into `working`, retained like the kernel's own topology.
+    imported: Vec<PersistentId>,
 }
 
 /// Everything an edit can change, retained to retry an alternative edit.
@@ -60,7 +62,16 @@ impl<'kernel> Transaction<'kernel> {
             touched_bodies: Vec::new(),
             namespace,
             composes_imported_topology: false,
+            imported: Vec::new(),
         }
+    }
+
+    /// Copy a published body into the workspace. Its entities count as
+    /// pre-existing topology: untouched ones are recorded as retained.
+    pub(crate) fn import_body(&mut self, source: &Topology, body: BodyId) -> KernelResult<BodyId> {
+        let body = self.working.import_body(source, body)?;
+        self.imported.extend(self.working.body_entity_names(body)?);
+        Ok(body)
     }
 
     /// Run `edit`, restoring this transaction to its prior state if it fails.
@@ -120,32 +131,8 @@ impl<'kernel> Transaction<'kernel> {
         Ok(())
     }
 
-    pub(super) fn rename_vertex(&mut self, id: VertexId, name: PersistentId) -> KernelResult<()> {
-        let old = std::mem::replace(&mut self.working.vertices.get_mut(id)?.name, name);
-        self.history.rename_entity(old, name);
-        Ok(())
-    }
-
-    pub(super) fn rename_edge(&mut self, id: EdgeId, name: PersistentId) -> KernelResult<()> {
-        let old = std::mem::replace(&mut self.working.edges.get_mut(id)?.name, name);
-        self.history.rename_entity(old, name);
-        Ok(())
-    }
-
-    pub(super) fn rename_coedge(&mut self, id: CoedgeId, name: PersistentId) -> KernelResult<()> {
-        let old = std::mem::replace(&mut self.working.coedges.get_mut(id)?.name, name);
-        self.history.rename_entity(old, name);
-        Ok(())
-    }
-
-    pub(super) fn rename_face(&mut self, id: FaceId, name: PersistentId) -> KernelResult<()> {
-        let old = std::mem::replace(&mut self.working.faces.get_mut(id)?.name, name);
-        self.history.rename_entity(old, name);
-        Ok(())
-    }
-
-    pub(super) fn rename_loop(&mut self, id: LoopId, name: PersistentId) -> KernelResult<()> {
-        let old = std::mem::replace(&mut self.working.loops.get_mut(id)?.name, name);
+    pub(super) fn rename(&mut self, id: impl Into<EntityId>, name: PersistentId) -> KernelResult<()> {
+        let old = self.working.rename(id.into(), name)?;
         self.history.rename_entity(old, name);
         Ok(())
     }
@@ -275,18 +262,6 @@ impl<'kernel> Transaction<'kernel> {
         let name = self.working.vertex(vertex)?.name;
         self.working.vertices.remove(vertex)?;
         self.history.changed(name, ChangeKind::Split, outputs);
-        Ok(())
-    }
-
-    /// Point `vertex` at any remaining coedge leaving it, or none.
-    pub(super) fn repair_outgoing(&mut self, vertex: VertexId) -> KernelResult<()> {
-        let replacement = self.working.coedges().find_map(|(id, _)| {
-            self.working
-                .coedge_vertices(id)
-                .ok()
-                .and_then(|vertices| (vertices[0] == vertex).then_some(id))
-        });
-        self.working.vertices.get_mut(vertex)?.outgoing = replacement;
         Ok(())
     }
 
@@ -534,8 +509,22 @@ impl<'kernel> Transaction<'kernel> {
     /// transaction can replace kernel state.
     pub(crate) fn finish(mut self) -> KernelResult<CommittedOperation> {
         self.normalize_periodic_edge_subdivisions()?;
-        super::validation::validate_structure(&self.working, self.kernel.tolerance)
-            .into_result()?;
+        // Untouched faces were validated when they were published. History is
+        // completed after validation, so an absent record means untouched.
+        let touched = self.history.touched_names();
+        let report = super::validation::validate_structure(&self.working, self.kernel.tolerance, Some(&touched));
+        // Catch any operation that edits geometry without recording history.
+        #[cfg(debug_assertions)]
+        {
+            let full = super::validation::validate_structure(&self.working, self.kernel.tolerance, None);
+            debug_assert_eq!(
+                report.is_valid(),
+                full.is_valid(),
+                "touched-face validation disagrees with full validation: {:?}",
+                full.diagnostics()
+            );
+        }
+        report.into_result()?;
         let certificates = super::physical::certify_bodies(
             &self.working,
             self.kernel.tolerance,
@@ -556,8 +545,10 @@ impl<'kernel> Transaction<'kernel> {
                 }
             }
         }
-        self.history
-            .complete_retained(&self.kernel.topology, &self.working);
+        self.history.complete_retained(
+            self.kernel.topology.names().chain(self.imported.iter().copied()),
+            &self.working,
+        );
         self.kernel.topology = self.working;
         *self.kernel.tessellation_cache.get_mut().unwrap() = Default::default();
         Ok(CommittedOperation {

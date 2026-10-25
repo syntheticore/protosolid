@@ -46,6 +46,5 @@ pub(crate) fn replace_face(
             ..Default::default()
         },
     )?;
-    commit_support_patches(source, patches, changed)?
-        .with_feature_parent(source, crate::DerivationRole::ReplaceFace)
+    commit_support_patches(source, patches, changed, Some(crate::DerivationRole::ReplaceFace))
 }

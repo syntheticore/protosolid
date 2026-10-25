@@ -5,6 +5,7 @@ pub(super) fn offset_body(
     openings: &BTreeSet<FaceId>,
     distance: f64,
     adjust_blends: bool,
+    role: Option<crate::DerivationRole>,
 ) -> KernelResult<(Compound, bool)> {
     let topology = source.topology();
     let tolerance = source.tolerance();
@@ -239,7 +240,7 @@ pub(super) fn offset_body(
     for shell in patches.values_mut() {
         regularize_coincident_offset_faces(shell, distance, tolerance)?;
     }
-    let offset = commit_support_patches(source, patches, changed_supports)?;
+    let offset = commit_support_patches(source, patches, changed_supports, role)?;
     Ok((offset, has_vanished_blends))
 }
 

@@ -45,7 +45,7 @@ impl Transaction<'_> {
         self.names.push_scope("profile")?;
         self.names.push_scope("outer")?;
         let seed_name = self.names.named("vertex", "segment0:start")?;
-        self.rename_vertex(seed.vertex, seed_name)?;
+        self.rename(seed.vertex, seed_name)?;
         let mut vertices = vec![seed.vertex];
         let mut forwards = Vec::new();
         let mut reverses = Vec::new();
@@ -159,7 +159,7 @@ impl Transaction<'_> {
             (sweep_face, "end", super::CreationRole::ExtrusionEnd),
         ] {
             let face_name = self.names.named("face", key)?;
-            self.rename_face(face, face_name)?;
+            self.rename(face, face_name)?;
             self.history.created_as(face_name, role);
             let loops = self.working.face(face)?.loops.clone();
             for (index, loop_id) in loops.into_iter().enumerate() {
@@ -171,7 +171,7 @@ impl Transaction<'_> {
                     },
                     &format!("{key}{index}"),
                 )?;
-                self.rename_loop(loop_id, name)?;
+                self.rename(loop_id, name)?;
             }
         }
         self.names.pop_scope()?;
@@ -404,7 +404,6 @@ impl Transaction<'_> {
             self.working.vertices.remove(vertex_id)?;
             self.history.changed(name, ChangeKind::Deleted, []);
         }
-        self.repair_outgoing(seam)?;
         let survivor_name = self.working.edge(survivor)?.name;
         self.history
             .changed(survivor_name, ChangeKind::Modified, [survivor_name]);
@@ -600,10 +599,10 @@ impl Transaction<'_> {
         )?;
         let hole_result = self.kemr(bridge.edge, bridge.forward)?;
         let sweep_loop_name = self.names.named("loop.inner", "sweep_cap")?;
-        self.rename_loop(hole_result.inner_loop, sweep_loop_name)?;
+        self.rename(hole_result.inner_loop, sweep_loop_name)?;
         let opposite_result = self.kfmrh(opposite_face, disk.face)?;
         let opposite_loop_name = self.names.named("loop.inner", "opposite_cap")?;
-        self.rename_loop(opposite_result.inner_loop, opposite_loop_name)?;
+        self.rename(opposite_result.inner_loop, opposite_loop_name)?;
         if self.working.face(sweep_face)?.loops.len() < 2
             || self.working.face(opposite_face)?.loops.len() < 2
         {

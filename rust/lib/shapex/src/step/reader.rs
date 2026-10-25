@@ -231,7 +231,7 @@ fn expand_knots(multiplicities: &Value, knots: &Value) -> KernelResult<Vec<f64>>
     Ok(knots
         .iter()
         .zip(multiplicities)
-        .flat_map(|(knot, count)| std::iter::repeat(*knot).take(count as usize))
+        .flat_map(|(knot, count)| std::iter::repeat_n(*knot, count as usize))
         .collect())
 }
 
@@ -1034,7 +1034,7 @@ impl<'a> Reader<'a> {
                 }
             }
             let area = signed_area(&candidate);
-            let better = best.as_ref().map_or(true, |(winds, best_area, _)| {
+            let better = best.as_ref().is_none_or(|(winds, best_area, _)| {
                 (area * sign > 0.0, -area.abs()) > (*winds, -best_area.abs())
             });
             if better {

@@ -2596,7 +2596,7 @@ fn trace_reaches_seed(
         let fraction = (seed[axis] - pair[0][axis]) / delta[axis];
         // Limit continuation to one sampled segment beyond either endpoint.
         // A large tracing step alone cannot justify a distant extrapolation.
-        if fraction < -1.0 || fraction > 2.0 { continue; }
+        if !(-1.0..=2.0).contains(&fraction) { continue; }
         let guide = std::array::from_fn(|i| pair[0][i] + delta[i] * fraction);
         if parameter_distance(guide, seed) <= allowed { return Ok(true); }
         let nearest = std::array::from_fn(|i| pair[0][i] + delta[i] * fraction.clamp(0.0, 1.0));

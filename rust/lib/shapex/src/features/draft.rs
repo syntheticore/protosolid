@@ -14,7 +14,7 @@ impl Profile {
                 return Ok(exact);
             }
         }
-        crate::sweeps::revolve(self, plane, axis, angle)
+        crate::revolve_loft::revolve(self, plane, axis, angle)
     }
 
     pub fn loft<'a>(
@@ -34,7 +34,7 @@ impl Profile {
         let sections = std::iter::once((plane, self))
             .chain(sections)
             .collect::<Vec<_>>();
-        crate::sweeps::loft(&sections, align_sections)
+        crate::revolve_loft::loft(&sections, align_sections)
     }
 }
 
@@ -169,7 +169,7 @@ pub(crate) fn draft(
         supports.insert(handle.topology_id(), surface);
     }
     let changed_supports = faces.iter().map(FaceHandle::topology_id).collect();
-    let result = rebuild_supports(
+    rebuild_supports(
         source,
         SupportEdit {
             supports,
@@ -177,6 +177,6 @@ pub(crate) fn draft(
             changed: changed_supports,
             ..Default::default()
         },
-    )?;
-    result.with_feature_parent(source, crate::DerivationRole::Draft)
+        crate::DerivationRole::Draft,
+    )
 }

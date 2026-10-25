@@ -187,10 +187,6 @@ impl Transaction<'_> {
             self.link(reverse, forward)?;
             self.working.loops.get_mut(loop_id)?.first = Some(forward);
         }
-        if self.working.vertex(from)?.outgoing.is_none() {
-            self.working.vertices.get_mut(from)?.outgoing = Some(forward);
-        }
-        self.working.vertices.get_mut(vertex)?.outgoing = Some(reverse);
 
         self.history
             .derived(vertex_name, [source_name], DerivationRole::MevVertex);
@@ -307,13 +303,9 @@ impl Transaction<'_> {
 
     /// Kill edge and face, the inverse of MEF for a face with one outer loop.
     pub(crate) fn kef(&mut self, edge: EdgeId, face_to_remove: FaceId) -> KernelResult<KefResult> {
-        let (edge_coedges, edge_name, vertices) = {
+        let (edge_coedges, edge_name) = {
             let edge_value = self.working.edge(edge)?;
-            (
-                edge_value.coedges.clone(),
-                edge_value.name,
-                edge_value.vertices,
-            )
+            (edge_value.coedges.clone(), edge_value.name)
         };
         if edge_coedges.len() != 2 {
             return Err(invalid("KEF requires a two-sided edge"));
@@ -381,9 +373,6 @@ impl Transaction<'_> {
             .get_mut(shell)?
             .faces
             .retain(|id| *id != face_to_remove);
-        for vertex in vertices {
-            self.repair_outgoing(vertex)?;
-        }
 
         for name in [
             edge_name,
@@ -421,9 +410,9 @@ impl Transaction<'_> {
     /// outer loop and a new inner loop on the same face. `inner_use` selects
     /// which removed coedge's successor begins the hole cycle.
     pub(crate) fn kemr(&mut self, edge: EdgeId, inner_use: CoedgeId) -> KernelResult<KemrResult> {
-        let (uses, edge_name, vertices) = {
+        let (uses, edge_name) = {
             let edge = self.working.edge(edge)?;
-            (edge.coedges.clone(), edge.name, edge.vertices)
+            (edge.coedges.clone(), edge.name)
         };
         if uses.len() != 2 || !uses.contains(&inner_use) {
             return Err(invalid(
@@ -468,9 +457,6 @@ impl Transaction<'_> {
         self.working.coedges.remove(inner_use)?;
         self.working.coedges.remove(other_use)?;
         self.working.edges.remove(edge)?;
-        for vertex in vertices {
-            self.repair_outgoing(vertex)?;
-        }
 
         let face_name = self.working.face(face)?.name;
         self.history
@@ -718,10 +704,10 @@ impl Transaction<'_> {
         let edge_name = self.names.named("edge", edge_key)?;
         let forward_name = self.names.named("coedge.forward", edge_key)?;
         let reverse_name = self.names.named("coedge.reverse", edge_key)?;
-        self.rename_vertex(result.vertex, vertex_name)?;
-        self.rename_edge(result.edge, edge_name)?;
-        self.rename_coedge(result.forward, forward_name)?;
-        self.rename_coedge(result.reverse, reverse_name)
+        self.rename(result.vertex, vertex_name)?;
+        self.rename(result.edge, edge_name)?;
+        self.rename(result.forward, forward_name)?;
+        self.rename(result.reverse, reverse_name)
     }
 
     /// Assign stable semantic names to the entities created by an MEF.
@@ -734,14 +720,14 @@ impl Transaction<'_> {
         let edge_name = self.names.named("edge", edge_key)?;
         let forward_name = self.names.named("coedge.forward", edge_key)?;
         let reverse_name = self.names.named("coedge.reverse", edge_key)?;
-        self.rename_edge(result.edge, edge_name)?;
-        self.rename_coedge(result.forward, forward_name)?;
-        self.rename_coedge(result.reverse, reverse_name)?;
+        self.rename(result.edge, edge_name)?;
+        self.rename(result.forward, forward_name)?;
+        self.rename(result.reverse, reverse_name)?;
         if let Some(face_key) = face_key {
             let face_name = self.names.named("face", face_key)?;
             let loop_name = self.names.named("loop.outer", face_key)?;
-            self.rename_face(result.face, face_name)?;
-            self.rename_loop(result.loop_id, loop_name)?;
+            self.rename(result.face, face_name)?;
+            self.rename(result.loop_id, loop_name)?;
         }
         Ok(())
     }

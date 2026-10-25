@@ -10,78 +10,14 @@ use std::collections::HashMap;
 
 use cgmath::prelude::*;
 
-use crate::geometry::basis_values;
+use crate::linalg::Interpolation;
 use crate::{
-    invalid, Curve3, KernelResult, NurbsCurve3, NurbsSurface3, ParameterRange, Point3, Surface3,
+    Curve3, KernelResult, NurbsCurve3, NurbsSurface3, ParameterRange, Point3, Surface3,
     Vec3,
 };
 
 const INITIAL_SAMPLES: usize = 9;
 const MAXIMUM_SAMPLES: usize = 257;
-
-/// A clamped interpolation basis for strictly increasing sample parameters,
-/// factored once so every row of a control net solves against it.
-struct Interpolation {
-    degree: usize,
-    knots: Vec<f64>,
-    factors: Vec<Vec<f64>>,
-    pivots: Vec<usize>,
-}
-
-impl Interpolation {
-    fn new(parameters: &[f64]) -> KernelResult<Self> {
-        let count = parameters.len();
-        let degree = 3.min(count - 1);
-        // Knot averaging keeps the collocation matrix totally positive.
-        let mut knots = vec![parameters[0]; degree + 1];
-        for index in 1..count - degree {
-            knots.push(parameters[index..index + degree].iter().sum::<f64>() / degree as f64);
-        }
-        knots.extend(vec![parameters[count - 1]; degree + 1]);
-
-        let mut factors = vec![vec![0.0; count]; count];
-        for (row, parameter) in parameters.iter().enumerate() {
-            let (first, values) = basis_values(degree, &knots, count, *parameter);
-            factors[row][first..first + values.len()].copy_from_slice(&values);
-        }
-        let mut pivots = (0..count).collect::<Vec<_>>();
-        for column in 0..count {
-            let pivot = (column..count)
-                .max_by(|a, b| factors[*a][column].abs().total_cmp(&factors[*b][column].abs()))
-                .unwrap();
-            if factors[pivot][column].abs() <= 1.0e-14 {
-                return Err(invalid("interpolation samples have a singular basis"));
-            }
-            factors.swap(column, pivot);
-            pivots.swap(column, pivot);
-            for row in column + 1..count {
-                let factor = factors[row][column] / factors[column][column];
-                factors[row][column] = factor;
-                for index in column + 1..count {
-                    factors[row][index] -= factor * factors[column][index];
-                }
-            }
-        }
-        Ok(Self { degree, knots, factors, pivots })
-    }
-
-    fn solve(&self, values: &[Vec3]) -> Vec<Vec3> {
-        let count = values.len();
-        let mut result = self.pivots.iter().map(|index| values[*index]).collect::<Vec<_>>();
-        for row in 0..count {
-            for index in 0..row {
-                result[row] = result[row] - result[index] * self.factors[row][index];
-            }
-        }
-        for row in (0..count).rev() {
-            for index in row + 1..count {
-                result[row] = result[row] - result[index] * self.factors[row][index];
-            }
-            result[row] = result[row] / self.factors[row][row];
-        }
-        result
-    }
-}
 
 fn samples(range: ParameterRange, count: usize) -> Vec<f64> {
     (0..count)

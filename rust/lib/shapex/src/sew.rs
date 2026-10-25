@@ -165,6 +165,42 @@ pub(crate) struct BrepPatchLoop {
     pub segments: Vec<BrepPatchSegment>,
 }
 
+impl BrepPatchSegment {
+    /// The exact trim of one existing coedge.
+    pub(crate) fn from_coedge(topology: &Topology, id: super::CoedgeId) -> KernelResult<Self> {
+        let coedge = topology.coedge(id)?;
+        Ok(Self {
+            provenance: SegmentProvenance::from_coedge(topology, id)?,
+            curve: topology.edge(coedge.edge())?.curve().clone(),
+            pcurve: coedge.pcurve().clone(),
+            range: coedge.range(),
+        })
+    }
+}
+
+impl BrepPatchLoop {
+    /// The exact trims of one existing loop, in its own direction and kind.
+    pub(crate) fn from_loop(topology: &Topology, id: super::LoopId) -> KernelResult<Self> {
+        Ok(Self {
+            kind: topology.loop_(id)?.kind(),
+            segments: topology
+                .loop_coedges(id)?
+                .into_iter()
+                .map(|coedge| BrepPatchSegment::from_coedge(topology, coedge))
+                .collect::<KernelResult<_>>()?,
+        })
+    }
+
+    /// Traverse the loop in the opposite direction.
+    pub(crate) fn reverse(&mut self) {
+        self.segments.reverse();
+        for segment in &mut self.segments {
+            segment.range = segment.range.reversed();
+            segment.provenance = segment.provenance.reversed();
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct BrepPatch {
     pub sources: Vec<PersistentId>,
@@ -227,11 +263,7 @@ impl BrepPatch {
     pub(crate) fn reverse(&mut self) {
         self.orientation = self.orientation.reversed();
         for loop_ in &mut self.loops {
-            loop_.segments.reverse();
-            for segment in &mut loop_.segments {
-                segment.range = segment.range.reversed();
-                segment.provenance = segment.provenance.reversed();
-            }
+            loop_.reverse();
         }
     }
 }
@@ -427,7 +459,7 @@ impl<T: Copy> PointWeld<T> {
                         self.cells.get(&[x + dx, y + dy, z + dz]).into_iter().flatten()
                     {
                         if candidate.distance(point) <= self.radius
-                            && best.map_or(true, |(best, _)| *index < best)
+                            && best.is_none_or(|(best, _)| *index < best)
                         {
                             best = Some((*index, *value));
                         }
@@ -635,9 +667,6 @@ impl Transaction<'_> {
                         },
                     )?;
                     uses.push(coedge);
-                    if self.working.vertex(start_vertex)?.outgoing.is_none() {
-                        self.working.vertices.get_mut(start_vertex)?.outgoing = Some(coedge);
-                    }
                 }
                 for index in 0..uses.len() {
                     let previous = uses[(index + uses.len() - 1) % uses.len()];
@@ -880,7 +909,6 @@ impl Transaction<'_> {
                     let name = self.names.next_for("vertex")?;
                     self.make_vertex(name, self.working.vertex(vertex)?.point())
                 };
-                self.working.vertices.get_mut(target)?.outgoing = Some(start);
                 let mut current = start;
                 while remaining.remove(&current) {
                     let coedge = self.working.coedge(current)?.clone();
@@ -1086,3 +1114,65 @@ fn shells_intersect(
     }
     Ok(false)
 }
+
+/// The planar face bounded by a profile placed on `plane`.
+pub(crate) fn cap(profile: &super::Profile, plane: super::Plane3, reversed: bool) -> KernelResult<BrepPatch> {
+    let mut loops = Vec::new();
+    for (index, wire) in std::iter::once(profile.outer())
+        .chain(profile.holes())
+        .enumerate()
+    {
+        let segments = wire
+            .segments()
+            .iter()
+            .map(|segment| {
+                Ok(BrepPatchSegment {
+                    provenance: Default::default(),
+                    curve: plane.lift_trimmed_curve(segment, profile.tolerance())?,
+                    pcurve: segment.curve().clone(),
+                    range: segment.range(),
+                })
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        loops.push(BrepPatchLoop {
+            kind: if index == 0 {
+                LoopKind::Outer
+            } else {
+                LoopKind::Inner
+            },
+            segments,
+        });
+    }
+    let mut patch = BrepPatch {
+        preserved: Vec::new(),
+        sources: Vec::new(),
+        surface: plane.into(),
+        orientation: FaceOrientation::Forward,
+        loops,
+    };
+    if reversed {
+        patch.reverse();
+    }
+    Ok(patch)
+}
+/// Publish a closed shell sewn from `patches` as a new compound.
+pub(crate) fn publish(patches: &[BrepPatch], tolerance: ModelTolerance) -> KernelResult<super::Compound> {
+    let mut kernel = super::Kernel::new(tolerance)?;
+    let mut transaction = kernel.begin_operation();
+    transaction.brep_shell(patches)?;
+    let committed = transaction.finish()?;
+    super::Compound::from_operation(kernel, committed, [])
+}
+
+// Attach roles at construction, before welding/unification can merge patches.
+// The tokens identify generators, not positions in the published face array.
+pub(crate) fn publish_with_roles(mut patches: Vec<BrepPatch>, roles: Vec<super::CreationRole>, tolerance: ModelTolerance) -> KernelResult<super::Compound> {
+    let namespace = super::identity::fresh_uuid();
+    let roots = roles.into_iter().enumerate().map(|(index, role)|
+        (PersistentId { namespace, local: index as u64 }, role)).collect::<std::collections::BTreeMap<_, _>>();
+    for (patch, (name, _)) in patches.iter_mut().zip(&roots) {
+        patch.sources.push(*name);
+    }
+    Ok(publish(&patches, tolerance)?.with_patch_roles(&roots))
+}
+

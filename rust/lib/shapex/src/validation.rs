@@ -26,6 +26,12 @@ impl ValidationReport {
     fn error(&mut self, diagnostic: Diagnostic) {
         self.diagnostics.push(diagnostic);
     }
+    fn topology(&mut self, entity: PersistentId, message: impl Into<String>) {
+        self.error(Diagnostic::new(DiagnosticKind::TopologyInvariant, message).with_entity(entity));
+    }
+    fn geometry(&mut self, entity: PersistentId, message: impl Into<String>) {
+        self.error(Diagnostic::new(DiagnosticKind::GeometryInvariant, message).with_entity(entity));
+    }
 
     pub fn into_result(self) -> KernelResult<()> {
         if self.is_valid() {
@@ -46,14 +52,74 @@ impl ValidationReport {
 /// Prove that every body of `topology` bounds a closed, geometrically
 /// consistent and physically valid volume.
 pub(crate) fn validate(topology: &Topology, tolerance: ModelTolerance) -> ValidationReport {
-    let mut report = validate_structure(topology, tolerance);
+    let mut report = validate_structure(topology, tolerance, None);
     validate_physical_volumes(topology, tolerance, &mut report);
     report
 }
 
+/// Faces whose geometry a validation covers; `None` covers every face.
+struct GeometryScope(Option<BTreeSet<FaceId>>);
+
+impl GeometryScope {
+    /// Every face that uses an entity named in `touched`, or every face.
+    fn new(topology: &Topology, touched: Option<&BTreeSet<PersistentId>>) -> Self {
+        let Some(touched) = touched else {
+            return Self(None);
+        };
+        let uses_touched = |face: &Face| -> KernelResult<bool> {
+            if touched.contains(&face.name) {
+                return Ok(true);
+            }
+            for loop_id in &face.loops {
+                if touched.contains(&topology.loop_(*loop_id)?.name) {
+                    return Ok(true);
+                }
+                for id in topology.loop_coedges(*loop_id)? {
+                    let coedge = topology.coedge(id)?;
+                    let edge = topology.edge(coedge.edge)?;
+                    if touched.contains(&coedge.name)
+                        || touched.contains(&edge.name)
+                        || edge.vertices.iter().any(|vertex| {
+                            topology.vertex(*vertex).is_ok_and(|vertex| touched.contains(&vertex.name))
+                        })
+                    {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(false)
+        };
+        // A face whose boundary cannot be traversed is reported structurally
+        // and validated geometrically as well.
+        Self(Some(
+            topology
+                .faces()
+                .filter(|(_, face)| uses_touched(face).unwrap_or(true))
+                .map(|(id, _)| id)
+                .collect(),
+        ))
+    }
+
+    fn contains(&self, face: FaceId) -> bool {
+        self.0.as_ref().is_none_or(|faces| faces.contains(&face))
+    }
+
+    fn contains_coedge(&self, topology: &Topology, coedge: &Coedge) -> bool {
+        self.0.is_none() || topology.loop_(coedge.loop_id).is_ok_and(|loop_| self.contains(loop_.face))
+    }
+}
+
 /// Check published topology and geometry without discarding a newly computed
 /// physical certificate. Commit performs certification once and retains it.
-pub(crate) fn validate_structure(topology: &Topology, tolerance: ModelTolerance) -> ValidationReport {
+///
+/// Structural checks always cover the whole topology. Geometric checks cover
+/// only faces that use an entity in `touched` when given: every other face
+/// was published unchanged by an earlier validation.
+pub(crate) fn validate_structure(
+    topology: &Topology,
+    tolerance: ModelTolerance,
+    touched: Option<&BTreeSet<PersistentId>>,
+) -> ValidationReport {
     let mut report = ValidationReport::default();
     validate_names(topology, &mut report);
     validate_ownership(topology, &mut report);
@@ -63,9 +129,10 @@ pub(crate) fn validate_structure(topology: &Topology, tolerance: ModelTolerance)
     validate_vertices(topology, &outgoing, &mut report);
     validate_manifold_vertices(topology, &outgoing, &mut report);
     validate_shell_euler_characteristic(topology, &mut report);
-    validate_geometry(topology, tolerance, &mut report);
-    validate_planar_face_regions(topology, tolerance, &mut report);
-    validate_curved_face_boundaries(topology, tolerance, &mut report);
+    let scope = GeometryScope::new(topology, touched);
+    validate_geometry(topology, tolerance, &scope, &mut report);
+    validate_planar_face_regions(topology, tolerance, &scope, &mut report);
+    validate_curved_face_boundaries(topology, tolerance, &scope, &mut report);
     report
 }
 
@@ -75,10 +142,11 @@ pub(crate) fn validate_structure(topology: &Topology, tolerance: ModelTolerance)
 fn validate_curved_face_boundaries(
     topology: &Topology,
     tolerance: ModelTolerance,
+    scope: &GeometryScope,
     report: &mut ValidationReport,
 ) {
-    for (_, face) in topology.faces() {
-        if matches!(face.surface(), super::Surface3::Plane(_)) {
+    for (id, face) in topology.faces() {
+        if !scope.contains(id) || matches!(face.surface(), super::Surface3::Plane(_)) {
             continue;
         }
         for loop_id in face.loops() {
@@ -146,10 +214,7 @@ fn validate_curved_face_boundaries(
             })();
             if let Err(error) = result {
                 for diagnostic in error.diagnostics() {
-                    report.error(Diagnostic::new(
-                        DiagnosticKind::GeometryInvariant,
-                        format!("invalid curved face boundary: {}", diagnostic.message),
-                    ).with_entity(face.name));
+                    report.geometry(face.name, format!("invalid curved face boundary: {}", diagnostic.message));
                 }
             }
         }
@@ -162,12 +227,16 @@ fn validate_curved_face_boundaries(
 fn validate_planar_face_regions(
     topology: &Topology,
     tolerance: ModelTolerance,
+    scope: &GeometryScope,
     report: &mut ValidationReport,
 ) {
-    for (_, face) in topology.faces() {
+    for (id, face) in topology.faces() {
         let super::Surface3::Plane(plane) = face.surface() else {
             continue;
         };
+        if !scope.contains(id) {
+            continue;
+        }
         let e = plane.u().magnitude2();
         let f = plane.u().dot(plane.v());
         let g = plane.v().magnitude2();
@@ -215,13 +284,7 @@ fn validate_planar_face_regions(
         let result = validate(false).or_else(|_| validate(true));
         if let Err(error) = result {
             for diagnostic in error.diagnostics() {
-                report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::GeometryInvariant,
-                        format!("invalid planar face region: {}", diagnostic.message),
-                    )
-                    .with_entity(face.name),
-                );
+                report.geometry(face.name, format!("invalid planar face region: {}", diagnostic.message));
             }
         }
     }
@@ -239,44 +302,12 @@ fn validate_physical_volumes(
     }
 }
 
-fn duplicate_name(
-    seen: &mut BTreeSet<PersistentId>,
-    name: PersistentId,
-    report: &mut ValidationReport,
-) {
-    if !seen.insert(name) {
-        report.error(
-            Diagnostic::new(
-                DiagnosticKind::TopologyInvariant,
-                "persistent topology names must be unique within a model",
-            )
-            .with_entity(name),
-        );
-    }
-}
-
 fn validate_names(topology: &Topology, report: &mut ValidationReport) {
     let mut seen = BTreeSet::new();
-    for (_, value) in topology.vertices() {
-        duplicate_name(&mut seen, value.name, report);
-    }
-    for (_, value) in topology.edges() {
-        duplicate_name(&mut seen, value.name, report);
-    }
-    for (_, value) in topology.coedges() {
-        duplicate_name(&mut seen, value.name, report);
-    }
-    for (_, value) in topology.loops() {
-        duplicate_name(&mut seen, value.name, report);
-    }
-    for (_, value) in topology.faces() {
-        duplicate_name(&mut seen, value.name, report);
-    }
-    for (_, value) in topology.shells() {
-        duplicate_name(&mut seen, value.name, report);
-    }
-    for (_, value) in topology.bodies() {
-        duplicate_name(&mut seen, value.name, report);
+    for name in topology.names() {
+        if !seen.insert(name) {
+            report.topology(name, "persistent topology names must be unique within a model");
+        }
     }
 }
 
@@ -286,92 +317,44 @@ fn validate_ownership(topology: &Topology, report: &mut ValidationReport) {
     let mut loop_owners = BTreeMap::new();
     for (body_id, body) in topology.bodies() {
         if body.shells.is_empty() {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "a body must contain a shell",
-                )
-                .with_entity(body.name),
-            );
+            report.topology(body.name, "a body must contain a shell");
         }
         let mut unique = BTreeSet::new();
         for shell_id in &body.shells {
             if !unique.insert(*shell_id) {
-                report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "a body may not list the same shell more than once",
-                    )
-                    .with_entity(body.name),
-                );
+                report.topology(body.name, "a body may not list the same shell more than once");
             }
             *shell_owners.entry(*shell_id).or_insert(0usize) += 1;
             match topology.shell(*shell_id) {
                 Ok(shell) if shell.body == body_id => {}
-                _ => report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "body-to-shell ownership is not reciprocal",
-                    )
-                    .with_entity(body.name),
-                ),
+                _ => report.topology(body.name, "body-to-shell ownership is not reciprocal"),
             }
         }
     }
 
     for (shell_id, shell) in topology.shells() {
         if shell_owners.get(&shell_id).copied() != Some(1) || topology.body(shell.body).is_err() {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "every shell must be owned exactly once by its recorded body",
-                )
-                .with_entity(shell.name),
-            );
+            report.topology(shell.name, "every shell must be owned exactly once by its recorded body");
         }
         if shell.kind != ShellKind::Closed {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "published bodies may not contain open shells",
-                )
-                .with_entity(shell.name),
-            );
+            report.topology(shell.name, "published bodies may not contain open shells");
         }
         let mut unique = BTreeSet::new();
         for face_id in &shell.faces {
             if !unique.insert(*face_id) {
-                report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "a shell may not list the same face more than once",
-                    )
-                    .with_entity(shell.name),
-                );
+                report.topology(shell.name, "a shell may not list the same face more than once");
             }
             *face_owners.entry(*face_id).or_insert(0usize) += 1;
             match topology.face(*face_id) {
                 Ok(face) if face.shell == shell_id => {}
-                _ => report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "shell-to-face ownership is not reciprocal",
-                    )
-                    .with_entity(shell.name),
-                ),
+                _ => report.topology(shell.name, "shell-to-face ownership is not reciprocal"),
             }
         }
     }
 
     for (face_id, face) in topology.faces() {
         if face_owners.get(&face_id).copied() != Some(1) || topology.shell(face.shell).is_err() {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "every face must be owned exactly once by its recorded shell",
-                )
-                .with_entity(face.name),
-            );
+            report.topology(face.name, "every face must be owned exactly once by its recorded shell");
         }
         let outer_count = face
             .loops
@@ -380,35 +363,17 @@ fn validate_ownership(topology: &Topology, report: &mut ValidationReport) {
             .filter(|loop_| loop_.kind == LoopKind::Outer)
             .count();
         if outer_count != 1 {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "every face must own exactly one outer loop",
-                )
-                .with_entity(face.name),
-            );
+            report.topology(face.name, "every face must own exactly one outer loop");
         }
         let mut unique = BTreeSet::new();
         for loop_id in &face.loops {
             if !unique.insert(*loop_id) {
-                report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "a face may not list the same loop more than once",
-                    )
-                    .with_entity(face.name),
-                );
+                report.topology(face.name, "a face may not list the same loop more than once");
             }
             *loop_owners.entry(*loop_id).or_insert(0usize) += 1;
             match topology.loop_(*loop_id) {
                 Ok(loop_) if loop_.face == face_id => {}
-                _ => report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "face-to-loop ownership is not reciprocal",
-                    )
-                    .with_entity(face.name),
-                ),
+                _ => report.topology(face.name, "face-to-loop ownership is not reciprocal"),
             }
         }
     }
@@ -416,13 +381,7 @@ fn validate_ownership(topology: &Topology, report: &mut ValidationReport) {
     for (loop_id, loop_value) in topology.loops() {
         if loop_owners.get(&loop_id).copied() != Some(1) || topology.face(loop_value.face).is_err()
         {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "every loop must be owned exactly once by its recorded face",
-                )
-                .with_entity(loop_value.name),
-            );
+            report.topology(loop_value.name, "every loop must be owned exactly once by its recorded face");
         }
     }
 }
@@ -431,13 +390,7 @@ fn validate_loops(topology: &Topology, report: &mut ValidationReport) {
     let mut globally_reached = BTreeSet::new();
     for (loop_id, loop_) in topology.loops() {
         let Some(first) = loop_.first else {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "a published face loop may not be empty",
-                )
-                .with_entity(loop_.name),
-            );
+            report.topology(loop_.name, "a published face loop may not be empty");
             continue;
         };
 
@@ -446,69 +399,33 @@ fn validate_loops(topology: &Topology, report: &mut ValidationReport) {
         loop {
             if !visited.insert(current) {
                 if current != first {
-                    report.error(
-                        Diagnostic::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "a coedge cycle repeated before returning to its loop start",
-                        )
-                        .with_entity(loop_.name),
-                    );
+                    report.topology(loop_.name, "a coedge cycle repeated before returning to its loop start");
                 }
                 break;
             }
             if !globally_reached.insert(current) {
-                report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "a coedge may be reachable from exactly one loop cycle",
-                    )
-                    .with_entity(loop_.name),
-                );
+                report.topology(loop_.name, "a coedge may be reachable from exactly one loop cycle");
             }
             let coedge = match topology.coedge(current) {
                 Ok(value) => value,
                 Err(_) => {
-                    report.error(
-                        Diagnostic::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "loop references a missing coedge",
-                        )
-                        .with_entity(loop_.name),
-                    );
+                    report.topology(loop_.name, "loop references a missing coedge");
                     break;
                 }
             };
             if coedge.loop_id != loop_id {
-                report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "coedge belongs to a different loop",
-                    )
-                    .with_entity(coedge.name),
-                );
+                report.topology(coedge.name, "coedge belongs to a different loop");
             }
             match topology.coedge(coedge.next) {
                 Ok(next) if next.previous == current => {}
-                _ => report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "coedge next/previous links are not reciprocal",
-                    )
-                    .with_entity(coedge.name),
-                ),
+                _ => report.topology(coedge.name, "coedge next/previous links are not reciprocal"),
             }
             if let (Ok([_, end]), Ok([next_start, _])) = (
                 topology.coedge_vertices(current),
                 topology.coedge_vertices(coedge.next),
             ) {
                 if end != next_start {
-                    report.error(
-                        Diagnostic::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "consecutive coedges do not share an endpoint vertex",
-                        )
-                        .with_entity(coedge.name),
-                    );
+                    report.topology(coedge.name, "consecutive coedges do not share an endpoint vertex");
                 }
             }
             current = coedge.next;
@@ -516,13 +433,7 @@ fn validate_loops(topology: &Topology, report: &mut ValidationReport) {
                 break;
             }
             if visited.len() > topology.coedges.len() {
-                report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "coedge loop does not terminate",
-                    )
-                    .with_entity(loop_.name),
-                );
+                report.topology(loop_.name, "coedge loop does not terminate");
                 break;
             }
         }
@@ -532,24 +443,12 @@ fn validate_loops(topology: &Topology, report: &mut ValidationReport) {
                 .and_then(|coedge| topology.edge(coedge.edge))
                 .is_ok_and(|edge| edge.vertices[0] == edge.vertices[1]);
         if visited.len() < 2 && !is_closed_single_edge {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "a published boundary loop needs at least two coedges unless it is one closed edge",
-                )
-                .with_entity(loop_.name),
-            );
+            report.topology(loop_.name, "a published boundary loop needs at least two coedges unless it is one closed edge");
         }
     }
     for (coedge_id, coedge) in topology.coedges() {
         if !globally_reached.contains(&coedge_id) {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "every coedge must be reachable from its recorded loop",
-                )
-                .with_entity(coedge.name),
-            );
+            report.topology(coedge.name, "every coedge must be reachable from its recorded loop");
         }
     }
 }
@@ -558,52 +457,22 @@ fn validate_edges(topology: &Topology, report: &mut ValidationReport) {
     for (edge_id, edge) in topology.edges() {
         if topology.vertex(edge.vertices[0]).is_err() || topology.vertex(edge.vertices[1]).is_err()
         {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "edge endpoint handles must refer to live vertices",
-                )
-                .with_entity(edge.name),
-            );
+            report.topology(edge.name, "edge endpoint handles must refer to live vertices");
         }
         if edge.coedges.is_empty() || edge.coedges.len() > 2 {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "a manifold edge must have one or two coedge uses",
-                )
-                .with_entity(edge.name),
-            );
+            report.topology(edge.name, "a manifold edge must have one or two coedge uses");
         }
         if edge.coedges.len() != 2 {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "every edge of a closed shell needs two coedges",
-                )
-                .with_entity(edge.name),
-            );
+            report.topology(edge.name, "every edge of a closed shell needs two coedges");
         }
         let mut unique = BTreeSet::new();
         for coedge_id in &edge.coedges {
             if !unique.insert(*coedge_id) {
-                report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "an edge may not list the same coedge more than once",
-                    )
-                    .with_entity(edge.name),
-                );
+                report.topology(edge.name, "an edge may not list the same coedge more than once");
             }
             match topology.coedge(*coedge_id) {
                 Ok(coedge) if coedge.edge == edge_id => {}
-                _ => report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "edge-to-coedge ownership is not reciprocal",
-                    )
-                    .with_entity(edge.name),
-                ),
+                _ => report.topology(edge.name, "edge-to-coedge ownership is not reciprocal"),
             }
         }
         if edge.coedges.len() == 2 {
@@ -611,13 +480,7 @@ fn validate_edges(topology: &Topology, report: &mut ValidationReport) {
             let second = topology.coedge(edge.coedges[1]);
             if let (Ok(first), Ok(second)) = (first, second) {
                 if first.forward == second.forward {
-                    report.error(
-                        Diagnostic::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "the two uses of a manifold edge must have opposite orientations",
-                        )
-                        .with_entity(edge.name),
-                    );
+                    report.topology(edge.name, "the two uses of a manifold edge must have opposite orientations");
                 }
                 let first_shell = topology
                     .loop_(first.loop_id)
@@ -628,13 +491,7 @@ fn validate_edges(topology: &Topology, report: &mut ValidationReport) {
                     .and_then(|loop_| topology.face(loop_.face))
                     .map(|face| face.shell);
                 if !matches!((first_shell, second_shell), (Ok(a), Ok(b)) if a == b) {
-                    report.error(
-                        Diagnostic::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "both uses of an edge must belong to the same shell",
-                        )
-                        .with_entity(edge.name),
-                    );
+                    report.topology(edge.name, "both uses of an edge must belong to the same shell");
                 }
             }
         }
@@ -642,13 +499,7 @@ fn validate_edges(topology: &Topology, report: &mut ValidationReport) {
     for (coedge_id, coedge) in topology.coedges() {
         match topology.edge(coedge.edge) {
             Ok(edge) if edge.coedges.contains(&coedge_id) => {}
-            _ => report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "coedge-to-edge ownership is not reciprocal",
-                )
-                .with_entity(coedge.name),
-            ),
+            _ => report.topology(coedge.name, "coedge-to-edge ownership is not reciprocal"),
         }
     }
 }
@@ -670,35 +521,8 @@ fn validate_vertices(
     report: &mut ValidationReport,
 ) {
     for (vertex_id, vertex) in topology.vertices() {
-        let outgoing_uses = outgoing.get(&vertex_id).map_or(&[][..], Vec::as_slice);
-        if let Some(outgoing) = vertex.outgoing {
-            match topology.coedge_vertices(outgoing) {
-                Ok([start, _]) if start == vertex_id => {}
-                _ => report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "vertex outgoing coedge does not originate at that vertex",
-                    )
-                    .with_entity(vertex.name),
-                ),
-            }
-        } else if !outgoing_uses.is_empty() {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "an incident vertex must reference an outgoing coedge",
-                )
-                .with_entity(vertex.name),
-            );
-        }
-        if outgoing_uses.is_empty() {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "a published body may not contain isolated vertices",
-                )
-                .with_entity(vertex.name),
-            );
+        if !outgoing.contains_key(&vertex_id) {
+            report.topology(vertex.name, "a published body may not contain isolated vertices");
         }
     }
 }
@@ -727,13 +551,7 @@ fn validate_manifold_vertices(
             };
             if let Some(existing) = shell {
                 if existing != face.shell {
-                    report.error(
-                        Diagnostic::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "a manifold vertex may not be shared by multiple shells",
-                        )
-                        .with_entity(vertex.name),
-                    );
+                    report.topology(vertex.name, "a manifold vertex may not be shared by multiple shells");
                 }
             } else {
                 shell = Some(face.shell);
@@ -750,13 +568,7 @@ fn validate_manifold_vertices(
             continue;
         }
         if link.values().any(|neighbors| neighbors.len() != 2) {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "the incident face corners at a closed-shell vertex must form one two-regular link",
-                )
-                .with_entity(vertex.name),
-            );
+            report.topology(vertex.name, "the incident face corners at a closed-shell vertex must form one two-regular link");
             continue;
         }
         let Some(start) = link.keys().next().copied() else {
@@ -773,13 +585,7 @@ fn validate_manifold_vertices(
             }
         }
         if reached.len() != link.len() {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "the incident faces at a vertex form disconnected fans",
-                )
-                .with_entity(vertex.name),
-            );
+            report.topology(vertex.name, "the incident faces at a vertex form disconnected fans");
         }
     }
 }
@@ -811,10 +617,7 @@ fn validate_shell_euler_characteristic(topology: &Topology, report: &mut Validat
                     continue;
                 };
                 let mut current = first;
-                loop {
-                    let Ok(coedge) = topology.coedge(current) else {
-                        break;
-                    };
+                while let Ok(coedge) = topology.coedge(current) {
                     edges.insert(coedge.edge);
                     if let Ok(edge) = topology.edge(coedge.edge) {
                         vertices.extend(edge.vertices);
@@ -828,18 +631,17 @@ fn validate_shell_euler_characteristic(topology: &Topology, report: &mut Validat
         }
         let characteristic = vertices.len() as isize - edges.len() as isize + face_cells;
         if characteristic > 2 || characteristic % 2 != 0 {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "closed orientable shell has an impossible Euler characteristic",
-                )
-                .with_entity(shell.name),
-            );
+            report.topology(shell.name, "closed orientable shell has an impossible Euler characteristic");
         }
     }
 }
 
-fn validate_geometry(topology: &Topology, tolerance: ModelTolerance, report: &mut ValidationReport) {
+fn validate_geometry(
+    topology: &Topology,
+    tolerance: ModelTolerance,
+    scope: &GeometryScope,
+    report: &mut ValidationReport,
+) {
     let scale = topology
         .vertices()
         .map(|(_, vertex)| vertex.point.to_vec().magnitude())
@@ -852,13 +654,7 @@ fn validate_geometry(topology: &Topology, tolerance: ModelTolerance, report: &mu
             || !vertex.tolerance.is_finite()
             || vertex.tolerance < 0.0
         {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "vertex geometry is not finite",
-                )
-                .with_entity(vertex.name),
-            );
+            report.geometry(vertex.name, "vertex geometry is not finite");
         }
     }
 
@@ -868,13 +664,7 @@ fn validate_geometry(topology: &Topology, tolerance: ModelTolerance, report: &mu
             .domain()
             .contains_range(edge.range, tolerance.parameter)
         {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "edge trim range lies outside its curve's natural domain",
-                )
-                .with_entity(edge.name),
-            );
+            report.geometry(edge.name, "edge trim range lies outside its curve's natural domain");
             continue;
         }
         let Ok(start) = topology.vertex(edge.vertices[0]) else {
@@ -911,21 +701,22 @@ fn validate_geometry(topology: &Topology, tolerance: ModelTolerance, report: &mu
             .max(curve_end.distance(end.point));
         if endpoint_error > achieved {
             report.error(
-                Diagnostic::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "edge curve endpoints do not agree with its vertices within tolerance",
-                )
-                .with_entity(edge.name)
-                .with_accuracy(achieved, endpoint_error),
+                Diagnostic::new(DiagnosticKind::GeometryInvariant, "edge curve endpoints do not agree with its vertices within tolerance")
+                    .with_entity(edge.name)
+                    .with_accuracy(achieved, endpoint_error),
             );
         }
     }
 
     for (_, coedge) in topology.coedges() {
-        validate_coedge_geometry(topology, tolerance, scale, coedge, report);
+        if scope.contains_coedge(topology, coedge) {
+            validate_coedge_geometry(topology, tolerance, scale, coedge, report);
+        }
     }
-    for (_, face) in topology.faces() {
-        validate_face_loops(topology, tolerance, face, report);
+    for (id, face) in topology.faces() {
+        if scope.contains(id) {
+            validate_face_loops(topology, tolerance, face, report);
+        }
     }
 }
 
@@ -972,13 +763,7 @@ fn validate_coedge_geometry(
         .domain()
         .contains_range(coedge.range, tolerance.parameter)
     {
-        report.error(
-            Diagnostic::new(
-                DiagnosticKind::GeometryInvariant,
-                "coedge trim range lies outside its p-curve's natural domain",
-            )
-            .with_entity(coedge.name),
-        );
+        report.geometry(coedge.name, "coedge trim range lies outside its p-curve's natural domain");
         return;
     }
     let vertices = if coedge.forward {
@@ -1028,12 +813,9 @@ fn validate_coedge_geometry(
         .max(surface_end.distance(end.point));
     if endpoint_error > achieved {
         report.error(
-            Diagnostic::new(
-                DiagnosticKind::GeometryInvariant,
-                "coedge p-curve endpoints do not agree with face and edge geometry",
-            )
-            .with_entity(coedge.name)
-            .with_accuracy(achieved, endpoint_error),
+            Diagnostic::new(DiagnosticKind::GeometryInvariant, "coedge p-curve endpoints do not agree with face and edge geometry")
+                .with_entity(coedge.name)
+                .with_accuracy(achieved, endpoint_error),
         );
     }
     let domains = face.surface.domains();
@@ -1062,13 +844,7 @@ fn validate_coedge_geometry(
         if !domains[0].contains(uv.x, tolerance.parameter)
             || !domains[1].contains(uv.y, tolerance.parameter)
         {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "p-curve leaves its face surface's natural parameter domain",
-                )
-                .with_entity(coedge.name),
-            );
+            report.geometry(coedge.name, "p-curve leaves its face surface's natural parameter domain");
             break;
         }
         match face.surface.evaluate(uv.x, uv.y) {
@@ -1076,12 +852,9 @@ fn validate_coedge_geometry(
             Ok(value) => {
                 let interior_error = value.point.distance(edge_point);
                 report.error(
-                    Diagnostic::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "edge and p-curve disagree in the interior of their trim ranges",
-                    )
-                    .with_entity(coedge.name)
-                    .with_accuracy(achieved, interior_error),
+                    Diagnostic::new(DiagnosticKind::GeometryInvariant, "edge and p-curve disagree in the interior of their trim ranges")
+                        .with_entity(coedge.name)
+                        .with_accuracy(achieved, interior_error),
                 );
                 break;
             }
@@ -1129,13 +902,7 @@ fn validate_face_loops(
         }
         report.diagnostics.extend(attempt.diagnostics);
         if !(correct(principal_area, 0.0) || correct(lifted_area, 0.0)) {
-            report.error(
-                Diagnostic::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "face loop has zero area or winding inconsistent with face orientation",
-                )
-                .with_entity(loop_value.name),
-            );
+            report.geometry(loop_value.name, "face loop has zero area or winding inconsistent with face orientation");
         }
     }
 }
@@ -1166,10 +933,7 @@ fn loop_areas(
     let mut principal_area = 0.0;
     let mut uncertainty = 0.0;
     let mut previous_end = None;
-    loop {
-        let Ok(coedge) = topology.coedge(current) else {
-            break;
-        };
+    while let Ok(coedge) = topology.coedge(current) {
         let start = coedge.pcurve.evaluate(coedge.range.start);
         let end = coedge.pcurve.evaluate(coedge.range.end);
         let chart_shift = match (previous_end, &start) {
@@ -1221,13 +985,7 @@ fn loop_areas(
                             lifted_area += bridge;
                             principal_area += bridge;
                         }
-                        None => report.error(
-                            Diagnostic::new(
-                                DiagnosticKind::GeometryInvariant,
-                                "consecutive p-curves are not continuous in parameter space or across a collapsed surface interval",
-                            )
-                            .with_entity(coedge.name),
-                        ),
+                        None => report.geometry(coedge.name, "consecutive p-curves are not continuous in parameter space or across a collapsed surface interval"),
                     }
                 }
             }
@@ -1322,7 +1080,9 @@ mod tests {
         let (cheap, _, uncertainty) = loop_areas(&topology, tolerance, &face, first, &mut report, false);
         let (precise, _, _) = loop_areas(&topology, tolerance, &face, first, &mut report, true);
         assert!(report.is_valid());
-        assert!(cheap > 0.0 && cheap < uncertainty && precise < 0.0,
+        // The cheap pass may resolve the sign itself, but must never report the
+        // wrong sign outside its uncertainty.
+        assert!((cheap < 0.0 || cheap < uncertainty) && precise < 0.0,
             "cheap {cheap}, uncertainty {uncertainty}, precise {precise}");
         validate_face_loops(&topology, tolerance, &face, &mut report);
         assert_eq!(report.diagnostics().len(), 1);

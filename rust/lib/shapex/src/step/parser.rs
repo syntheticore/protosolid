@@ -286,8 +286,7 @@ fn decode(text: &str) -> String {
             .find_map(|(width, prefix)| Some((width, rest.strip_prefix(prefix)?)))
         {
             let end = after.find("\\X0\\").unwrap_or(after.len());
-            let units = after[..end]
-                .as_bytes()
+            let units = after.as_bytes()[..end]
                 .chunks(width)
                 .filter_map(|chunk| hex(std::str::from_utf8(chunk).ok()?))
                 .collect::<Vec<_>>();

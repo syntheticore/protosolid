@@ -344,7 +344,10 @@ impl Transaction<'_> {
                 let bridge = transaction.insert_blend_transition_bridge(vertex, cross, selected)?;
                 let mut selected = selected.clone();
                 selected.insert(bridge);
-                transaction.blend_network(selected, radius, follow, EdgeBlendKind::Fillet, None)
+                match transaction.blend_network(selected, radius, follow, EdgeBlendKind::Fillet, None)? {
+                    BlendOutcome::Built => Ok(()),
+                    BlendOutcome::Staged(_) => Err(unsupported("a bridged blend transition needs a staged corner")),
+                }
             });
             if attempt.is_ok() {
                 return attempt;
@@ -479,8 +482,6 @@ impl Transaction<'_> {
             );
             self.insert_loop_coedge(previous, next, coedge)?;
         }
-        self.repair_outgoing(vertex)?;
-        self.repair_outgoing(new_vertex)?;
         Ok(edge)
     }
 

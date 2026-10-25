@@ -1,15 +1,21 @@
 use super::*;
 
-pub(super) fn rebuild_supports(source: &Compound, edit: SupportEdit) -> KernelResult<Compound> {
+pub(super) fn rebuild_supports(
+    source: &Compound,
+    edit: SupportEdit,
+    role: crate::DerivationRole,
+) -> KernelResult<Compound> {
     let changed = edit.changed.clone();
     let patches_by_shell = support_patches(source.topology(), source.tolerance(), edit)?;
-    commit_support_patches(source, patches_by_shell, changed)
+    commit_support_patches(source, patches_by_shell, changed, Some(role))
 }
 
+/// Publish rebuilt shells, attributed to `source` under `role` when given.
 pub(super) fn commit_support_patches(
     source: &Compound,
     patches_by_shell: BTreeMap<crate::ShellId, Vec<BrepPatch>>,
     changed_supports: BTreeSet<FaceId>,
+    role: Option<crate::DerivationRole>,
 ) -> KernelResult<Compound> {
     let topology = source.topology();
     let tolerance = source.tolerance();
@@ -29,7 +35,10 @@ pub(super) fn commit_support_patches(
     }
     transaction.restore_brep_shells(topology, &bodies, &affected)?;
     let committed = transaction.finish()?;
-    Compound::from_operation(kernel, committed, [])
+    match role {
+        Some(role) => Compound::from_operation_with_parents(kernel, committed, &[source], role),
+        None => Compound::from_operation(kernel, committed, []),
+    }
 }
 
 pub(crate) fn support_patches(
@@ -85,9 +94,9 @@ pub(crate) fn support_patches(
     let mut required_vertices = BTreeSet::new();
     for (edge_id, edge) in &edges {
         let source_edge = topology.edge(*edge_id)?;
-        if source_edge.vertices()[0] != source_edge.vertices()[1] {
-            required_vertices.extend(source_edge.vertices());
-        } else if edge.curve.domain().period.is_none() {
+        if source_edge.vertices()[0] != source_edge.vertices()[1]
+            || edge.curve.domain().period.is_none()
+        {
             required_vertices.extend(source_edge.vertices());
         }
     }
@@ -388,8 +397,8 @@ pub(crate) fn support_patches(
                 } else {
                     original.clone()
                 };
-                for end in 0..2 {
-                    if !changed_vertices.contains(&endpoints[end]) {
+                for (end, endpoint) in endpoints.iter().enumerate() {
+                    if !changed_vertices.contains(endpoint) {
                         provenance.vertices[end] = original.vertices[end].clone();
                     }
                 }
@@ -508,49 +517,22 @@ pub(crate) fn face_patch(
     reverse: bool,
 ) -> KernelResult<BrepPatch> {
     let face = topology.face(face_id)?;
-    let mut loops = Vec::new();
-    for loop_id in face.loops() {
-        let loop_value = topology.loop_(*loop_id)?;
-        let mut segments = topology
-            .loop_coedges(*loop_id)?
-            .into_iter()
-            .map(|coedge_id| {
-                let coedge = topology.coedge(coedge_id)?;
-                Ok(BrepPatchSegment {
-                    provenance: SegmentProvenance::from_coedge(topology, coedge_id)?,
-                    curve: topology.edge(coedge.edge())?.curve().clone(),
-                    pcurve: coedge.pcurve().clone(),
-                    range: coedge.range(),
-                })
-            })
-            .collect::<KernelResult<Vec<_>>>()?;
-        if reverse {
-            segments.reverse();
-            for segment in &mut segments {
-                segment.range = segment.range.reversed();
-                segment.provenance = segment.provenance.reversed();
-            }
-        }
-        loops.push(BrepPatchLoop {
-            kind: loop_value.kind(),
-            segments,
-        });
-    }
-    Ok(BrepPatch {
-        preserved: if reverse {
-            Vec::new()
-        } else {
-            vec![face.name()]
-        },
+    let mut patch = BrepPatch {
+        preserved: vec![face.name()],
         sources: vec![face.name()],
         surface: face.surface().clone(),
-        orientation: if reverse {
-            face.orientation().reversed()
-        } else {
-            face.orientation()
-        },
-        loops,
-    })
+        orientation: face.orientation(),
+        loops: face
+            .loops()
+            .iter()
+            .map(|loop_id| BrepPatchLoop::from_loop(topology, *loop_id))
+            .collect::<KernelResult<_>>()?,
+    };
+    if reverse {
+        patch.preserved.clear();
+        patch.reverse();
+    }
+    Ok(patch)
 }
 
 pub(super) fn loop_patch(
@@ -558,31 +540,12 @@ pub(super) fn loop_patch(
     loop_id: crate::LoopId,
     output_kind: crate::LoopKind,
 ) -> KernelResult<BrepPatchLoop> {
-    let loop_value = topology.loop_(loop_id)?;
-    let mut segments = topology
-        .loop_coedges(loop_id)?
-        .into_iter()
-        .map(|coedge_id| {
-            let coedge = topology.coedge(coedge_id)?;
-            Ok(BrepPatchSegment {
-                provenance: SegmentProvenance::from_coedge(topology, coedge_id)?,
-                curve: topology.edge(coedge.edge())?.curve().clone(),
-                pcurve: coedge.pcurve().clone(),
-                range: coedge.range(),
-            })
-        })
-        .collect::<KernelResult<Vec<_>>>()?;
-    if loop_value.kind() != output_kind {
-        segments.reverse();
-        for segment in &mut segments {
-            segment.range = segment.range.reversed();
-            segment.provenance = segment.provenance.reversed();
-        }
+    let mut patch = BrepPatchLoop::from_loop(topology, loop_id)?;
+    if patch.kind != output_kind {
+        patch.kind = output_kind;
+        patch.reverse();
     }
-    Ok(BrepPatchLoop {
-        kind: output_kind,
-        segments,
-    })
+    Ok(patch)
 }
 
 pub(super) fn rim_segment_points(segment: &BrepPatchSegment) -> KernelResult<[Point3; 3]> {
@@ -956,6 +919,7 @@ pub(super) fn assemble_shell_boundary(
         }
         transaction.nest_brep_shells(&bodies)?;
     }
-    let committed = transaction.finish()?;
-    Ok(Compound::from_operation(kernel, committed, [])?.with_patch_roles(&tokens))
+    let mut committed = transaction.finish()?;
+    committed.history.record_patch_roles(&tokens);
+    Compound::from_operation_with_parents(kernel, committed, &[source], crate::DerivationRole::Shell)
 }

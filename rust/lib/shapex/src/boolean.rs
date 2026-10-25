@@ -102,8 +102,7 @@ pub(crate) fn boolean_brep(
     transaction.nest_brep_shells(&bodies)?;
     transaction.unify_same_domain()?;
     let committed = transaction.finish()?;
-    Compound::from_operation(kernel, committed, [first, second])?
-        .with_boolean_parents(first, second, super::DerivationRole::Boolean(kind))
+    Compound::from_operation_with_parents(kernel, committed, &[first, second], super::DerivationRole::Boolean(kind))
 }
 
 /// A face of either operand, addressed as `(operand, index)`.
@@ -1459,7 +1458,7 @@ fn add_periodic_seams(
         .filter_map(|(node, degree)| (degree % 2 == 1).then_some(*node))
         .collect::<Vec<_>>();
     for start in endpoints {
-        if degree[&start] % 2 == 0 {
+        if degree[&start].is_multiple_of(2) {
             continue;
         }
         let mut queue = std::collections::VecDeque::from([start]);
@@ -1530,11 +1529,11 @@ fn add_periodic_seams(
         .filter_map(|(node, degree)| (*degree % 2 == 1).then_some(*node))
         .collect::<Vec<_>>();
     for first in 0..dangling.len() {
-        if degree[&dangling[first]] % 2 == 0 {
+        if degree[&dangling[first]].is_multiple_of(2) {
             continue;
         }
         for second in first + 1..dangling.len() {
-            if degree[&dangling[second]] % 2 == 0 {
+            if degree[&dangling[second]].is_multiple_of(2) {
                 continue;
             }
             let node_uv = |node| {
@@ -1647,15 +1646,12 @@ pub(super) fn unchanged_face_patch(
     }
     let reverse = output_orientation != source_orientation;
     let mut patch_loops = Vec::new();
-    for (kind, mut segments) in loops {
+    for (kind, segments) in loops {
+        let mut patch = BrepPatchLoop { kind, segments };
         if reverse {
-            segments.reverse();
-            for segment in &mut segments {
-                segment.range = segment.range.reversed();
-                segment.provenance = segment.provenance.reversed();
-            }
+            patch.reverse();
         }
-        patch_loops.push(BrepPatchLoop { kind, segments });
+        patch_loops.push(patch);
     }
     Ok(BrepPatch {
         preserved: Vec::new(),

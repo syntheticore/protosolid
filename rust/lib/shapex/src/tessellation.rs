@@ -430,7 +430,7 @@ impl Kernel {
             }
         }
         let indices = earcutr::earcut(&flat_uv, &holes, 2);
-        if indices.len() < 3 || indices.len() % 3 != 0 {
+        if indices.len() < 3 || !indices.len().is_multiple_of(3) {
             return Err(KernelError::new(
                 DiagnosticKind::NumericalFailure,
                 "trimmed face triangulation failed",

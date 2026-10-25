@@ -100,6 +100,7 @@ pub(crate) fn move_faces(
             preserve_orientation: true,
             ..Default::default()
         },
+        crate::DerivationRole::MoveFaces,
     )?;
     // A valid closed shell alone does not certify that a former fillet is still
     // tangent. Check the reconstructed contact rails before publishing it.
@@ -141,7 +142,7 @@ pub(crate) fn move_faces(
             ));
         }
     }
-    result.with_feature_parent(source, crate::DerivationRole::MoveFaces)
+    Ok(result)
 }
 
 pub(super) type BlendContacts = BTreeMap<FaceId, Vec<(FaceId, Point3, crate::Vec3)>>;

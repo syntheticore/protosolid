@@ -1182,7 +1182,6 @@ impl Transaction<'_> {
         for old_vertex in old_vertices {
             if patches.iter().any(|patch| patch.ends.iter().any(|end|
                 matches!(end, BlendPatchEnd::Boundary(endpoint) if endpoint.old_vertex == old_vertex && endpoint.cap.is_some()))) {
-                self.repair_outgoing(old_vertex)?;
                 continue;
             }
             let outputs = contact_vertices
@@ -1193,9 +1192,6 @@ impl Transaction<'_> {
                 .map(|vertex| self.working.vertex(vertex).map(|value| value.name))
                 .collect::<KernelResult<Vec<_>>>()?;
             self.delete_split_vertex(old_vertex, outputs)?;
-        }
-        for vertex in contact_vertices.values().copied() {
-            self.repair_outgoing(vertex)?;
         }
         Ok(modified_faces)
     }

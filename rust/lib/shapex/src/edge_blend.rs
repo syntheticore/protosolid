@@ -30,7 +30,7 @@ use super::trim::{
 };
 use super::wire::{curve_loop_contains_point, curve_pair_intersection};
 use super::{
-    nearest_uv, Circle2, Circle3, CoedgeId, Cone3, Curve2, Curve3, Cylinder3, Diagnostic, DiagnosticKind,
+    nearest_uv, Circle2, Circle3, CoedgeId, Cone3, Curve2, Curve3, Cylinder3, DiagnosticKind,
     DomainBounds, EdgeId, FaceId, FaceOrientation, Frame3, IntersectionSet, KernelError,
     KernelResult, Line2, LoopId, ModelTolerance, ParameterDomain, ParameterRange, PersistentId,
     Plane3, RevolvedSurface3, ShellId,
@@ -39,9 +39,20 @@ use super::{
 };
 use crate::{topology_error, unsupported};
 
-/// Diagnostic operation tags that `Compound::blend_edges` turns into staged retries.
-pub(crate) const MIXED_TRIHEDRAL_SETBACK: &str = "blend.mixed-trihedral-setback";
-pub(crate) const CROSSING_CORNER_SEQUENCE: &str = "blend.crossing-corner-sequence";
+/// Whether a blend network was built in one transaction, or needs a staged
+/// construction that `Compound::blend_edges` performs from the source.
+pub(crate) enum BlendOutcome {
+    Built,
+    Staged(BlendStaging),
+}
+
+/// A corner that one network cannot round, and the sequence that can.
+pub(crate) enum BlendStaging {
+    /// Concave rails set back the corner before the convex network enters it.
+    MixedTrihedral { concave_edges: Vec<PersistentId> },
+    /// Opposite blends of a four-face corner, each ending on the other.
+    CrossingCorner { pair: [PersistentId; 2] },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EdgeBlendKind {
@@ -156,6 +167,8 @@ enum SpineEnd {
     },
     /// The network ends here.
     Endpoint(BlendEndpoint),
+    /// The corner needs a staged construction.
+    Staged(BlendStaging),
 }
 
 /// For each blended edge end on a boundary, its consecutive terminating-face
@@ -259,7 +272,7 @@ impl Transaction<'_> {
         follow_tangent_edges: bool,
         kind: EdgeBlendKind,
         chamfer: Option<&ChamferSettings>,
-    ) -> KernelResult<()> {
+    ) -> KernelResult<BlendOutcome> {
         self.blend_network(
             edges.iter().copied().collect(),
             radius,
@@ -276,7 +289,7 @@ impl Transaction<'_> {
         follow_tangent_edges: bool,
         kind: EdgeBlendKind,
         chamfer: Option<&ChamferSettings>,
-    ) -> KernelResult<()> {
+    ) -> KernelResult<BlendOutcome> {
         if kind != EdgeBlendKind::Fillet {
             return self.blend_network_with_guide(
                 selected, radius, follow_tangent_edges, kind, chamfer, false,
@@ -308,7 +321,7 @@ impl Transaction<'_> {
         kind: EdgeBlendKind,
         chamfer: Option<&ChamferSettings>,
         interpolate_guides: bool,
-    ) -> KernelResult<()> {
+    ) -> KernelResult<BlendOutcome> {
         let input_names = selected
             .iter()
             .map(|edge| self.working.edge(*edge).map(|edge| edge.name))
@@ -453,6 +466,7 @@ impl Transaction<'_> {
                             regular_endpoints
                                 .insert((spine.edge_id, endpoint_index), Some(endpoint));
                         }
+                        SpineEnd::Staged(staging) => return Ok(BlendOutcome::Staged(staging)),
                     }
                 }
             }
@@ -498,7 +512,7 @@ impl Transaction<'_> {
                                     radius,
                                     follow_tangent_edges,
                                     error,
-                                );
+                                ).map(|()| BlendOutcome::Built);
                             }
                             Err(error) => return Err(error),
                         }
@@ -735,7 +749,7 @@ impl Transaction<'_> {
                         self.history.forget_output(generated);
                     }
                 }
-                return Ok(());
+                return Ok(BlendOutcome::Built);
             }
             if selected.len() > 256 {
                 return Err(unsupported("blend transition propagation exceeded the connected regular edge network"));

@@ -224,21 +224,32 @@ impl EntitySource {
 }
 
 impl OperationHistory {
+    /// Assign creation roles to outputs constructed from tagged patches.
+    pub(crate) fn record_patch_roles(&mut self, tokens: &BTreeMap<PersistentId, super::CreationRole>) {
+        let roles = self
+            .construction
+            .iter()
+            .filter_map(|(output, records)| {
+                let mut roles = Vec::new();
+                for role in records.iter().filter_map(|record| tokens.get(&record.name)) {
+                    if !roles.contains(role) {
+                        roles.push(role.clone());
+                    }
+                }
+                (!roles.is_empty()).then_some((*output, roles))
+            })
+            .collect::<Vec<_>>();
+        self.construction_roles.extend(roles);
+    }
+
     /// Fill untouched/deleted identities; explicit operator edits take precedence.
-    pub(crate) fn complete_retained(&mut self, before: &Topology, after: &Topology) {
-        fn names(topology: &Topology) -> impl Iterator<Item = PersistentId> + '_ {
-            topology
-                .vertices()
-                .map(|(_, value)| value.name())
-                .chain(topology.edges().map(|(_, value)| value.name()))
-                .chain(topology.coedges().map(|(_, value)| value.name()))
-                .chain(topology.loops().map(|(_, value)| value.name()))
-                .chain(topology.faces().map(|(_, value)| value.name()))
-                .chain(topology.shells().map(|(_, value)| value.name()))
-                .chain(topology.bodies().map(|(_, value)| value.name()))
-        }
-        let outputs = names(after).collect::<BTreeSet<_>>();
-        for source in names(before) {
+    pub(crate) fn complete_retained(
+        &mut self,
+        before: impl IntoIterator<Item = PersistentId>,
+        after: &Topology,
+    ) {
+        let outputs = after.names().collect::<BTreeSet<_>>();
+        for source in before {
             self.changes.entry(source).or_insert_with(|| {
                 if outputs.contains(&source) {
                     (ChangeKind::Unchanged, vec![source])
@@ -316,6 +327,20 @@ impl OperationHistory {
     /// Feature construction records its primary source first.
     pub(crate) fn primary_source(&self, output: PersistentId) -> PersistentId {
         self.construction[&output][0].name
+    }
+
+    /// Every entity this operation created, derived, or changed so far.
+    pub(crate) fn touched_names(&self) -> BTreeSet<PersistentId> {
+        self.origins
+            .keys()
+            .copied()
+            .chain(
+                self.changes
+                    .iter()
+                    .filter(|(_, (kind, _))| *kind != ChangeKind::Unchanged)
+                    .map(|(name, _)| *name),
+            )
+            .collect()
     }
 
     pub(crate) fn created(&mut self, output: PersistentId) {

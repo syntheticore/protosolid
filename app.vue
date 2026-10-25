@@ -210,10 +210,12 @@
         return
       }
       if(!editingText && !switchingDocument.value && !documentBusy.value &&
-        activeDocument.value?.activeSketch && !e.altKey && (e.ctrlKey || e.metaKey) &&
+        activeDocument.value && !e.altKey && (e.ctrlKey || e.metaKey) &&
         (key == 'z' || key == 'y')) {
         e.preventDefault()
-        bus.emit('sketch-history', key == 'y' || e.shiftKey ? 1 : -1)
+        const direction = key == 'y' || e.shiftKey ? 1 : -1
+        if(activeDocument.value.activeSketch) bus.emit('sketch-history', direction)
+        else activeDocument.value.restoreHistory(direction)
         return
       }
       const isModifierKey = ['Shift', 'Control', 'Meta', 'Alt'].includes(e.key)

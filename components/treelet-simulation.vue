@@ -536,19 +536,19 @@
       changed(key, event) {
         this.simulation[key] = Number(event.target.value)
         if(this.simulation.mode == 'fluid' && (key == 'density' || key == 'viscosity')) this.simulation.fluid = 'custom'
-        this.document.hasChanges = true
+        this.document.markChanged()
         this.solve()
       },
 
       fluidChanged(fluid) {
         this.simulation.setFluid(fluid)
-        this.document.hasChanges = true
+        this.document.markChanged()
         this.solve()
       },
 
       displayChanged(key, event) {
         this.simulation[key] = event.target.checked
-        this.document.hasChanges = true
+        this.document.markChanged()
         this.bus.emit('fluid-result')
       },
 
@@ -565,7 +565,7 @@
 
       clearPick(key) {
         this.simulation[key] = []
-        this.document.hasChanges = true
+        this.document.markChanged()
         this.updatePaths()
         this.solve()
       },
@@ -592,7 +592,7 @@
         })
         if(existing) references.splice(references.indexOf(existing), 1)
         else references.push(face.faceReference())
-        this.document.hasChanges = true
+        this.document.markChanged()
         this.solve()
       },
 
@@ -643,7 +643,7 @@
         this.bus.emit('clear-pickers')
         const simulations = this.component.creator.simulations
         simulations.splice(simulations.indexOf(this.simulation), 1)
-        this.document.hasChanges = true
+        this.document.markChanged()
         this.bus.emit('activate-tool', ManipulationTool)
       },
     },

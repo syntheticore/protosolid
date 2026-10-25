@@ -93,6 +93,7 @@ export default class Document extends Emitter {
     this.dirtyView = null
     this.currentCameraView = cloneCameraView(this.views[3])
     this.viewPreviewSnapshot = null
+    this.resetHistory()
 
     // this.on('component-changed', () => {
     //   this.hasChanges = true
@@ -129,6 +130,111 @@ export default class Document extends Emitter {
   }
 
   markChanged() {
+    this.hasChanges = true
+    this.isFresh = false
+    this.history.pending = true
+    this.scheduleHistory()
+  }
+
+  // Undo history of committed changes. States store each feature serialized,
+  // so restoring a state only rebuilds the timeline from the first feature
+  // that differs. Visibility is restored along, but is no change by itself.
+  resetHistory() {
+    clearTimeout(this.history?.timer)
+    this.history = markRaw({ states: [this.captureHistoryState()], index: 0, pending: false, timer: null })
+  }
+
+  captureHistoryState() {
+    const materials = new Map()
+    const materialLinks = {}
+    historyDefinitions(this.timeline).forEach((definition, id) => {
+      if(!definition.material) return
+      if(!materials.has(definition.material)) materials.set(definition.material, id)
+      materialLinks[id] = materials.get(definition.material)
+    })
+    return {
+      marker: this.timeline.marker,
+      materialLinks: JSON.stringify(materialLinks),
+      baseCompDef: historyJSON(Serialize.serialize(this.timeline.baseCompDef)),
+      features: this.timeline.features.map(feature => {
+        // Later features add topology names to earlier ones when picking their
+        // geometry. Store them separately, as extra names need no rebuild.
+        const dump = Serialize.serialize(feature)
+        const names = JSON.stringify(dump.topologyNames)
+        delete dump.topologyNames
+        return { id: feature.id, data: historyJSON(dump), names }
+      }),
+      visibilities: this.captureVisualViewState().visibilities,
+    }
+  }
+
+  scheduleHistory() {
+    clearTimeout(this.history.timer)
+    // Coalesce rapid changes, like typing, into one step
+    this.history.timer = setTimeout(() => this.recordHistory(), 250)
+  }
+
+  get canRestoreHistory() {
+    return !this.activeFeature && !this.creatingFeature && !this.isRegenerating && !this.activeMerge
+  }
+
+  recordHistory() {
+    const history = this.history
+    if(!history.pending || !this.canRestoreHistory) return
+    history.pending = false
+    const current = history.states[history.index]
+    const state = this.captureHistoryState()
+    if(sameHistoryState(state, current)) {
+      // Redo returns to the latest visibility
+      current.visibilities = state.visibilities
+      return
+    }
+    history.states.splice(history.index + 1, Infinity, state)
+    history.index++
+  }
+
+  async restoreHistory(direction) {
+    if(!this.canRestoreHistory) return
+    this.recordHistory()
+    const history = this.history
+    const current = history.states[history.index]
+    const target = history.states[history.index + direction]
+    if(!target) return
+    history.index += direction
+    this.activateInteractivePanel(null)
+
+    const timeline = this.timeline
+    const context = { document: this, sketches: {}, materials: [] }
+    const materialLinks = JSON.parse(target.materialLinks)
+    const currentMaterialLinks = JSON.parse(current.materialLinks)
+    let first = 0
+    if(target.baseCompDef == current.baseCompDef) {
+      const kept = (entry, other) => entry.data == other?.data &&
+        materialLinks[entry.id] == currentMaterialLinks[entry.id] && hasTopologyNames(other.names, entry.names)
+      while(first < target.features.length && kept(target.features[first], current.features[first])) first++
+    } else {
+      // Every cached tree shares the base definition
+      Object.assign(timeline.baseCompDef, Serialize.parse(target.baseCompDef, context))
+    }
+    timeline.features.slice(0, first).forEach(feature => {
+      if(feature.sketch) context.sketches[feature.sketch.id] = feature.sketch
+    })
+    timeline.replaceFeatures(first, target.features.slice(first).map(entry => {
+      const feature = Serialize.parse(entry.data, context)
+      feature.topologyNames = entry.names && JSON.parse(entry.names)
+      return feature
+    }))
+    // Serialization copies materials; restore the sharing between definitions.
+    const definitions = historyDefinitions(timeline)
+    Object.entries(materialLinks).forEach(([id, owner]) => {
+      definitions.get(id).material = definitions.get(owner).material
+    })
+    await this.regenerate(target.marker)
+    this.applyPartVisibilities(target.visibilities)
+    if(context.materials.length) {
+      this.materials = [...new Set([...definitions.values()]
+        .map(definition => definition.material).filter(Boolean))]
+    }
     this.hasChanges = true
     this.isFresh = false
   }
@@ -289,6 +395,8 @@ export default class Document extends Emitter {
       } finally {
         this.pendingRegenerations--
         this.bus.emit('calculation-finished', calculationId)
+        // Record changes once their results are in
+        this.scheduleHistory()
       }
     }
     this.regenerationQueue = this.regenerationQueue.catch(() => {}).then(run)
@@ -344,8 +452,7 @@ export default class Document extends Emitter {
     // dirty so closed regions are rebuilt from the regenerated geometry.
     this.top().getChildren().flatMap(component => component.sketches)
       .forEach(sketch => { sketch.profileUpdateNeeded = true })
-    this.hasChanges = true
-    this.isFresh = false
+    this.markChanged()
   }
 
   renameParameterReferences(oldName, newName) {
@@ -531,6 +638,7 @@ export default class Document extends Emitter {
       }
       this.activeFeature = null
       this.activeSketch = null
+      this.scheduleHistory()
     }
     this.selection.clear()
   }
@@ -610,6 +718,7 @@ export default class Document extends Emitter {
       visibilities[comp.id] = {
         compHidden: comp.creator.hidden,
         itemsHidden: JSON.parse(JSON.stringify(comp.creator.itemsHidden)),
+        ownsItemsHidden: Object.hasOwn(comp.creator, 'itemsHidden'),
       }
       sections[comp.id] = comp.creator.sectionViews.map(section => ({
         id: section.id,
@@ -621,11 +730,12 @@ export default class Document extends Emitter {
 
   applyPartVisibilities(visibilities) {
     if(!visibilities) return
-    Object.entries(visibilities).forEach(([compId, { compHidden, itemsHidden }]) => {
+    Object.entries(visibilities).forEach(([compId, { compHidden, itemsHidden, ownsItemsHidden }]) => {
       const comp = this.getComponent(compId)
       if(!comp) return
       comp.creator.hidden = compHidden
-      comp.creator.itemsHidden = JSON.parse(JSON.stringify(itemsHidden))
+      if(ownsItemsHidden === false) delete comp.creator.itemsHidden
+      else comp.creator.itemsHidden = JSON.parse(JSON.stringify(itemsHidden))
     })
   }
 
@@ -820,6 +930,7 @@ export default class Document extends Emitter {
     this.materials = materials
     this.activeComponent = activeComponent || this.top()
     this.hasChanges = false
+    this.resetHistory()
   }
 
   // Returns { dump, materials }, or an empty object when the content could not be read
@@ -875,6 +986,7 @@ export default class Document extends Emitter {
       const homeView = this.views.find(view => view.system && view.title == 'Home') ||
         this.views.find(view => view.position && view.target)
       if(homeView && resetCamera) this.currentCameraView = cloneCameraView(homeView)
+      this.resetHistory()
     })
   }
 
@@ -907,6 +1019,37 @@ export default class Document extends Emitter {
 }
 
 const bigIntMax = (...args) => args.reduce((m, e) => e > m ? e : m)
+
+function historyDefinitions(timeline) {
+  return new Map([
+    ['id-0', timeline.baseCompDef],
+    ...timeline.features.filter(feature => feature.definition).map(feature => [feature.id, feature.definition]),
+  ])
+}
+
+// History states restore visibility separately, so it never counts as a change
+function historyJSON(dump) {
+  return JSON.stringify(dump, function(key, value) {
+    return this.$class == 'ComponentDefinition' && (key == 'hidden' || key == 'itemsHidden') ? undefined : value
+  })
+}
+
+// A feature keeps its topology names when restoring, so it must already have
+// every name the restored state refers to. Its results carry no others.
+function hasTopologyNames(names, required) {
+  if(names === required || !required) return true
+  const ids = names => Object.values(JSON.parse(names || '{}'))
+    .flatMap(entries => Array.isArray(entries) ? entries.map(entry => entry.id || entry.identity) : [])
+  const known = new Set(ids(names))
+  return ids(required).every(id => known.has(id))
+}
+
+function sameHistoryState(left, right) {
+  return left.marker == right.marker && left.baseCompDef == right.baseCompDef &&
+    left.materialLinks == right.materialLinks &&
+    left.features.length == right.features.length &&
+    left.features.every((entry, i) => entry.data == right.features[i].data)
+}
 
 function cloneCameraView(view) {
   if(!view?.position || !view?.target) return null

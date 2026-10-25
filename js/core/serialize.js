@@ -28,7 +28,8 @@ export default class Serialize {
 
     } else {
       // Generic Objects & unregistered custom classes
-      dump = obj
+      // Copy, so live objects keep their values instead of dumps
+      dump = { ...obj }
       if(obj.constructor !== Object) console.warn("Losing type information about class " + obj.constructor.name)
     }
 

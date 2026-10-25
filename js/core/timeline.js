@@ -79,6 +79,15 @@ export class Timeline {
     // console.log('removeFeature', this.last_change_index, this.features)
   }
 
+  // Replace all features from index on. Like edits, their outdated results
+  // stay visible until evaluation replaces them.
+  replaceFeatures(index, features) {
+    this.features = [...this.features.slice(0, index), ...features]
+    this.last_change_index = Math.min(this.last_change_index, index)
+    this.last_eval_index = Math.min(this.last_eval_index, index)
+    this.change_version++
+  }
+
   evaluate() {
     const last_change = this.last_change_index
     console.log('evaluate', last_change, this.marker)

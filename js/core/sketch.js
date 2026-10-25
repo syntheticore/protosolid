@@ -991,14 +991,12 @@ export class Sketch {
       } else if(c instanceof Dimension) {
         if(c.isCircleOffset()) {
           const [left, right] = c.items.map(item => idMap[item.curve().id].slice(-1)[0])
-          const leftCenter = idMap[c.items[0].curve().id][0]
-          const rightCenter = idMap[c.items[1].curve().id][0]
           const centersCoincident = this.coincidentPointsConnected(
             c.items[0].curve(), 0, c.items[1].curve(), 0
           )
           return [
             // Coincident centers provide the implicit concentric constraint.
-            ...(centersCoincident ? [] : [{ id: `${id++}`, type: 'p2p_coincident', p1_id: leftCenter.id, p2_id: rightCenter.id, temporary: c.temporary }]),
+            ...(centersCoincident ? [] : [{ id: `${id++}`, type: 'p2p_coincident', p1_id: left.c_id, p2_id: right.c_id, temporary: c.temporary }]),
             { id: `${id++}`, type: 'difference', param1: { o_id: right.id, prop: 'radius' }, param2: { o_id: left.id, prop: 'radius' }, difference: c.radiusDifferenceSign * c.distance, temporary: c.temporary },
           ]
 
@@ -1501,7 +1499,7 @@ export class Dimension extends Constraint {
 
   isCircleOffset() {
     return this.items.length == 2 && this.items.every(item =>
-      item.index === undefined && item.curve() instanceof Circle
+      item.index === undefined && (item.curve() instanceof Circle || item.curve() instanceof Arc)
     )
   }
 

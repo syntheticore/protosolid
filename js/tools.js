@@ -2800,8 +2800,9 @@ export class DimensionTool extends HighlightTool {
     if(first instanceof ElemRef) return isPoint || item instanceof Circle
     if(first instanceof Line) return item instanceof Line
     if(first instanceof Circle) {
-      return item instanceof Circle || (isPoint && item.curve() != first)
+      return item instanceof Circle || item instanceof Arc || (isPoint && item.curve() != first)
     }
+    if(first instanceof Arc) return item instanceof Circle || item instanceof Arc
     return isPoint || item instanceof Line || item instanceof Circle || item instanceof Arc
   }
 
@@ -2831,10 +2832,10 @@ export class DimensionTool extends HighlightTool {
         this.placeDimension(vec)
       }
 
-    } else if(this.items.length == 1 && this.items[0] instanceof Circle) {
+    } else if(this.items.length == 1 && (this.items[0] instanceof Circle || this.items[0] instanceof Arc)) {
+      // A second circle or arc dimensions the radial offset between them
       const curve = await this.getObject(coords)
-      if(curve && curve != this.items[0] &&
-        (curve instanceof Circle || (curve instanceof ElemRef && curve.curve() != this.items[0]))) {
+      if(curve && curve != this.items[0]) {
         this.items.push(curve)
         this.updatePreview(vec)
       } else {
@@ -2849,7 +2850,7 @@ export class DimensionTool extends HighlightTool {
   async mouseMove(vec, coords) {
     if(!this.canPlaceDimension()) return super.mouseMove(vec, coords)
     if(this.items.length == 1 &&
-      (this.items[0] instanceof Line || this.items[0] instanceof Circle)) {
+      (this.items[0] instanceof Line || this.items[0] instanceof Circle || this.items[0] instanceof Arc)) {
       await super.mouseMove(vec, coords)
     }
     this.updatePreview(vec)

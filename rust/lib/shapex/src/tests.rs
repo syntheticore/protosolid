@@ -7795,6 +7795,38 @@ fn shell_filleted_spline_prism_through_flat_end() {
     }
 }
 
+#[test]
+fn fillet_spline_tube_inner_cap_edges() {
+    let body = spline_prism();
+    let ends = body
+        .faces()
+        .filter(|face| match face.surface() {
+            Surface3::Plane(plane) => plane.normal().z.abs() < 0.5,
+            _ => false,
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let tube = body.shell(&ends, -2.5).unwrap();
+    let inner = spline_prism_cap_curves(&tube)
+        .into_iter()
+        .filter(|edge| {
+            let z = edge.endpoints().unwrap()[0].z;
+            z > 1.0 && z < 21.5
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(inner.len(), 4);
+    let volume = tube.volume();
+    for edges in inner.iter().map(|edge| vec![edge.clone()]).chain([inner.clone()]) {
+        let result = tube.check_edge_blends(&edges, 1.0).unwrap();
+        assert_eq!(result.solids().len(), 1);
+        assert_eq!(result.faces().count(), tube.faces().count() + edges.len());
+        assert!(result.volume() > volume && result.volume() < volume * 1.1);
+        result
+            .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+            .unwrap();
+    }
+}
+
 // Two spline sides joined by lines, meeting them at obtuse and acute corners.
 fn spline_prism() -> super::Compound {
     let tolerance = ModelTolerance::default();

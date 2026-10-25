@@ -1362,6 +1362,14 @@ pub(super) fn extended_support(
                 revolved.frame(), revolved.profile().extended(range)?, range, tolerance,
             ).map(Into::into)
         }
+        // An offset shares its base's chart, so continue that base instead.
+        Surface3::Offset(offset) if offset.v_slope() == 0.0 => {
+            let base = extended_support(offset.base(), bounds, distance, tolerance)?;
+            if &base == offset.base() {
+                return Ok(surface.clone());
+            }
+            super::OffsetSurface3::new(base, offset.distance(), tolerance).map(Surface3::Offset)
+        }
         _ => Ok(surface.clone()),
     }
 }

@@ -20,7 +20,7 @@
           spellcheck="false"
           @input="drafts[field.key] = $event.target.value"
           @keydown="keydown($event, index)"
-          @keyup="$event.key.length == 1 && $event.stopPropagation()"
+          @keyup="$event.key.length == 1 && !isShortcut($event) && $event.stopPropagation()"
           @focus="focused = index"
           @blur="blur(index)"
         )
@@ -187,6 +187,7 @@
 
       keydown(e, index) {
         if(e.key == 'Escape' || e.altKey || e.ctrlKey || e.metaKey) return
+        if(this.isShortcut(e)) return e.preventDefault()
         e.stopPropagation()
         const field = this.fields[index]
         if(e.key == 'Enter') {
@@ -203,6 +204,12 @@
           const count = this.fields.length
           this.$nextTick(() => this.focus((index + (e.shiftKey ? count - 1 : 1)) % count))
         }
+      },
+
+      // Letters can only follow a value (units), so a leading letter
+      // is passed on as a tool shortcut instead of being typed.
+      isShortcut(e) {
+        return /^\p{L}$/u.test(e.key) && e.target.selectionStart == 0
       },
 
       blur(index) {

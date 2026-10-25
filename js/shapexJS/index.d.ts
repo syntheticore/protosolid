@@ -418,6 +418,7 @@ export interface Compound extends NativeValue {
   moveFaces(faces: Iterable<Face>, transform: RigidTransform3): Compound
   replaceFace(target: Face, replacement: Face): Compound
   transformed(transform: RigidTransform3): Compound
+  mirrored(plane: Plane3): Compound
   resolve<T extends Face | Edge | Vertex>(entity: T): Resolution<T>
   isSemanticEdge(edge: Edge): boolean
   topologyHistory(): {

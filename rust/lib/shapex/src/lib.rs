@@ -101,7 +101,7 @@ pub use topology::{
     LoopId, LoopKind, Shell, ShellId, ShellKind, Topology, Vertex, VertexId,
 };
 pub use step::{StepAssembly, StepLengthUnit, StepOccurrence, StepProduct};
-pub use transform::RigidTransform3;
+pub use transform::{Reflection3, RigidTransform3};
 pub use validation::ValidationReport;
 pub use wire::{TrimmedCurve2, Wire2};
 pub use planar::{CurveProjection2, CurveIntersection2, CurveContact, PointClassification, Polyline2, OffsetCurve2};

@@ -75,7 +75,7 @@ impl Axis3 {
     }
 }
 
-/// A right-handed orthonormal coordinate frame.
+/// An orthonormal coordinate frame, right-handed unless reflected.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Frame3 {
     origin: Point3,
@@ -143,6 +143,12 @@ impl Frame3 {
             origin: self.origin,
             direction: self.z,
         }
+    }
+
+    /// The left-handed frame produced by reflecting a right-handed one.
+    pub(crate) fn with_reversed_z(mut self) -> Self {
+        self.z = -self.z;
+        self
     }
 }
 

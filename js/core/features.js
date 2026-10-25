@@ -488,12 +488,7 @@ export class PatternFeature extends SolidFeature {
   acceptsInput() { return true }
 
   updateFeature(tree, references) {
-    const timeline = this.document.pendingTimeline || this.document.timeline
-    const ownIndex = timeline.features.indexOf(this)
-    const hasFutureInput = this.inputs().some(input => input.featureId &&
-      timeline.features.findIndex(feature => feature.id == input.featureId) >= ownIndex
-    )
-    if(hasFutureInput) {
+    if(hasFutureInput(this)) {
       this.error = { type: 'error', msg: 'Pattern inputs must precede the pattern feature' }
       return
     }
@@ -623,6 +618,73 @@ export class PatternFeature extends SolidFeature {
 }
 
 Serialize.register(PatternFeature, 'PatternFeature')
+
+
+// Whether any input feature of a pattern or mirror comes after it in the timeline.
+function hasFutureInput(feature) {
+  const timeline = feature.document.pendingTimeline || feature.document.timeline
+  const ownIndex = timeline.features.indexOf(feature)
+  return feature.inputs().some(input => input.featureId &&
+    timeline.features.findIndex(other => other.id == input.featureId) >= ownIndex
+  )
+}
+
+
+export class MirrorFeature extends SolidFeature {
+  static icon = 'mirror'
+
+  constructor(doc) {
+    super(doc, true, 'Mirror', {
+      inputs: {
+        title: 'Solids',
+        type: 'patternInput',
+        multi: true,
+      },
+      plane: {
+        title: 'Plane',
+        type: 'plane',
+      },
+    })
+
+    this.plane = null
+
+    const selected = doc.selection.items
+      .filter(item => this.acceptsInput(item))
+      .map(item => PatternInputReference.fromItem(item))
+      .filter(Boolean)
+    this.inputs = selected.length ? () => selected : null
+  }
+
+  // Component placements are rigid, so mirrored instances cannot be expressed
+  acceptsInput(item) { return item?.typename?.() != 'Component' }
+
+  updateFeature(tree, references) {
+    if(hasFutureInput(this)) {
+      this.error = { type: 'error', msg: 'Mirror inputs must precede the mirror feature' }
+      return
+    }
+
+    const comp = tree.findChild(this.componentId)
+    let plane = references.plane
+    const planeSourceId = referenceComponentId(this.plane())
+    const planeSource = planeSourceId && tree.findChild(planeSourceId)
+    const target = tree.findChild(this.componentOccurrenceId) || comp
+    if(planeSource && planeSource != target) {
+      plane = relativeComponentTransform(planeSource, target).multiply(plane)
+    }
+
+    try {
+      const tool = references.inputs
+        .map(input => input.toCompound ? input.toCompound() : input)
+        .map(source => source.mirror(plane).namespaceTopology(`mirror/${source.componentId}`))
+        .reduce((combined, copy) => combined.boolean(copy, 'join'))
+      comp.compound = comp.compound.boolean(tool, this.operation)
+      this.previewBody = tool
+    } catch(err) { this.error = featureError(err, 'Mirror could not be created') }
+  }
+}
+
+Serialize.register(MirrorFeature, 'MirrorFeature')
 
 
 export class PoseFeature extends Feature {

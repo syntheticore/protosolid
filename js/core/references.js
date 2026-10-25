@@ -166,14 +166,14 @@ export class PatternInputReference extends Reference {
 
     const timeline = this.document.pendingTimeline || this.document.timeline
     const feature = timeline.features.find(feature => feature.id == this.featureId)
-    if(!feature) return { type: 'error', msg: 'Pattern input feature was lost' }
+    if(!feature) return { type: 'error', msg: 'Input feature was lost' }
 
     // Additive features expose their tool body. For modifying features, use
     // the affected component's current result so every timeline feature is a
     // valid pattern input.
     this.item = feature.previewBody || tree.findChild(feature.componentId)?.compound
     if(!this.item || !this.item.geom) {
-      return { type: 'error', msg: 'Pattern input feature has no solid result' }
+      return { type: 'error', msg: 'Input feature has no solid result' }
     }
   }
 

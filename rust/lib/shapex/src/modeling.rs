@@ -11,7 +11,8 @@ use super::physical::PhysicalCertificate;
 use super::{
     BodyId, BooleanKind, ChangeKind, DerivationRole, EdgeId, EntityId, FaceId, Kernel, KernelError,
     KernelResult, MassProperties, ModelTolerance, OperationHistory, Origin, PersistentId, Plane3,
-    Profile, RigidTransform3, Tessellate, TessellationOptions, Topology, TriangleMesh, invalid,
+    Profile, Reflection3, RigidTransform3, Tessellate, TessellationOptions, Topology, TriangleMesh,
+    invalid,
 };
 use crate::{geometry_error, topology_error, unsupported};
 
@@ -796,6 +797,19 @@ impl Compound {
         if transform == RigidTransform3::identity() {
             return self.unchanged();
         }
+        self.mapped(|kernel, body| kernel.transform_body(body, transform))
+    }
+
+    /// Mirror every solid across a plane while retaining transitive entity lineage.
+    pub fn mirrored(&self, plane: Plane3) -> KernelResult<Self> {
+        let reflection = Reflection3::new(plane);
+        self.mapped(|kernel, body| kernel.reflect_body(body, reflection))
+    }
+
+    fn mapped(
+        &self,
+        map: impl Fn(&mut Kernel, BodyId) -> KernelResult<OperationHistory>,
+    ) -> KernelResult<Self> {
         let mut kernel = Kernel::new(self.state.tolerance())?;
         let mut bodies = Vec::with_capacity(self.solids.len());
         for solid in &self.solids {
@@ -807,7 +821,7 @@ impl Compound {
         }
         let mut history = OperationHistory::default();
         for body in &bodies {
-            kernel.transform_body(*body, transform)?;
+            map(&mut kernel, *body)?;
             history.absorb(kernel.topology.reidentify_body(*body, super::identity::fresh_uuid())?);
         }
         let certificates = certify_bodies(&kernel, &bodies)?;

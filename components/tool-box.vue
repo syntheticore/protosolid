@@ -261,6 +261,7 @@
     ReplaceFeature,
     LoftFeature,
     PatternFeature,
+    MirrorFeature,
     JointFeature,
     MotionLinkFeature,
     GroupFeature,
@@ -438,7 +439,7 @@
               { title: 'Coil', icon: 'coil' },
               { title: 'Web', icon: 'rib' },
               { title: 'Pattern', feature: PatternFeature },
-              { title: 'Mirror', icon: 'mirror' },
+              { title: 'Mirror', feature: MirrorFeature },
             ],
           },
           {

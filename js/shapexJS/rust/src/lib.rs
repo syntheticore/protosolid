@@ -1442,6 +1442,13 @@ impl NativeCompound {
             .map(|inner| Self { inner })
             .map_err(js_error)
     }
+    pub fn mirrored(&self, plane_values: &[f64], tolerance_values: &[f64]) -> Result<Self, JsValue> {
+        let tolerance = tolerance(tolerance_values)?;
+        self.inner
+            .mirrored(plane(plane_values, tolerance)?)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
     #[wasm_bindgen(js_name = resolveFace)]
     pub fn resolve_face(&self, value: &NativeFace) -> NativeResolution {
         face_resolution(self.inner.resolve(&value.inner))

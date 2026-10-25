@@ -1174,6 +1174,12 @@ export function createShapex(bindings) {
         new Float64Array(transform._values()), new Float64Array(transform.tolerance.toArray()),
       )))
     }
+    mirrored(plane) {
+      instance(plane, Plane3, 'plane')
+      return nativeCall(() => new Compound(this._raw().mirrored(
+        new Float64Array(plane._values()), new Float64Array(plane.tolerance.toArray()),
+      )))
+    }
     resolve(entity) {
       let raw
       let wrap

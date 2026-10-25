@@ -53,7 +53,7 @@ outside the body. Moving the plane back restores the original identities.
 
 Independent copies retain provenance but reset continuity names in a new
 namespace, keyed by the source and logical pattern
-cell or imported component. A grid cell `(u, v)` retains its identity when the
+cell, mirror or imported component. A grid cell `(u, v)` retains its identity when the
 number of rows changes. Component occurrences scope references separately.
 Projected sketch curves use the persistent projection ID.
 

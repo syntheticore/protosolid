@@ -245,6 +245,8 @@ pub struct Torus3 {
     pub(super) x_major: Vec3,
     pub(super) y_major: Vec3,
     pub(super) minor_radius: f64,
+    // Unit axis, opposite to x × y in a mirrored torus
+    pub(super) normal: Vec3,
 }
 
 /// An exact surface of revolution whose meridian is retained as a 2D curve.
@@ -613,7 +615,15 @@ impl Torus3 {
             x_major,
             y_major,
             minor_radius,
+            normal: x_major.cross(y_major).normalize(),
         })
+    }
+
+    /// The same torus with its tube parameter running the other way around.
+    /// Reflections keep the parameterization of a torus with this axis.
+    pub(crate) fn with_reversed_normal(mut self) -> Self {
+        self.normal = -self.normal;
+        self
     }
 
     pub fn from_axis(
@@ -651,7 +661,7 @@ impl Torus3 {
         self.y_major
     }
     pub fn normal(self) -> Vec3 {
-        self.x_major.cross(self.y_major).normalize()
+        self.normal
     }
 
     pub(super) fn evaluate(self, u: f64, v: f64) -> KernelResult<SurfaceEvaluation> {

@@ -109,6 +109,64 @@ impl RigidTransform3 {
     }
 }
 
+/// A reflection across a plane.
+///
+/// Geometry keeps its parameterization under the reflection, which reverses
+/// every parametric normal. Mirrored bodies therefore reverse their faces and
+/// loops to keep their material on the inside.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Reflection3 {
+    origin: Point3,
+    normal: Vec3,
+}
+
+impl Reflection3 {
+    pub fn new(plane: Plane3) -> Self {
+        Self {
+            origin: plane.origin(),
+            normal: plane.normal(),
+        }
+    }
+    pub fn transform_point(self, point: Point3) -> Point3 {
+        point - self.normal * (2.0 * (point - self.origin).dot(self.normal))
+    }
+    pub fn transform_vector(self, vector: Vec3) -> Vec3 {
+        vector - self.normal * (2.0 * vector.dot(self.normal))
+    }
+}
+
+/// A Euclidean isometry that geometry can be mapped through.
+pub(crate) trait Isometry3: Copy {
+    fn transform_point(self, point: Point3) -> Point3;
+    fn transform_vector(self, vector: Vec3) -> Vec3;
+    /// Whether the map reverses handedness.
+    fn reflects(self) -> bool;
+}
+
+impl Isometry3 for RigidTransform3 {
+    fn transform_point(self, point: Point3) -> Point3 {
+        RigidTransform3::transform_point(self, point)
+    }
+    fn transform_vector(self, vector: Vec3) -> Vec3 {
+        RigidTransform3::transform_vector(self, vector)
+    }
+    fn reflects(self) -> bool {
+        false
+    }
+}
+
+impl Isometry3 for Reflection3 {
+    fn transform_point(self, point: Point3) -> Point3 {
+        Reflection3::transform_point(self, point)
+    }
+    fn transform_vector(self, vector: Vec3) -> Vec3 {
+        Reflection3::transform_vector(self, vector)
+    }
+    fn reflects(self) -> bool {
+        true
+    }
+}
+
 impl Kernel {
     /// Rigidly transform a body without changing its topology or persistent names.
     /// The transformed copy is physically re-certified before it becomes visible.
@@ -117,21 +175,38 @@ impl Kernel {
         body: super::BodyId,
         transform: RigidTransform3,
     ) -> KernelResult<OperationHistory> {
-        let mut history = OperationHistory::default();
-        let kind = if transform == RigidTransform3::identity() {
-            ChangeKind::Unchanged
-        } else {
-            ChangeKind::Modified
-        };
-        for name in self.topology.body_entity_names(body)? {
-            history.changed(name, kind, [name]);
-        }
-        if kind == ChangeKind::Unchanged {
+        if transform == RigidTransform3::identity() {
+            let mut history = OperationHistory::default();
+            for name in self.topology.body_entity_names(body)? {
+                history.changed(name, ChangeKind::Unchanged, [name]);
+            }
             return Ok(history);
+        }
+        self.map_body(body, transform)
+    }
+
+    /// Mirror a body across a plane, keeping its persistent names.
+    pub fn reflect_body(
+        &mut self,
+        body: super::BodyId,
+        reflection: Reflection3,
+    ) -> KernelResult<OperationHistory> {
+        self.map_body(body, reflection)
+    }
+
+    fn map_body(
+        &mut self,
+        body: super::BodyId,
+        transform: impl Isometry3,
+    ) -> KernelResult<OperationHistory> {
+        let mut history = OperationHistory::default();
+        for name in self.topology.body_entity_names(body)? {
+            history.changed(name, ChangeKind::Modified, [name]);
         }
         let mut working = self.topology.clone();
         let shell_ids = working.body(body)?.shells().to_vec();
         let mut faces = BTreeSet::<FaceId>::new();
+        let mut coedges = Vec::new();
         let mut edges = BTreeSet::new();
         let mut vertices = BTreeSet::new();
         for shell_id in shell_ids {
@@ -144,6 +219,7 @@ impl Kernel {
                     let mut current = first;
                     loop {
                         let coedge = working.coedge(current)?;
+                        coedges.push(current);
                         edges.insert(coedge.edge());
                         vertices.extend(working.edge(coedge.edge())?.vertices());
                         current = coedge.next();
@@ -165,6 +241,18 @@ impl Kernel {
         for face_id in faces {
             let face = working.faces.get_mut(face_id)?;
             face.surface = transform_surface(face.surface.clone(), transform, self.tolerance)?;
+            if transform.reflects() {
+                face.orientation = face.orientation.reversed();
+            }
+        }
+        if transform.reflects() {
+            // Unchanged p-curves now wind against the reversed faces
+            for coedge_id in coedges {
+                let coedge = working.coedges.get_mut(coedge_id)?;
+                std::mem::swap(&mut coedge.next, &mut coedge.previous);
+                coedge.forward = !coedge.forward;
+                coedge.range = coedge.range.reversed();
+            }
         }
         super::validation::validate(&working, self.tolerance).into_result()?;
         self.topology = working;
@@ -175,7 +263,7 @@ impl Kernel {
 
 pub(crate) fn transform_curve(
     curve: Curve3,
-    transform: RigidTransform3,
+    transform: impl Isometry3,
     tolerance: ModelTolerance,
 ) -> KernelResult<Curve3> {
     Ok(match curve {
@@ -225,9 +313,11 @@ pub(crate) fn transform_curve(
 
 pub(crate) fn transform_surface(
     surface: Surface3,
-    transform: RigidTransform3,
+    transform: impl Isometry3,
     tolerance: ModelTolerance,
 ) -> KernelResult<Surface3> {
+    // Offsets follow the parent's parametric normal, which a reflection reverses
+    let offset_sign = if transform.reflects() { -1.0 } else { 1.0 };
     Ok(match surface {
         Surface3::Plane(plane) => Plane3::new(
             transform.transform_point(plane.origin()),
@@ -260,14 +350,17 @@ pub(crate) fn transform_surface(
             tolerance,
         )?
         .into(),
-        Surface3::Torus(torus) => Torus3::new(
-            transform.transform_point(torus.center()),
-            transform.transform_vector(torus.x_major()),
-            transform.transform_vector(torus.y_major()),
-            torus.minor_radius(),
-            tolerance,
-        )?
-        .into(),
+        Surface3::Torus(torus) => {
+            let mapped = Torus3::new(
+                transform.transform_point(torus.center()),
+                transform.transform_vector(torus.x_major()),
+                transform.transform_vector(torus.y_major()),
+                torus.minor_radius(),
+                tolerance,
+            )?;
+            let mirrored = transform.transform_vector(torus.normal()).dot(mapped.normal()) < 0.0;
+            if mirrored { mapped.with_reversed_normal() } else { mapped }.into()
+        }
         Surface3::Swept(surface) => {
             let plane = |p: super::Plane3| {
                 super::Plane3::new(
@@ -287,13 +380,15 @@ pub(crate) fn transform_surface(
         }
         Surface3::Revolved(surface) => {
             let frame = surface.frame();
+            let mapped = Frame3::new(
+                transform.transform_point(frame.origin()),
+                transform.transform_vector(frame.x()),
+                transform.transform_vector(frame.y()),
+                tolerance,
+            )?;
+            let mirrored = transform.transform_vector(frame.z()).dot(mapped.z()) < 0.0;
             super::RevolvedSurface3::new(
-                Frame3::new(
-                    transform.transform_point(frame.origin()),
-                    transform.transform_vector(frame.x()),
-                    transform.transform_vector(frame.y()),
-                    tolerance,
-                )?,
+                if mirrored { mapped.with_reversed_z() } else { mapped },
                 surface.profile().clone(),
                 surface.profile_range(),
                 tolerance,
@@ -318,11 +413,11 @@ pub(crate) fn transform_surface(
         .into(),
         Surface3::Offset(surface) if surface.v_slope() != 0.0 => OffsetSurface3::with_linear_distance(
             transform_surface(surface.base().clone(), transform, tolerance)?,
-            surface.distance(), surface.v_slope(), tolerance,
+            surface.distance() * offset_sign, surface.v_slope() * offset_sign, tolerance,
         )?.into(),
         Surface3::Offset(surface) => OffsetSurface3::new(
             transform_surface(surface.base().clone(), transform, tolerance)?,
-            surface.distance(),
+            surface.distance() * offset_sign,
             tolerance,
         )?
         .into(),

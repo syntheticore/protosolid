@@ -579,6 +579,9 @@ export class Compound extends Volumetric {
   transform(plane) {
     return new Compound(this.componentId, this.geom().transformed(transformFromMatrix(plane))).trackTopology([this], "transform")
   }
+  mirror(plane) {
+    return new Compound(this.componentId, this.geom().mirrored(planeFromMatrix(plane))).trackTopology([this], "mirror")
+  }
   merge(others) {
     const geometry = this.geom().combined(others.map(other => other.geom()))
     return new Compound(this.componentId, geometry).trackTopology([this, ...others], "combine")

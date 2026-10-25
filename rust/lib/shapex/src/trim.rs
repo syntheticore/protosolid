@@ -3,8 +3,9 @@ use std::borrow::Cow;
 use cgmath::prelude::*;
 use crate::{Point2, Point3, Vec2};
 use super::polygon::point_segment_distance;
-use super::{box_center, nearest_uv, whole_periods, Curve2, Curve3, DiagnosticKind, IntersectionSet, KernelError, KernelResult,
+use super::{box_center, nearest_uv, whole_periods, Curve2, Curve3, IntersectionSet, KernelResult,
     LoopKind, ModelTolerance, ParameterRange, Surface3};
+use crate::geometry_error;
 
 /// A directed trim with caller-owned metadata. Geometry utilities never inspect
 /// that metadata; Boolean construction can retain ancestry without imposing it
@@ -602,10 +603,7 @@ fn partition_to_faces_sampled<P, Q>(
             return Ok(projection.range());
         }
         let Curve2::Line(line) = curve else {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "an unbounded surface-intersection p-curve must be linear",
-            ));
+            return Err(geometry_error("an unbounded surface-intersection p-curve must be linear"));
         };
         let denominator = line.direction().magnitude2();
         let mut parameters = Vec::new();

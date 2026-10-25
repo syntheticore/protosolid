@@ -6,7 +6,7 @@ use super::{
     Axis3, BodyId, BooleanKind, Circle3, Curve2, Curve3, FilletOptions, IntersectionSet, Kernel,
     Line3, MassProperties, ModelTolerance, NurbsCurve2, NurbsCurve3, NurbsSurface3, ParameterRange,
     Plane3, PolyhedralMesh, Profile, Resolution, RevolvedSurface3, RigidTransform3, Sphere3,
-    SplitKeep, Surface3, TessellationOptions, TrimmedCurve2, Wire2,
+    ShellJoin, SplitKeep, Surface3, TessellationOptions, TrimmedCurve2, Wire2,
 };
 
 // Run both cross sections on the same source revision and selection. Keeping
@@ -3022,7 +3022,7 @@ fn analytical_shell_offsets_a_closed_polyhedral_skin() {
     ));
 
     let outward = cube
-        .shell_with_join(&[], 1.0, "sharp")
+        .shell_with_join(&[], 1.0, ShellJoin::Sharp)
         .expect("outward sharp shell");
     assert_eq!(outward.solids().len(), 1);
     assert!((outward.volume() - 728.0).abs() < 1.0e-7);
@@ -3071,14 +3071,13 @@ fn rounded_shell_joins_open_and_disconnected_boxes() {
     open.tessellate(TessellationOptions::default()).unwrap();
     let other = owned_cuboid(Point3::new(30.0, 0.0, 0.0), Point3::new(40.0, 10.0, 10.0));
     let combined = cube.combined(&[other]).unwrap();
-    for mode in ["sharp", "rounded"] {
+    for mode in [ShellJoin::Sharp, ShellJoin::Rounded] {
         let result = combined
             .shell_with_join(&[opening.clone()], 1.0, mode)
             .unwrap();
         assert_eq!(result.solids().len(), 2);
         result.tessellate(TessellationOptions::default()).unwrap();
     }
-    assert!(cube.shell_with_join(&[], 1.0, "invalid").is_err());
 }
 
 #[test]
@@ -3135,14 +3134,14 @@ fn rounded_shell_joins_circle_and_plane_in_both_directions() {
         matches!(face.surface(), Surface3::Plane(p) if p.normal().z.abs() > 0.9 && p.origin().z.abs() < 1.0e-6)
     ).unwrap().clone();
     let sharp = source
-        .shell_with_join(&[opening.clone()], -9.0, "sharp")
+        .shell_with_join(&[opening.clone()], -9.0, ShellJoin::Sharp)
         .unwrap();
     for thickness in [1.0, 3.0, 9.0] {
         let outward = source
             .shell(&[opening.clone()], thickness)
             .expect("outward rounded fixture");
         let sharp_outward = source
-            .shell_with_join(&[opening.clone()], thickness, "sharp")
+            .shell_with_join(&[opening.clone()], thickness, ShellJoin::Sharp)
             .unwrap();
         assert_eq!(outward.solids().len(), 1);
         assert!(outward.volume() > 0.0 && outward.volume() < sharp_outward.volume());
@@ -4524,7 +4523,7 @@ fn analytical_shell_offsets_a_closed_cylinder() {
     let opened = cylinder.shell(&[top], -1.0).expect("open cylinder shell");
     assert!((opened.volume() - 106.0 * std::f64::consts::PI).abs() < 1.0e-7);
     let outward = cylinder
-        .shell_with_join(&[], 1.0, "sharp")
+        .shell_with_join(&[], 1.0, ShellJoin::Sharp)
         .expect("outward sharp cylinder shell");
     assert!((outward.volume() - 182.0 * std::f64::consts::PI).abs() < 1.0e-7);
 }
@@ -6848,7 +6847,7 @@ fn shell_rounded_chamfered_torus() {
     for thickness in [1.0, 0.5, 2.0] {
         for openings in [vec![], vec![planar[0].clone()], vec![planar[1].clone()]] {
             let result = body
-                .shell_with_join(&openings, -thickness, "sharp")
+                .shell_with_join(&openings, -thickness, ShellJoin::Sharp)
                 .unwrap_or_else(|error| {
                     panic!("shell {thickness}, {} openings: {error:?}", openings.len())
                 });
@@ -7023,7 +7022,7 @@ fn filleted_chamfered_slot_document_51() -> super::Compound {
 fn benchmark_shell_document_51() {
     let body = filleted_chamfered_slot_document_51();
     let volume = body.volume();
-    for join in ["sharp", "rounded"] {
+    for join in [ShellJoin::Sharp, ShellJoin::Rounded] {
         for thickness in [2.0, 10.0, 12.0] {
             let mut samples = Vec::new();
             for iteration in 0..4 {
@@ -7035,7 +7034,7 @@ fn benchmark_shell_document_51() {
                 if iteration > 0 { samples.push(elapsed); }
             }
             samples.sort_by(f64::total_cmp);
-            println!("{join} {thickness} mm: median {:.6}s, samples {samples:?}", samples[1]);
+            println!("{join:?} {thickness} mm: median {:.6}s, samples {samples:?}", samples[1]);
         }
     }
 }
@@ -7046,20 +7045,20 @@ fn shell_filleted_chamfered_slot_document_51() {
     let body = filleted_chamfered_slot_document_51();
     let bottom = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.origin().y.abs() < tol.linear)).unwrap().clone();
     let mut failures = Vec::new();
-    for join in ["sharp", "rounded"] {
+    for join in [ShellJoin::Sharp, ShellJoin::Rounded] {
         for thickness in (1..=12).map(f64::from) {
             for openings in [vec![], vec![bottom.clone()]] {
                 let shell = match body.shell_with_join(&openings, -thickness, join) {
                     Ok(shell) => shell,
                     Err(error) => {
-                        failures.push(format!("{join} {thickness} mm, {} openings: {error}", openings.len()));
+                        failures.push(format!("{join:?} {thickness} mm, {} openings: {error}", openings.len()));
                         continue;
                     }
                 };
                 assert_eq!(shell.solids().len(), 1);
                 assert!(shell.volume() > 0.0 && shell.volume() < body.volume());
                 shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
-                    .unwrap_or_else(|error| panic!("{join} {thickness} mm, {} openings: {error}", openings.len()));
+                    .unwrap_or_else(|error| panic!("{join:?} {thickness} mm, {} openings: {error}", openings.len()));
             }
         }
     }

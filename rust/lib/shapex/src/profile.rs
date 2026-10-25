@@ -6,6 +6,7 @@ use super::{
     invalid, BooleanKind, Curve2, DiagnosticKind, KernelError, KernelResult, ModelTolerance,
     ParameterRange, TrimmedCurve2, Wire2,
 };
+use crate::geometry_error;
 
 /// A validated planar region bounded by exact 2D curve wires.
 ///
@@ -174,10 +175,7 @@ impl Profile {
                 .evaluate(fragment.range().start + fragment.range().span() * 0.5)?;
             let tangent = evaluation.first_derivative * fragment.range().span().signum();
             if tangent.magnitude() <= self.tolerance.linear {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "analytical planar Boolean encountered a singular boundary fragment",
-                ));
+                return Err(geometry_error("analytical planar Boolean encountered a singular boundary fragment"));
             }
             let left = crate::Vec2::new(-tangent.y, tangent.x).normalize();
             let scale = evaluation.point.to_vec().magnitude().max(1.0);
@@ -369,10 +367,7 @@ pub(crate) fn profiles_from_fragments(
                     .start()
                     .is_ok_and(|point| point.distance(end) <= tolerance.linear)
             }) else {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "analytical planar Boolean fragments do not form closed wires",
-                ));
+                return Err(geometry_error("analytical planar Boolean fragments do not form closed wires"));
             };
             let next = fragments.swap_remove(next_index);
             end = next.end()?;
@@ -403,10 +398,7 @@ pub(crate) fn profiles_from_fragments(
             }
         }
         let Some(owner) = owner else {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "analytical planar Boolean produced a hole without an outer boundary",
-            ));
+            return Err(geometry_error("analytical planar Boolean produced a hole without an outer boundary"));
         };
         outers[owner].1.push(hole);
     }

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use cgmath::prelude::*;
 
+use crate::geometry::basis_values;
 use crate::{
     invalid, Curve3, KernelResult, NurbsCurve3, NurbsSurface3, ParameterRange, Point3, Surface3,
     Vec3,
@@ -40,10 +41,8 @@ impl Interpolation {
 
         let mut factors = vec![vec![0.0; count]; count];
         for (row, parameter) in parameters.iter().enumerate() {
-            let span = find_span(&knots, degree, count, *parameter);
-            for (offset, value) in basis(&knots, degree, span, *parameter).into_iter().enumerate() {
-                factors[row][span - degree + offset] = value;
-            }
+            let (first, values) = basis_values(degree, &knots, count, *parameter);
+            factors[row][first..first + values.len()].copy_from_slice(&values);
         }
         let mut pivots = (0..count).collect::<Vec<_>>();
         for column in 0..count {
@@ -82,41 +81,6 @@ impl Interpolation {
         }
         result
     }
-}
-
-fn find_span(knots: &[f64], degree: usize, count: usize, parameter: f64) -> usize {
-    if parameter >= knots[count] {
-        return count - 1;
-    }
-    let (mut low, mut high) = (degree, count);
-    while high - low > 1 {
-        let middle = (low + high) / 2;
-        if parameter < knots[middle] {
-            high = middle;
-        } else {
-            low = middle;
-        }
-    }
-    low
-}
-
-fn basis(knots: &[f64], degree: usize, span: usize, parameter: f64) -> Vec<f64> {
-    let mut values = vec![0.0; degree + 1];
-    let mut left = vec![0.0; degree + 1];
-    let mut right = vec![0.0; degree + 1];
-    values[0] = 1.0;
-    for j in 1..=degree {
-        left[j] = parameter - knots[span + 1 - j];
-        right[j] = knots[span + j] - parameter;
-        let mut saved = 0.0;
-        for r in 0..j {
-            let temp = values[r] / (right[r + 1] + left[j - r]);
-            values[r] = saved + right[r + 1] * temp;
-            saved = left[j - r] * temp;
-        }
-        values[j] = saved;
-    }
-    values
 }
 
 fn samples(range: ParameterRange, count: usize) -> Vec<f64> {

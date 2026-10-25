@@ -5,11 +5,12 @@ use cgmath::prelude::*;
 use crate::{Matrix3, Point3, Quaternion, Vec3};
 
 use super::{
-    ChangeKind, Cone3, Curve3, Cylinder3, DiagnosticKind, FaceId, Frame3, Kernel, KernelError,
+    ChangeKind, Cone3, Curve3, Cylinder3, FaceId, Frame3, Kernel,
     KernelResult, Line3, ModelTolerance, NurbsCurve3, NurbsSurface3, OffsetSurface3,
     OperationHistory, Plane3, RollingBallSurface3, Sphere3, Surface3, SurfaceCurve3,
     SurfaceIntersectionCurve, Torus3,
 };
+use crate::invalid;
 
 /// A validated orientation-preserving Euclidean transform.
 ///
@@ -41,10 +42,7 @@ impl RigidTransform3 {
             && columns[0].dot(columns[2]).abs() <= tolerance.angular
             && columns[1].dot(columns[2]).abs() <= tolerance.angular;
         if !finite || !orthonormal || (rotation.determinant() - 1.0).abs() > tolerance.angular {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "a rigid transform requires a finite, right-handed orthonormal rotation",
-            ));
+            return Err(invalid("a rigid transform requires a finite, right-handed orthonormal rotation"));
         }
         Ok(Self {
             rotation,
@@ -63,10 +61,7 @@ impl RigidTransform3 {
             || !rotation.v.z.is_finite()
             || rotation.magnitude2() == 0.0
         {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "transform quaternion must be finite and nonzero",
-            ));
+            return Err(invalid("transform quaternion must be finite and nonzero"));
         }
         Self::new(Matrix3::from(rotation.normalize()), translation, tolerance)
     }

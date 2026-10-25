@@ -2,6 +2,7 @@
 //! contact and end boundaries, and certification against the parent trims.
 
 use super::*;
+use crate::{geometry_error, topology_error};
 
 impl Transaction<'_> {
     fn chamfer_surface(
@@ -376,10 +377,7 @@ impl Transaction<'_> {
                         if rail.evaluate(parameter)?.point.distance(point)
                             > tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0
                         {
-                            return Err(KernelError::new(
-                                DiagnosticKind::GeometryInvariant,
-                                "blend corner misses its incident contact rail",
-                            ));
+                            return Err(geometry_error("blend corner misses its incident contact rail"));
                         }
                         contact_parameters[endpoint_index][parent] = parameter;
                         contact_points[endpoint_index][parent] = point;
@@ -434,10 +432,7 @@ impl Transaction<'_> {
                 let allowed =
                     tolerance.linear_at_scale(junction.center.to_vec().magnitude().max(1.0)) * 8.0;
                 if achieved > allowed {
-                    return Err(KernelError::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "blend junction center does not lie on every incident offset intersection",
-                    ));
+                    return Err(geometry_error("blend junction center does not lie on every incident offset intersection"));
                 }
                 for parent_index in 0..2 {
                     contact_parameters[endpoint_index][parent_index] = parameter;
@@ -445,10 +440,7 @@ impl Transaction<'_> {
                         .contact_points
                         .get(&spine.faces[parent_index])
                         .ok_or_else(|| {
-                            KernelError::new(
-                                DiagnosticKind::TopologyInvariant,
-                                "blend junction lost an incident face contact",
-                            )
+                            topology_error("blend junction lost an incident face contact")
                         })?;
                 }
                 ends.push(BlendPatchEnd::Junction(vertex));
@@ -457,10 +449,7 @@ impl Transaction<'_> {
                     .get(&(spine.edge_id, endpoint_index))
                     .and_then(Clone::clone)
                     .ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "regular blend endpoint was not retained during network discovery",
-                        )
+                        topology_error("regular blend endpoint was not retained during network discovery")
                     })?;
                 contact_parameters[endpoint_index] = endpoint.contact_parameters;
                 contact_points[endpoint_index] = endpoint.contact_points;
@@ -572,7 +561,7 @@ impl Transaction<'_> {
             .collect::<KernelResult<Vec<_>>>()?
             .try_into()
             .map_err(|_| {
-                KernelError::new(DiagnosticKind::TopologyInvariant, "two contacts expected")
+                topology_error("two contacts expected")
             })?;
 
         let unit = ParameterRange::new(0.0, 1.0)?;
@@ -664,10 +653,7 @@ impl Transaction<'_> {
                                 .iter()
                                 .position(|face| *face == carrier_face)
                                 .ok_or_else(|| {
-                                    KernelError::new(
-                                        DiagnosticKind::TopologyInvariant,
-                                        "inner-rim patch lost its carrier face",
-                                    )
+                                    topology_error("inner-rim patch lost its carrier face")
                                 })?;
                             let top = contact_points[endpoint_index][carrier_index];
                             let angle = junction_surface.project(top, tolerance)?.parameters.0;
@@ -727,12 +713,12 @@ impl Transaction<'_> {
             .collect::<KernelResult<Vec<_>>>()?
             .try_into()
             .map_err(|_| {
-                KernelError::new(DiagnosticKind::TopologyInvariant, "two ends expected")
+                topology_error("two ends expected")
             })?;
         Ok(BlendPatch {
             spine,
             ends: ends.try_into().map_err(|_| {
-                KernelError::new(DiagnosticKind::TopologyInvariant, "two patch ends expected")
+                topology_error("two patch ends expected")
             })?,
             contact_parameters,
             contact_points,
@@ -838,10 +824,7 @@ impl Transaction<'_> {
                                         .iter()
                                         .any(|hit| closed || !at_contact_endpoint(hit.first_parameter)))
                             {
-                                return Err(KernelError::new(
-                                    DiagnosticKind::GeometryInvariant,
-                                    "blend contact boundary crosses an existing face boundary",
-                                ));
+                                return Err(geometry_error("blend contact boundary crosses an existing face boundary"));
                             }
                         }
                     }
@@ -859,16 +842,10 @@ impl Transaction<'_> {
                     }
                 }
                 if closed && inside_existing_hole && !crosses_locally_rewritten_boundary {
-                    return Err(KernelError::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "blend contact boundary enters an existing face hole",
-                    ));
+                    return Err(geometry_error("blend contact boundary enters an existing face hole"));
                 }
                 if closed && !outer_contains_middle && !crosses_locally_rewritten_boundary {
-                    return Err(KernelError::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "blend contact boundary leaves its incident face trim",
-                    ));
+                    return Err(geometry_error("blend contact boundary leaves its incident face trim"));
                 }
             }
         }

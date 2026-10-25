@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 use super::{DerivationRole, DiagnosticKind, KernelError, KernelResult};
+use crate::{invalid, topology_error};
 
 /// Stable identity of a topological entity across modeling operations.
 ///
@@ -52,10 +53,7 @@ impl NameSource {
     /// unaffected output categories during feature evolution.
     pub fn next_for(&mut self, role: &str) -> KernelResult<PersistentId> {
         if role.is_empty() {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "persistent naming roles may not be empty",
-            ));
+            return Err(invalid("persistent naming roles may not be empty"));
         }
         let qualified_role = if self.scope.is_empty() {
             role.to_owned()
@@ -91,10 +89,7 @@ impl NameSource {
     /// Allocate a name from a semantic key rather than a positional ordinal.
     pub fn named(&mut self, role: &str, key: &str) -> KernelResult<PersistentId> {
         if role.is_empty() || key.is_empty() {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "persistent naming roles and semantic keys may not be empty",
-            ));
+            return Err(invalid("persistent naming roles and semantic keys may not be empty"));
         }
         let encoded_scope = self
             .scope
@@ -116,10 +111,7 @@ impl NameSource {
     pub fn push_scope(&mut self, role: impl Into<String>) -> KernelResult<()> {
         let role = role.into();
         if role.is_empty() {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "persistent naming scope components must be nonempty",
-            ));
+            return Err(invalid("persistent naming scope components must be nonempty"));
         }
         self.scope.push(role);
         Ok(())
@@ -127,10 +119,7 @@ impl NameSource {
 
     pub fn pop_scope(&mut self) -> KernelResult<()> {
         self.scope.pop().map(|_| ()).ok_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "persistent naming scope stack is empty",
-            )
+            topology_error("persistent naming scope stack is empty")
         })
     }
 }

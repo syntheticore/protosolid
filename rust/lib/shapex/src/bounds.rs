@@ -6,6 +6,7 @@ use super::{
     Compound, Curve2, Curve3, DiagnosticKind, KernelError, KernelResult, ParameterRange, Surface3,
 };
 use crate::{Point3, Vec3};
+use crate::unsupported;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Bounds(pub Point3, pub Point3);
@@ -53,10 +54,7 @@ impl Bounds {
 }
 
 fn unavailable() -> KernelError {
-    KernelError::new(
-        DiagnosticKind::UnsupportedGeometry,
-        "cannot establish a finite geometric enclosure",
-    )
+    unsupported("cannot establish a finite geometric enclosure")
 }
 
 pub(crate) fn curve2(curve: &Curve2, range: ParameterRange) -> KernelResult<Bounds> {

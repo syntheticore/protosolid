@@ -8,10 +8,11 @@ use crate::{Point3, Vec3};
 use super::transaction::CommittedOperation;
 use super::physical::PhysicalCertificate;
 use super::{
-    BodyId, BooleanKind, ChangeKind, DerivationRole, DiagnosticKind, EdgeId, EntityId, FaceId, Kernel, KernelError,
+    BodyId, BooleanKind, ChangeKind, DerivationRole, EdgeId, EntityId, FaceId, Kernel, KernelError,
     KernelResult, MassProperties, ModelTolerance, OperationHistory, Origin, PersistentId, Plane3,
-    Profile, RigidTransform3, Tessellate, TessellationOptions, Topology, TriangleMesh,
+    Profile, RigidTransform3, Tessellate, TessellationOptions, Topology, TriangleMesh, invalid,
 };
+use crate::{geometry_error, topology_error, unsupported};
 
 #[derive(Debug, Clone, Default)]
 struct LineageEntry {
@@ -367,17 +368,28 @@ pub enum Resolution<T> {
     Unrelated,
 }
 
+/// How a shell's offset faces meet at its edges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellJoin {
+    /// Extend the offset supports until they intersect.
+    Sharp,
+    /// Join the offset supports with blends of the shell thickness.
+    Rounded,
+}
+
 mod sealed {
     pub trait Sealed {}
 }
 
 /// Entity types accepted by [`Compound::resolve`] and provenance queries.
 #[doc(hidden)]
-pub trait ResolvableEntity: sealed::Sealed + Clone {
+pub trait ResolvableEntity: sealed::Sealed + Clone + PartialEq {
     fn persistent_name(&self) -> PersistentId;
     fn revision(&self) -> uuid::Uuid;
     fn resolve_in(&self, compound: &Compound) -> Resolution<Self>;
     fn resolve_in_solid(&self, solid: &Solid) -> Resolution<Self>;
+    /// The solid's handles of this entity kind by persistent name.
+    fn index_in(solid: &Solid) -> BTreeMap<PersistentId, &Self>;
 }
 
 macro_rules! impl_resolvable {
@@ -417,6 +429,9 @@ macro_rules! impl_resolvable {
                             .cloned()
                     },
                 )
+            }
+            fn index_in(solid: &Solid) -> BTreeMap<PersistentId, &Self> {
+                solid.$iterator().map(|entity| (entity.name, entity)).collect()
             }
         }
     };
@@ -565,10 +580,7 @@ impl Solid {
             .into_iter()
             .next()
             .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "rigidly transforming a solid produced no solid",
-                )
+                geometry_error("rigidly transforming a solid produced no solid")
             })
     }
     pub fn tessellate(&self, options: TessellationOptions) -> KernelResult<TriangleMesh> {
@@ -1033,80 +1045,84 @@ impl Compound {
         self.boolean(other, BooleanKind::Intersection)
     }
 
-    /// Remove a feature and extend its surviving support surfaces to close it.
-    pub fn dissolve_faces(&self, faces: &[FaceHandle]) -> KernelResult<Self> {
-        let selected = faces.iter().map(FaceHandle::persistent_id).collect::<BTreeSet<_>>();
-        if faces.is_empty() || selected.len() != faces.len()
-            || faces.iter().any(|face| !self.faces().any(|candidate| candidate == face))
-        {
-            return Err(KernelError::new(DiagnosticKind::InvalidInput,
-                "dissolve needs distinct faces from this compound revision"));
+    /// Group `selection` by owning solid as that solid's own handles. Rejects a
+    /// selection that is empty (unless allowed), repeats an entity, or names
+    /// entities outside this compound revision with `message`.
+    fn partition_selection<E: ResolvableEntity>(
+        &self,
+        selection: &[E],
+        allow_empty: bool,
+        message: &str,
+    ) -> KernelResult<Vec<Vec<E>>> {
+        let mut index = BTreeMap::new();
+        for (position, solid) in self.solids.iter().enumerate() {
+            index.extend(E::index_in(solid).into_iter().map(|(name, own)| (name, (position, own))));
         }
-        let mut results = Vec::new();
-        for solid in &self.solids {
-            let local = faces.iter().filter(|face| solid.faces().any(|candidate| candidate == *face))
-                .cloned().collect::<Vec<_>>();
+        let mut groups = vec![Vec::new(); self.solids.len()];
+        let mut seen = BTreeSet::new();
+        for entity in selection {
+            let name = entity.persistent_name();
+            match index.get(&name) {
+                Some((position, own)) if **own == *entity && seen.insert(name) => {
+                    groups[*position].push((*own).clone());
+                }
+                _ => return Err(invalid(message)),
+            }
+        }
+        if selection.is_empty() && !allow_empty {
+            return Err(invalid(message));
+        }
+        Ok(groups)
+    }
+
+    /// Run `operation` on every solid with its group of the selection. With
+    /// `skip_unselected`, solids owning none of the selection pass through.
+    /// A single solid keeps the operation's own history instead of a combination.
+    fn per_solid<E: ResolvableEntity>(
+        &self,
+        groups: Vec<Vec<E>>,
+        skip_unselected: bool,
+        operation: impl Fn(&Compound, &[E]) -> KernelResult<Compound>,
+    ) -> KernelResult<Compound> {
+        if self.solids.len() == 1 {
+            return operation(self, &groups[0]);
+        }
+        let mut results = Vec::with_capacity(self.solids.len());
+        for (solid, local) in self.solids.iter().zip(groups) {
             let body = solid.to_compound();
-            results.push(if local.is_empty() { body } else {
-                super::features::dissolve_faces(&body, &local)?
+            results.push(if skip_unselected && local.is_empty() {
+                body
+            } else {
+                operation(&body, &local)?
             });
         }
         combine_compounds(results, self.tolerance())
+    }
+
+    /// Remove a feature and extend its surviving support surfaces to close it.
+    pub fn dissolve_faces(&self, faces: &[FaceHandle]) -> KernelResult<Self> {
+        let groups = self.partition_selection(faces, false, "dissolve needs distinct faces from this compound revision")?;
+        self.per_solid(groups, true, |body, local| super::features::dissolve_faces(body, local))
     }
 
     /// Offset selected faces along their outward normals, extending adjacent
     /// supports and adjusting tangent blends to keep each solid closed.
     pub fn offset_faces(&self, faces: &[FaceHandle], distance: f64) -> KernelResult<Self> {
         if !distance.is_finite() {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "offset distance must be finite",
-            ));
+            return Err(invalid("offset distance must be finite"));
         }
-        if faces.is_empty()
-            || faces
-                .iter()
-                .any(|face| !self.faces().any(|available| *available == *face))
-            || faces
-                .iter()
-                .map(FaceHandle::persistent_id)
-                .collect::<BTreeSet<_>>()
-                .len()
-                != faces.len()
-        {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "offset needs distinct faces from this compound revision",
-            ));
-        }
+        let groups = self.partition_selection(faces, false, "offset needs distinct faces from this compound revision")?;
         if distance == 0.0 {
             return self.unchanged();
         }
         if distance.abs() <= self.tolerance().linear {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "offset distance must exceed model tolerance",
-            ));
+            return Err(invalid("offset distance must exceed model tolerance"));
         }
-        let mut results = Vec::new();
-        for solid in &self.solids {
-            let local = faces
-                .iter()
-                .filter(|face| solid.faces().any(|available| *available == **face))
-                .cloned()
-                .collect::<Vec<_>>();
-            let body = solid.to_compound();
-            results.push(if local.is_empty() {
-                body
-            } else {
-                super::features::offset_faces(&body, &local, distance)?
-            });
-        }
-        combine_compounds(results, self.tolerance())
+        self.per_solid(groups, true, |body, local| super::features::offset_faces(body, local, distance))
     }
 
     pub fn shell(&self, openings: &[FaceHandle], distance: f64) -> KernelResult<Self> {
-        self.shell_with_join(openings, distance, "rounded")
+        self.shell_with_join(openings, distance, ShellJoin::Rounded)
     }
 
     /// Offset a skin with either intersected (sharp) or thickness-radius joins.
@@ -1114,70 +1130,18 @@ impl Compound {
         &self,
         openings: &[FaceHandle],
         distance: f64,
-        join_type: &str,
+        join: ShellJoin,
     ) -> KernelResult<Self> {
-        if !matches!(join_type, "sharp" | "rounded") {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "shell join type must be sharp or rounded",
-            ));
-        }
         if !distance.is_finite() || distance.abs() <= self.tolerance().linear {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "shell thickness must be finite and exceed model tolerance",
-            ));
+            return Err(invalid("shell thickness must be finite and exceed model tolerance"));
         }
-        let selected = openings
-            .iter()
-            .map(FaceHandle::persistent_id)
-            .collect::<BTreeSet<_>>();
-        if selected.len() != openings.len() {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "shell opening selection contains duplicates",
-            ));
-        }
-        let available = self
-            .faces()
-            .map(FaceHandle::persistent_id)
-            .collect::<BTreeSet<_>>();
-        if !selected.is_subset(&available) {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "shell opening faces do not belong to this compound revision",
-            ));
-        }
-        if !available.is_empty() && selected == available {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "shelling cannot remove every face of a solid",
-            ));
-        }
-        if self.solids.len() > 1 {
-            let mut results = Vec::new();
-            for solid in &self.solids {
-                let names = solid
-                    .faces()
-                    .map(FaceHandle::persistent_id)
-                    .collect::<BTreeSet<_>>();
-                let local = openings
-                    .iter()
-                    .filter(|face| names.contains(&face.persistent_id()))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                debug_assert!(local
-                    .iter()
-                    .all(|face| selected.contains(&face.persistent_id())));
-                results.push(
-                    solid
-                        .to_compound()
-                        .shell_with_join(&local, distance, join_type)?,
-                );
+        let groups = self.partition_selection(openings, true, "shell openings must be distinct faces from this compound revision")?;
+        self.per_solid(groups, false, |body, local| {
+            if local.len() == body.faces().count() {
+                return Err(invalid("shelling cannot remove every face of a solid"));
             }
-            return combine_compounds(results, self.state.tolerance());
-        }
-        super::features::shell(self, openings, distance, join_type)
+            super::features::shell(body, local, distance, join)
+        })
     }
 
     pub fn fillet(&self, edges: &[EdgeHandle], radius: f64) -> KernelResult<Self> {
@@ -1207,67 +1171,29 @@ impl Compound {
         chamfer: Option<&ChamferSettings>,
     ) -> KernelResult<Self> {
         if !size.is_finite() || size <= self.tolerance().linear {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "edge blend size must be finite and exceed model tolerance",
-            ));
+            return Err(invalid("edge blend size must be finite and exceed model tolerance"));
         }
-        if edges.is_empty() {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "edge blend needs at least one edge",
-            ));
+        let groups = self.partition_selection(edges, false, "edge blend needs distinct edges from this compound revision")?;
+        if self.solids.len() > 1 {
+            return self.per_solid(groups, true, |body, local| {
+                body.blend_edges(local, size, follow_tangent_edges, kind, chamfer)
+            });
         }
         let selected = edges
             .iter()
             .map(EdgeHandle::persistent_id)
             .collect::<BTreeSet<_>>();
-        if selected.len() != edges.len() {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "edge blend edge selection contains duplicates",
-            ));
-        }
-        let available = self
-            .edges()
-            .map(|edge| edge.persistent_id())
-            .collect::<BTreeSet<_>>();
-        if !selected.is_subset(&available) {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "edge blend edges do not belong to this compound revision",
-            ));
-        }
-        if self.solids.len() > 1 {
-            let mut results = Vec::with_capacity(self.solids.len());
-            for solid in &self.solids {
-                let local = solid
-                    .edges()
-                    .filter(|edge| selected.contains(&edge.persistent_id()))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let local_compound = solid.to_compound();
-                results.push(if local.is_empty() {
-                    local_compound
-                } else {
-                    local_compound.blend_edges(&local, size, follow_tangent_edges, kind, chamfer)?
-                });
-            }
-            return combine_compounds(results, self.tolerance());
-        }
 
         let mut kernel = Kernel::new(self.tolerance())?;
         kernel
             .topology
             .import_body(self.state.topology(), self.solids[0].body)?;
+        let index = kernel.topology.entity_index();
         let imported_edges = selected
             .iter()
-            .map(|name| match kernel.topology.entity(*name) {
-                Some(EntityId::Edge(edge)) => Ok(edge),
-                _ => Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "imported edge blend edge could not be reidentified",
-                )),
+            .map(|name| match index.get(name) {
+                Some(EntityId::Edge(edge)) => Ok(*edge),
+                _ => Err(topology_error("imported edge blend edge could not be reidentified")),
             })
             .collect::<KernelResult<Vec<_>>>()?;
         let mut transaction = kernel.begin_operation();
@@ -1275,13 +1201,13 @@ impl Compound {
             transaction.blend_edges(&imported_edges, size, follow_tangent_edges, kind, chamfer)
         {
             let mixed_trihedral = error.diagnostics().iter().find(|diagnostic| {
-                diagnostic.operation.as_deref() == Some("blend.mixed-trihedral-setback")
+                diagnostic.operation.as_deref() == Some(super::edge_blend::MIXED_TRIHEDRAL_SETBACK)
             });
             if let Some(diagnostic) = mixed_trihedral {
                 return self.blend_setback_network(edges, size, &diagnostic.entities, kind, chamfer);
             }
             let crossing_corner = error.diagnostics().iter().find(|diagnostic| {
-                diagnostic.operation.as_deref() == Some("blend.crossing-corner-sequence")
+                diagnostic.operation.as_deref() == Some(super::edge_blend::CROSSING_CORNER_SEQUENCE)
                     && diagnostic.entities.iter().all(|name| selected.contains(name))
             });
             if let Some(diagnostic) = crossing_corner {
@@ -1372,10 +1298,7 @@ impl Compound {
                     Resolution::Split(mut descendants) if descendants.len() == 1 => {
                         Ok(descendants.remove(0))
                     }
-                    _ => Err(KernelError::new(
-                        DiagnosticKind::UnsupportedGeometry,
-                        "staged blend could not reidentify an incident edge after the preceding blend",
-                    )),
+                    _ => Err(unsupported("staged blend could not reidentify an incident edge after the preceding blend")),
                 })
                 .collect::<KernelResult<Vec<_>>>()?;
             let settings = chamfer.map(|settings| {
@@ -1387,7 +1310,7 @@ impl Compound {
                         _ => Vec::new(),
                     };
                     let reference = edge.connected_faces()?.into_iter().find(|face| faces.contains(face))
-                        .ok_or_else(|| KernelError::new(DiagnosticKind::TopologyInvariant, "staged chamfer lost its reference face"))?;
+                        .ok_or_else(|| topology_error("staged chamfer lost its reference face"))?;
                     Ok((edge.persistent_id(), reference.persistent_id()))
                 }).collect::<KernelResult<_>>()?;
                 Ok::<_, KernelError>(ChamferSettings { mode: settings.mode, reference_faces })
@@ -1502,8 +1425,7 @@ impl Compound {
             }
         };
         if !valid || reference_faces.len() != edges.len() {
-            return Err(KernelError::new(DiagnosticKind::InvalidInput,
-                "chamfer needs a positive second distance or an angle between 0 and 90 degrees, and one reference face per edge"));
+            return Err(invalid("chamfer needs a positive second distance or an angle between 0 and 90 degrees, and one reference face per edge"));
         }
         let settings = ChamferSettings {
             mode,
@@ -1522,37 +1444,8 @@ impl Compound {
         )
     }
     pub fn draft(&self, faces: &[FaceHandle], plane: Plane3, angle: f64) -> KernelResult<Self> {
-        if faces.is_empty()
-            || faces
-                .iter()
-                .any(|face| !self.faces().any(|available| *available == *face))
-            || faces
-                .iter()
-                .map(FaceHandle::persistent_id)
-                .collect::<BTreeSet<_>>()
-                .len()
-                != faces.len()
-        {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "draft needs distinct faces from this compound revision",
-            ));
-        }
-        let mut results = Vec::new();
-        for solid in &self.solids {
-            let local = faces
-                .iter()
-                .filter(|face| solid.faces().any(|available| *available == **face))
-                .cloned()
-                .collect::<Vec<_>>();
-            let body = solid.to_compound();
-            results.push(if local.is_empty() {
-                body
-            } else {
-                super::features::draft(&body, &local, plane, angle)?
-            });
-        }
-        combine_compounds(results, self.tolerance())
+        let groups = self.partition_selection(faces, false, "draft needs distinct faces from this compound revision")?;
+        self.per_solid(groups, true, |body, local| super::features::draft(body, local, plane, angle))
     }
 
     pub fn split(&self, plane: Plane3, keep: SplitKeep) -> KernelResult<Self> {
@@ -1615,40 +1508,8 @@ impl Compound {
         faces: &[FaceHandle],
         transform: RigidTransform3,
     ) -> KernelResult<Self> {
-        let selected = faces
-            .iter()
-            .map(FaceHandle::persistent_id)
-            .collect::<BTreeSet<_>>();
-        if faces.is_empty()
-            || selected.len() != faces.len()
-            || faces.iter().any(|face| !self.faces().any(|candidate| candidate == face))
-        {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "move needs distinct faces from this compound revision",
-            ));
-        }
-        if self.solids.len() > 1 {
-            let mut results = Vec::new();
-            for solid in &self.solids {
-                let names = solid
-                    .faces()
-                    .map(FaceHandle::persistent_id)
-                    .collect::<BTreeSet<_>>();
-                let local = faces
-                    .iter()
-                    .filter(|face| names.contains(&face.persistent_id()))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                if local.is_empty() {
-                    results.push(solid.to_compound());
-                } else {
-                    results.push(solid.to_compound().move_faces(&local, transform)?);
-                }
-            }
-            return combine_compounds(results, self.state.tolerance());
-        }
-        super::features::move_faces(self, faces, transform)
+        let groups = self.partition_selection(faces, false, "move needs distinct faces from this compound revision")?;
+        self.per_solid(groups, true, |body, local| super::features::move_faces(body, local, transform))
     }
 
     /// Replace a face's support and extend or trim its neighbors to meet it.
@@ -1658,25 +1519,11 @@ impl Compound {
         target: &FaceHandle,
         replacement: &FaceHandle,
     ) -> KernelResult<Self> {
-        let target = self.faces().find(|face| *face == target).ok_or_else(|| {
-            KernelError::new(DiagnosticKind::InvalidInput,
-                "replacement target face does not belong to this compound revision")
-        })?;
-        if self.solids.len() > 1 {
-            let mut results = Vec::new();
-            for solid in &self.solids {
-                let contains = solid
-                    .faces()
-                    .any(|face| face == target);
-                if contains {
-                    results.push(solid.to_compound().replace_face(target, replacement)?);
-                } else {
-                    results.push(solid.to_compound());
-                }
-            }
-            return combine_compounds(results, self.state.tolerance());
-        }
-        super::features::replace_face(self, target, replacement)
+        let target = std::slice::from_ref(target);
+        let groups = self.partition_selection(target, false, "replacement target face does not belong to this compound revision")?;
+        self.per_solid(groups, true, |body, local| {
+            super::features::replace_face(body, &local[0], replacement)
+        })
     }
 }
 
@@ -1770,10 +1617,7 @@ fn build_solid(
         .get(&body)
         .map(|certificate| certificate.properties)
         .ok_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "published solid is missing its physical certificate",
-            )
+            geometry_error("published solid is missing its physical certificate")
         })?;
     let topology = state.topology();
     let mut face_ids = BTreeSet::new();
@@ -1948,10 +1792,7 @@ fn ensure_compatible_tolerances(
     second: super::ModelTolerance,
 ) -> KernelResult<()> {
     if first != second {
-        return Err(KernelError::new(
-            DiagnosticKind::InvalidInput,
-            "modeling operands must use the same tolerance policy",
-        ));
+        return Err(invalid("modeling operands must use the same tolerance policy"));
     }
     Ok(())
 }

@@ -2,6 +2,7 @@
 //! partial chamfers, and the exact boundary closing each end.
 
 use super::*;
+use crate::{invalid, topology_error, unsupported};
 
 impl Transaction<'_> {
     // A selected circular segment can stop before its tangent continuation.
@@ -22,10 +23,7 @@ impl Transaction<'_> {
             .into_iter()
             .find(|face| !spine.faces.contains(face))
             .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "partial blend has no terminating face",
-                )
+                topology_error("partial blend has no terminating face")
             })?;
         let parameter = spine.endpoint_seeds[index];
         let mut points = [old_point; 2];
@@ -55,10 +53,7 @@ impl Transaction<'_> {
                 })
             })
         {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "partial blend cannot close on a transverse end plane",
-            ));
+            return Err(unsupported("partial blend cannot close on a transverse end plane"));
         }
         Ok(BlendEndpoint {
             old_vertex: vertex,
@@ -87,10 +82,7 @@ impl Transaction<'_> {
             .filter(|face| !spine.faces.contains(face))
             .collect::<Vec<_>>();
         if terminating_faces.is_empty() || terminating_faces.len() > 2 {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "a regular blend endpoint requires one face or two tangent terminating faces",
-            ));
+            return Err(unsupported("a regular blend endpoint requires one face or two tangent terminating faces"));
         }
         let mut terminating_face = terminating_faces[0];
         let mut adjacent_uses = [spine.uses[0]; 2];
@@ -344,10 +336,7 @@ impl Transaction<'_> {
                     })
                 })
                 .ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::UnsupportedGeometry,
-                        "blend terminating supports have no shared seam",
-                    )
+                    unsupported("blend terminating supports have no shared seam")
                 })?;
             let point = self.working.vertex(old_vertex)?.point;
             let mut normals = Vec::new();
@@ -364,17 +353,11 @@ impl Transaction<'_> {
                         .copied()
                         .find(|face| adjacent_faces.contains(face))
                         .ok_or_else(|| {
-                            KernelError::new(
-                                DiagnosticKind::TopologyInvariant,
-                                "blend rail does not bound a terminating support",
-                            )
+                            topology_error("blend rail does not bound a terminating support")
                         })?;
                 }
                 if faces[0] == faces[1] {
-                    return Err(KernelError::new(
-                        DiagnosticKind::UnsupportedGeometry,
-                        "blend rails end on the same non-tangent terminating support",
-                    ));
+                    return Err(unsupported("blend rails end on the same non-tangent terminating support"));
                 }
                 terminating_face = faces[0];
                 crossing = Some((seam, faces[1]));
@@ -409,18 +392,12 @@ impl Transaction<'_> {
                     }
                 }
                 if tangent_termination.is_none() {
-                    return Err(KernelError::new(
-                        DiagnosticKind::UnsupportedGeometry,
-                        "blend endpoint crosses both terminating supports",
-                    ));
+                    return Err(unsupported("blend endpoint crosses both terminating supports"));
                 }
             }
         }
         if spine.concave && allow_adjacent_extension.iter().all(|extension| *extension) {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "blend radius reaches beyond an adjacent boundary edge",
-            ));
+            return Err(invalid("blend radius reaches beyond an adjacent boundary edge"));
         }
         Ok(BlendEndpoint {
             old_vertex,
@@ -455,10 +432,7 @@ impl Transaction<'_> {
                     .is_ok_and(|loop_| loop_.face == face)
             })
             .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "blend endpoint lost its terminating chart",
-                )
+                topology_error("blend endpoint lost its terminating chart")
             })?;
         let traversal = self.working.coedge_vertices(id)?;
         Ok(coedge
@@ -483,10 +457,7 @@ impl Transaction<'_> {
     ) -> KernelResult<(BlendBoundary, Point3, BlendBoundary)> {
         let tolerance = self.kernel.tolerance;
         let (seam, second_face) = endpoint.crossing.ok_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "blend end boundary has no terminating seam to cross",
-            )
+            topology_error("blend end boundary has no terminating seam to cross")
         })?;
         let seam_edge = self.working.edge(seam)?;
         let [start, middle, end] = [0.0, 0.5, 1.0]
@@ -509,10 +480,7 @@ impl Transaction<'_> {
             || fraction <= 0.0
             || fraction >= 1.0
         {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "blend end boundary does not cross its terminating seam between its contacts",
-            ));
+            return Err(unsupported("blend end boundary does not cross its terminating seam between its contacts"));
         }
         let first_edge = self.working.coedge(endpoint.adjacent_uses[0])?.edge;
         let second_edge = self.working.coedge(endpoint.adjacent_uses[1])?.edge;

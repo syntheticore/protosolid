@@ -339,7 +339,7 @@ fn radial_angle(
 
 #[cfg(test)]
 mod tests {
-    use super::super::{TrimmedCurve2, Wire2};
+    use super::super::{ShellJoin, TrimmedCurve2, Wire2};
     use super::*;
     use crate::Point2;
 
@@ -688,7 +688,7 @@ mod tests {
             .unwrap();
         let joined = upper.combined(&[lower]).unwrap().union(&tool).unwrap();
         let closed = joined
-            .shell_with_join(&[], -1.0, "sharp")
+            .shell_with_join(&[], -1.0, ShellJoin::Sharp)
             .expect("unfilleted closed shell");
         assert_eq!(closed.solids().len(), 1);
         assert!(closed.volume() > 0.0 && closed.volume() < joined.volume());
@@ -700,7 +700,7 @@ mod tests {
             .filter(|face| matches!(face.surface(), Surface3::Plane(_)))
         {
             let shell = joined
-                .shell_with_join(&[opening.clone()], -1.0, "sharp")
+                .shell_with_join(&[opening.clone()], -1.0, ShellJoin::Sharp)
                 .unwrap_or_else(|error| {
                     panic!("unfilleted opening {:?}: {error}", opening.surface())
                 });
@@ -726,7 +726,7 @@ mod tests {
             .filter(|face| matches!(face.surface(), Surface3::Plane(_)))
         {
             let shell = rounded
-                .shell_with_join(&[opening.clone()], -1.0, "sharp")
+                .shell_with_join(&[opening.clone()], -1.0, ShellJoin::Sharp)
                 .unwrap_or_else(|error| panic!("opening {:?}: {error}", opening.surface()));
             assert_eq!(shell.solids().len(), 1);
             assert!(shell.volume() > 0.0 && shell.volume() < rounded.volume());

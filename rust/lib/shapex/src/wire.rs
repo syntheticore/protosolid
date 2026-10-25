@@ -2,6 +2,7 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Vec2, Vec3};
 
+use super::geometry::de_casteljau_split;
 use super::polygon::on_segment;
 use super::{
     invalid, Circle2, Curve2, DiagnosticKind, KernelError, KernelResult, Line2, ModelTolerance,
@@ -479,7 +480,7 @@ pub(crate) fn simple_nurbs_pieces(curve: &super::NurbsCurve2, range: ParameterRa
                 "could not certify NURBS segment simplicity at the model tolerance",
             ));
         }
-        let (left, right) = split_values(&controls);
+        let (left, right) = de_casteljau_split(&controls, 0.5);
         let middle = (range.start + range.end) * 0.5;
         pending.push((
             ParameterRange {
@@ -1206,36 +1207,6 @@ fn bernstein_product(first: &[f64], second: &[f64]) -> Vec<f64> {
     result
 }
 
-fn split_values<T>(values: &[T]) -> (Vec<T>, Vec<T>)
-where
-    T: Copy + std::ops::Add<Output = T> + std::ops::Mul<f64, Output = T>,
-{
-    split_values_at(values, 0.5)
-}
-
-fn split_values_at<T>(values: &[T], parameter: f64) -> (Vec<T>, Vec<T>)
-where
-    T: Copy + std::ops::Add<Output = T> + std::ops::Mul<f64, Output = T>,
-{
-    let mut levels = vec![values.to_vec()];
-    while levels.last().is_some_and(|level| level.len() > 1) {
-        let previous = levels.last().unwrap();
-        levels.push(
-            previous
-                .windows(2)
-                .map(|pair| pair[0] * (1.0 - parameter) + pair[1] * parameter)
-                .collect(),
-        );
-    }
-    let left = levels.iter().map(|level| level[0]).collect();
-    let right = levels
-        .iter()
-        .rev()
-        .map(|level| *level.last().unwrap())
-        .collect();
-    (left, right)
-}
-
 fn trimmed_bezier_spans(
     curve: &super::NurbsCurve2,
     trim: ParameterRange,
@@ -1252,13 +1223,13 @@ fn trimmed_bezier_spans(
         let span_length = span.end - span.start;
         let end_fraction = (end - span.start) / span_length;
         let mut clipped = if end_fraction < 1.0 {
-            split_values_at(&controls, end_fraction).0
+            de_casteljau_split(&controls, end_fraction).0
         } else {
             controls
         };
         if start > span.start {
             let start_fraction = (start - span.start) / (end - span.start);
-            clipped = split_values_at(&clipped, start_fraction).1;
+            clipped = de_casteljau_split(&clipped, start_fraction).1;
         }
         result.push((ParameterRange { start, end }, clipped));
     }
@@ -1295,7 +1266,7 @@ fn isolate_bernstein_roots(
         output.push((range.start + range.end) * 0.5);
         return;
     }
-    let (left, right) = split_values(coefficients);
+    let (left, right) = de_casteljau_split(coefficients, 0.5);
     let middle = (range.start + range.end) * 0.5;
     isolate_bernstein_roots(
         &left,
@@ -1448,7 +1419,7 @@ fn nurbs_nurbs_intersection(
             continue;
         }
         if first_size * first_range.span().abs() >= second_size * second_range.span().abs() {
-            let (left, right) = split_values(&first_controls);
+            let (left, right) = de_casteljau_split(&first_controls, 0.5);
             let middle = (first_range.start + first_range.end) * 0.5;
             stack.push((
                 ParameterRange {
@@ -1471,7 +1442,7 @@ fn nurbs_nurbs_intersection(
                 depth + 1,
             ));
         } else {
-            let (left, right) = split_values(&second_controls);
+            let (left, right) = de_casteljau_split(&second_controls, 0.5);
             let middle = (second_range.start + second_range.end) * 0.5;
             stack.push((
                 first_range,

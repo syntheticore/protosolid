@@ -2,6 +2,7 @@
 //! inner-rim corners, and smooth and tangent-chain continuations.
 
 use super::*;
+use crate::{geometry_error, invalid, topology_error, unsupported};
 
 impl Transaction<'_> {
     pub(super) fn prepare_miter_junction(
@@ -49,10 +50,7 @@ impl Transaction<'_> {
                 rails.push((seam.curve.clone(), seam_seed));
             }
             if rails.len() != 2 {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "miter contact needs two incident curves",
-                ));
+                return Err(topology_error("miter contact needs two incident curves"));
             }
             let hit =
                 rails[0]
@@ -100,10 +98,7 @@ impl Transaction<'_> {
                 })
                 .collect::<KernelResult<Vec<_>>>()?;
             if rails.len() != 2 {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "a chamfer corner needs two contact rails per parent face",
-                ));
+                return Err(topology_error("a chamfer corner needs two contact rails per parent face"));
             }
             let hit =
                 rails[0]
@@ -137,20 +132,14 @@ impl Transaction<'_> {
         let old_vertex = spine.edge.vertices[endpoint_index];
         let vertex_faces = self.working.vertex_faces(old_vertex)?;
         if vertex_faces.len() != 3 || self.working.vertex_edges(old_vertex)?.len() != 3 {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "a rolling-ball vertex transition requires a regular valence-three BREP vertex",
-            ));
+            return Err(unsupported("a rolling-ball vertex transition requires a regular valence-three BREP vertex"));
         }
         let third_face = vertex_faces
             .iter()
             .copied()
             .find(|face| !spine.faces.contains(face))
             .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "blend junction has no third incident face",
-                )
+                topology_error("blend junction has no third incident face")
             })?;
         let third_surface = self.working.face(third_face)?.surface.clone();
         let third_outward = match self.working.face(third_face)?.orientation {
@@ -197,10 +186,7 @@ impl Transaction<'_> {
             tolerance.linear_at_scale(hit.point.to_vec().magnitude().max(radius).max(1.0)) * 16.0;
         for point in [first, second, third] {
             if (point.distance(hit.point) - radius).abs() > allowed {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "trihedral blend contact is not at the requested rolling-ball radius",
-                ));
+                return Err(geometry_error("trihedral blend contact is not at the requested rolling-ball radius"));
             }
         }
         Ok(BlendJunction {
@@ -225,17 +211,11 @@ impl Transaction<'_> {
             seam_edge,
         } = kind
         else {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "rim-corner preparation requires a rim-corner junction",
-            ));
+            return Err(invalid("rim-corner preparation requires a rim-corner junction"));
         };
         let faces = self.working.vertex_faces(vertex)?;
         if faces.len() != 3 || self.working.vertex_edges(vertex)?.len() != 3 {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "an inner-rim transition requires a regular valence-three BREP vertex",
-            ));
+            return Err(unsupported("an inner-rim transition requires a regular valence-three BREP vertex"));
         }
         self.working.face(carrier_face)?;
         self.working.edge(seam_edge)?;
@@ -262,10 +242,7 @@ impl Transaction<'_> {
         let point = self.working.vertex(vertex)?.point;
         let face = self.working.face(carrier_face)?;
         if !matches!(face.surface, Surface3::Plane(_)) {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "inner-rim corner sweeps currently require a planar carrier face",
-            ));
+            return Err(unsupported("inner-rim corner sweeps currently require a planar carrier face"));
         }
         let projection = face.surface.project(point, tolerance)?;
         let mut outward = face
@@ -281,17 +258,11 @@ impl Transaction<'_> {
         } else if seam.vertices[1] == vertex {
             seam.range.end
         } else {
-            return Err(KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "inner-rim seam is not incident to its corner vertex",
-            ));
+            return Err(topology_error("inner-rim seam is not incident to its corner vertex"));
         };
         let seam_tangent = seam.curve.evaluate(seam_parameter)?.first_derivative;
         if seam_tangent.normalize().cross(outward).magnitude() > tolerance.angular * 32.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "inner-rim seam must be normal to its planar carrier face",
-            ));
+            return Err(unsupported("inner-rim seam must be normal to its planar carrier face"));
         }
         let singular = point - outward * radius;
         let frame = Frame3::from_z(singular, outward)?;
@@ -403,10 +374,7 @@ impl Transaction<'_> {
                         .is_ok_and(|faces| faces.contains(&cross[1]))
             })
             .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "transition bridge has no source boundary",
-                )
+                topology_error("transition bridge has no source boundary")
             })?;
         let source = self.working.edge(source_id)?.clone();
         let source_use = source
@@ -420,10 +388,7 @@ impl Transaction<'_> {
                     .is_ok_and(|loop_| loop_.face == cross[1])
             })
             .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "transition source has no support coedge",
-                )
+                topology_error("transition source has no support coedge")
             })?;
         let first = self.working.face(cross[0])?.surface.clone();
         let second = self.working.face(cross[1])?.surface.clone();
@@ -467,10 +432,7 @@ impl Transaction<'_> {
             .iter()
             .find(|face| **face != cross[1])
             .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "transition source has no opposite support",
-                )
+                topology_error("transition source has no opposite support")
             })?;
         for edge in &incident {
             if self.working.edge_faces(*edge)?.contains(&moved_face) {
@@ -505,10 +467,7 @@ impl Transaction<'_> {
                 }
             }
             let (previous, next, loop_id, forward) = gap.ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "transition bridge has no loop gap",
-                )
+                topology_error("transition bridge has no loop gap")
             })?;
             let name = self.names.next_derived(DerivationRole::Fillet(BlendRole::TransitionUse))?;
             let coedge =
@@ -563,17 +522,13 @@ impl Transaction<'_> {
                         })
                     })
                     .ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::UnsupportedGeometry,
-                            "smooth blend transition has no opposite support seam",
-                        )
+                        unsupported("smooth blend transition has no opposite support seam")
                     })?;
                 Some((edge, pair))
             } else if vertex_faces.len() == 3 && incident.len() == 3 && other_faces.len() == 1 {
                 None
             } else {
-                return Err(KernelError::new(DiagnosticKind::UnsupportedGeometry,
-                "a smooth blend transition requires three faces or two pairs of tangent supports"));
+                return Err(unsupported("a smooth blend transition requires three faces or two pairs of tangent supports"));
             };
         let common_face = other_faces[0];
         let seam = self.working.edge(seam_edge)?.clone();
@@ -582,10 +537,7 @@ impl Transaction<'_> {
         } else if seam.vertices[1] == vertex {
             seam.range.end
         } else {
-            return Err(KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "smooth blend seam is not incident to its junction vertex",
-            ));
+            return Err(topology_error("smooth blend seam is not incident to its junction vertex"));
         };
         let tangent_face = tangent_faces[0];
         let tangent_surface = self.working.face(tangent_face)?.surface.clone();
@@ -601,10 +553,7 @@ impl Transaction<'_> {
                     .unwrap_or(false)
             })
             .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "smooth blend seam has no use on its tangent support",
-                )
+                topology_error("smooth blend seam has no use on its tangent support")
             })?;
         let seam_pcurve = self.working.coedge(tangent_use)?.pcurve.clone();
         let tangent_outward = match self.working.face(tangent_face)?.orientation {
@@ -637,10 +586,7 @@ impl Transaction<'_> {
                 <= tolerance
                     .linear_at_scale(surface.du.magnitude().max(surface.dv.magnitude()).max(1.0))
             {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "smooth blend seam reached a singular tangent support",
-                ));
+                return Err(geometry_error("smooth blend seam reached a singular tangent support"));
             }
             let normal = cross / magnitude;
             let cross_u = surface.duu.cross(surface.dv) + surface.du.cross(surface.duv);
@@ -744,10 +690,7 @@ impl Transaction<'_> {
             (common_contact, common_radius),
         ] {
             if (contact.distance(center) - offset.abs()).abs() > allowed {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "smooth blend junction contact is not at the requested rolling-ball radius",
-                ));
+                return Err(geometry_error("smooth blend junction contact is not at the requested rolling-ball radius"));
             }
         }
         let mut contact_points = BTreeMap::from([
@@ -759,20 +702,14 @@ impl Transaction<'_> {
             let edge = self.working.edge(opposite)?;
             let projection = edge.curve.project(common_contact, tolerance)?;
             if projection.distance > allowed {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "smooth blend contacts do not meet the opposite support seam",
-                ));
+                return Err(unsupported("smooth blend contacts do not meet the opposite support seam"));
             }
             let mut normals = [Vec3::new(0.0, 0.0, 0.0); 2];
             for side in 0..2 {
                 let face = self.working.face(pair[side])?;
                 let uv = face.surface.project(common_contact, tolerance)?;
                 if uv.distance > allowed {
-                    return Err(KernelError::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "smooth blend contact misses an opposite support",
-                    ));
+                    return Err(geometry_error("smooth blend contact misses an opposite support"));
                 }
                 normals[side] = face
                     .surface
@@ -783,10 +720,7 @@ impl Transaction<'_> {
                 }
             }
             if normals[0].dot(normals[1]) < 1.0 - tolerance.angular.max(f64::EPSILON.sqrt()) * 8.0 {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "opposite blend supports are not tangent at their seam",
-                ));
+                return Err(unsupported("opposite blend supports are not tangent at their seam"));
             }
             contact_points.insert(pair[1], common_contact);
         }

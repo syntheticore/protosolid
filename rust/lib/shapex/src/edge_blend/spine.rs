@@ -2,6 +2,7 @@
 //! rolling center, and how each spine ends or continues at its vertices.
 
 use super::*;
+use crate::{geometry_error, invalid, topology_error, unsupported};
 
 impl Transaction<'_> {
     /// Decide how `spine` ends at its endpoint `endpoint_index`. A spine whose
@@ -119,7 +120,7 @@ impl Transaction<'_> {
                             DiagnosticKind::UnsupportedGeometry,
                             "mixed convex-concave three-edge blends require a setback corner patch",
                         )
-                        .with_operation("blend.mixed-trihedral-setback"),
+                        .with_operation(super::MIXED_TRIHEDRAL_SETBACK),
                         |diagnostic, edge| diagnostic.with_entity(spines[edge].edge.name),
                     );
                 return Err(KernelError::from_diagnostic(diagnostic));
@@ -140,17 +141,14 @@ impl Transaction<'_> {
                     DiagnosticKind::UnsupportedGeometry,
                     "blends crossing a four-face corner must be built in sequence",
                 )
-                .with_operation("blend.crossing-corner-sequence");
+                .with_operation(super::CROSSING_CORNER_SEQUENCE);
                 for edge in pair {
                     diagnostic = diagnostic.with_entity(self.working.edge(edge)?.name);
                 }
                 return Err(KernelError::from_diagnostic(diagnostic));
             }
         }
-        Err(KernelError::new(
-            DiagnosticKind::UnsupportedGeometry,
-            "selected blend edges do not define a supported local corner transition",
-        ))
+        Err(unsupported("selected blend edges do not define a supported local corner transition"))
     }
 
     /// Identify the continuation and wall seam of a concave inner-rim corner.
@@ -191,10 +189,7 @@ impl Transaction<'_> {
             .into_iter()
             .find(|edge| *edge != spine.edge_id && *edge != continuation)
             .ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "an inner-rim corner has no wall seam edge",
-                )
+                topology_error("an inner-rim corner has no wall seam edge")
             })?;
         let seam = self.working.edge(seam_edge)?;
         let walls = self.working.edge_faces(seam_edge)?;
@@ -225,10 +220,7 @@ impl Transaction<'_> {
                 continue;
             }
             if edge.coedges.len() != 2 {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "a closed blend edge must have exactly two face uses",
-                ));
+                return Err(topology_error("a closed blend edge must have exactly two face uses"));
             }
 
             let source_name = edge.name;
@@ -362,10 +354,7 @@ impl Transaction<'_> {
         let tolerance = self.kernel.tolerance;
         let edge = self.working.edge(edge_id)?.clone();
         if edge.coedges.len() != 2 {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "blend requires a manifold edge with two face uses",
-            ));
+            return Err(unsupported("blend requires a manifold edge with two face uses"));
         }
         let uses = [edge.coedges[0], edge.coedges[1]];
         let faces = [
@@ -377,10 +366,7 @@ impl Transaction<'_> {
                 .face,
         ];
         if faces[0] == faces[1] {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "blend requires two distinct incident faces",
-            ));
+            return Err(unsupported("blend requires two distinct incident faces"));
         }
         let mut parent_surfaces = [
             self.working.face(faces[0])?.surface.clone(),
@@ -463,10 +449,7 @@ impl Transaction<'_> {
             let cosine = normals[0].dot(normals[1]).clamp(-1.0, 1.0);
             if let Some(settings) = chamfer {
                 let reference = settings.reference_faces.get(&edge.name).ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::InvalidInput,
-                        "chamfer edge has no reference face",
-                    )
+                    invalid("chamfer edge has no reference face")
                 })?;
                 let first = faces
                     .iter()
@@ -476,10 +459,7 @@ impl Transaction<'_> {
                             .is_ok_and(|face| face.name == *reference)
                     })
                     .ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::InvalidInput,
-                            "chamfer reference face must border its edge",
-                        )
+                        invalid("chamfer reference face must border its edge")
                     })?;
                 let sine = (1.0 - cosine * cosine).sqrt();
                 let second = match settings.mode {
@@ -487,10 +467,7 @@ impl Transaction<'_> {
                     ChamferMode::DistanceAngle(angle) => {
                         let denominator = sine * angle.cos() - cosine * angle.sin();
                         if denominator <= tolerance.angular {
-                            return Err(KernelError::new(
-                                DiagnosticKind::InvalidInput,
-                                "chamfer angle does not intersect the opposite face",
-                            ));
+                            return Err(invalid("chamfer angle does not intersect the opposite face"));
                         }
                         size * angle.sin() / denominator
                     }
@@ -541,16 +518,10 @@ impl Transaction<'_> {
             match intersection {
                 Ok(IntersectionSet::Isolated(curves)) => curves,
                 Ok(IntersectionSet::Empty) => {
-                    return Err(KernelError::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "incident face offsets do not intersect at the requested radius",
-                    ))
+                    return Err(geometry_error("incident face offsets do not intersect at the requested radius"))
                 }
                 Ok(IntersectionSet::Coincident) => {
-                    return Err(KernelError::new(
-                        DiagnosticKind::UnsupportedGeometry,
-                        "incident face offsets are coincident and do not define one blend spine",
-                    ))
+                    return Err(unsupported("incident face offsets are coincident and do not define one blend spine"))
                 }
                 Err(_) => {
                     local_guide = true;
@@ -702,10 +673,7 @@ impl Transaction<'_> {
         }
         let signed_turn = tangent.normalize().dot(normals[0].cross(normals[1]));
         if signed_turn.abs() <= self.kernel.tolerance.angular {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "blend edge has no well-defined convex or concave dihedral",
-            ));
+            return Err(unsupported("blend edge has no well-defined convex or concave dihedral"));
         }
         Ok(signed_turn < 0.0)
     }
@@ -793,10 +761,7 @@ impl Transaction<'_> {
                 continue;
             }
             if continuation.replace(candidate_id).is_some() {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "a blend tangent chain branches at one topological vertex",
-                ));
+                return Err(unsupported("a blend tangent chain branches at one topological vertex"));
             }
         }
         Ok(continuation.map(|edge| (edge, spine.faces)))

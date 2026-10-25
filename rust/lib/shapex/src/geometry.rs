@@ -1,3 +1,4 @@
+
 use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec2, Vec3, Vec4};
@@ -7,6 +8,7 @@ use super::{
     invalid, DiagnosticKind, DomainBounds, KernelError, KernelResult, ModelTolerance,
     ParameterDomain, ParameterRange,
 };
+use crate::geometry_error;
 
 #[cfg(test)]
 #[path = "geometry_tests.rs"]
@@ -281,7 +283,7 @@ impl NurbsCurve2 {
     /// retain the original NURBS parameterization.
     pub(crate) fn bezier_spans(&self) -> KernelResult<Vec<(ParameterRange, Vec<Vec3>)>> {
         let mut controls = self.homogeneous_controls();
-        let mut knots = self.knots.clone();
+        let mut knots = self.knots.to_vec();
         let degree = self.degree;
         let start = knots[degree];
         let end = knots[controls.len()];
@@ -427,10 +429,7 @@ impl NurbsCurve2 {
             ));
         }
         if value.z == 0.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "2D NURBS has zero homogeneous weight",
-            ));
+            return Err(geometry_error("2D NURBS has zero homogeneous weight"));
         }
         let point_vector = value.truncate() / value.z;
         let first_derivative = (first.truncate() - point_vector * first.z) / value.z;
@@ -595,8 +594,8 @@ impl Curve2 {
                         *point += shift;
                     }
                     return Ok(SurfaceProjectionPcurve2::new(
-                        *pcurve.curve.clone(),
-                        *pcurve.surface.clone(),
+                        (*pcurve.curve).clone(),
+                        (*pcurve.surface).clone(),
                         super::intersection::smooth_nurbs_guide(&points, range)?.into(),
                         range,
                         pcurve.tolerance,
@@ -625,7 +624,7 @@ impl Curve2 {
                 }
                 Ok(SurfaceProjectionPcurve2::new(
                     extended.into(),
-                    *pcurve.surface.clone(),
+                    (*pcurve.surface).clone(),
                     pcurve.guide.extended(range)?,
                     range,
                     pcurve.tolerance,
@@ -916,10 +915,7 @@ pub struct CurveEvaluation {
 impl CurveEvaluation {
     pub fn tangent(self) -> KernelResult<Vec3> {
         if self.first_derivative.magnitude2() == 0.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "curve tangent is singular at the requested parameter",
-            ));
+            return Err(geometry_error("curve tangent is singular at the requested parameter"));
         }
         Ok(self.first_derivative.normalize())
     }
@@ -927,10 +923,7 @@ impl CurveEvaluation {
     pub fn curvature(self) -> KernelResult<f64> {
         let speed = self.first_derivative.magnitude();
         if speed == 0.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "curve curvature is undefined at a singular parameter",
-            ));
+            return Err(geometry_error("curve curvature is undefined at a singular parameter"));
         }
         Ok(self
             .first_derivative
@@ -961,10 +954,7 @@ impl SurfaceEvaluation {
     pub fn normal(self) -> KernelResult<Vec3> {
         let normal = self.du.cross(self.dv);
         if normal.magnitude2() == 0.0 || !finite_vector(normal) {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "surface derivatives are singular at the requested parameter",
-            ));
+            return Err(geometry_error("surface derivatives are singular at the requested parameter"));
         }
         Ok(normal.normalize())
     }
@@ -978,10 +968,7 @@ impl SurfaceEvaluation {
         ];
         let determinant = first[0] * first[2] - first[1] * first[1];
         if determinant <= 0.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "surface first fundamental form is singular",
-            ));
+            return Err(geometry_error("surface first fundamental form is singular"));
         }
         let second = [
             normal.dot(self.duu),
@@ -1211,10 +1198,7 @@ impl NurbsCurve3 {
             ));
         }
         if value.w == 0.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "NURBS has zero homogeneous weight",
-            ));
+            return Err(geometry_error("NURBS has zero homogeneous weight"));
         }
 
         let point_vector = value.truncate() / value.w;
@@ -1357,6 +1341,39 @@ fn validate_nurbs(
         ));
     }
     Ok(())
+}
+
+/// Split a Bézier control polygon at `parameter` by de Casteljau subdivision.
+/// Both halves run in the original direction and share the split point.
+pub(crate) fn de_casteljau_split<V>(controls: &[V], parameter: f64) -> (Vec<V>, Vec<V>)
+where
+    V: Copy + std::ops::Add<Output = V> + std::ops::Mul<f64, Output = V>,
+{
+    let lerp = |pair: &[V]| pair[0] * (1.0 - parameter) + pair[1] * parameter;
+    let mut left = Vec::with_capacity(controls.len());
+    let mut right = Vec::with_capacity(controls.len());
+    left.push(controls[0]);
+    right.push(controls[controls.len() - 1]);
+    let mut row: Vec<V> = controls.windows(2).map(lerp).collect();
+    while !row.is_empty() {
+        left.push(row[0]);
+        right.push(row[row.len() - 1]);
+        row = row.windows(2).map(lerp).collect();
+    }
+    right.reverse();
+    (left, right)
+}
+
+/// The nonzero B-spline basis values at `parameter`: the index of the first
+/// contributing control and one value per control of the active span.
+pub(crate) fn basis_values(
+    degree: usize,
+    knots: &[f64],
+    control_count: usize,
+    parameter: f64,
+) -> (usize, Vec<f64>) {
+    let jet = SplineBasisJet::<1>::new(degree, knots, control_count, parameter);
+    (jet.first, jet.values().iter().map(|value| value[0]).collect())
 }
 
 fn find_span(degree: usize, knots: &[f64], control_count: usize, parameter: f64) -> usize {
@@ -2101,10 +2118,7 @@ impl SurfaceProjectionPcurve2 {
                 let residual = vector - du * guide.x - dv * guide.y;
                 return Ok(guide + Vec2::new(du.dot(residual), dv.dot(residual)) / trace);
             }
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "surface-projection p-curve reached a singular parameterization",
-            ));
+            return Err(geometry_error("surface-projection p-curve reached a singular parameterization"));
         }
         let b0 = du.dot(vector);
         let b1 = dv.dot(vector);
@@ -2329,7 +2343,7 @@ impl SurfaceIntersectionCurve {
             }
         }
         Ok(Some(Self::new(
-            *self.first_surface.clone(), *self.second_surface.clone(),
+            (*self.first_surface).clone(), (*self.second_surface).clone(),
             joined.remove(0), joined.remove(0), ParameterRange::new(0.0, 1.0)?,
             self.tolerance, self.achieved_error.max(other.achieved_error),
         )?))
@@ -2345,8 +2359,8 @@ impl SurfaceIntersectionCurve {
             _ => guide.extended(range),
         };
         Self::new(
-            *self.first_surface.clone(),
-            *self.second_surface.clone(),
+            (*self.first_surface).clone(),
+            (*self.second_surface).clone(),
             extend(&self.first_pcurve)?,
             extend(&self.second_pcurve)?,
             range,
@@ -2486,10 +2500,7 @@ impl SurfaceIntersectionCurve {
             .sum::<f64>()
             .sqrt();
         if speed <= self.tolerance.parameter {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "surface-intersection p-curve guide has a singular tangent",
-            ));
+            return Err(geometry_error("surface-intersection p-curve guide has a singular tangent"));
         }
         let tangent = derivative.map(|value| value / speed);
         let speed_derivative = derivative
@@ -2642,10 +2653,7 @@ impl SurfaceIntersectionCurve {
             .sum::<f64>()
             .sqrt();
         if tangent_norm <= self.tolerance.parameter {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "surface-intersection guide has a singular tangent",
-            ));
+            return Err(geometry_error("surface-intersection guide has a singular tangent"));
         }
         let tangent = tangent.map(|value| value / tangent_norm);
         let mut parameters = guide;
@@ -3534,10 +3542,7 @@ impl Plane3 {
         let vv = self.v.dot(self.v);
         let determinant = uu * vv - uv * uv;
         if determinant == 0.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "plane frame is singular",
-            ));
+            return Err(geometry_error("plane frame is singular"));
         }
         let du = delta.dot(self.u);
         let dv = delta.dot(self.v);
@@ -3764,7 +3769,7 @@ impl NurbsSurface3 {
         &self.weights
     }
     pub fn knots(&self) -> (&[f64], &[f64]) {
-        (&self.knots.0, &self.knots.1)
+        (&self.knots.0[..], &self.knots.1[..])
     }
 
     pub fn domains(&self) -> [ParameterDomain; 2] {
@@ -3902,9 +3907,9 @@ impl NurbsSurface3 {
         let knots = |axis: usize, degree: usize| {
             if padding[axis] == 0.0 {
                 return if axis == 0 {
-                    self.knots.0.clone()
+                    self.knots.0.to_vec()
                 } else {
-                    self.knots.1.clone()
+                    self.knots.1.to_vec()
                 };
             }
             let mut knots = vec![ranges[axis].start - padding[axis]; degree + 1];
@@ -3932,8 +3937,8 @@ impl NurbsSurface3 {
     /// convex-hull intersection isolation and never tessellates the surface.
     pub(crate) fn bezier_patches(&self) -> KernelResult<Vec<BezierSurfacePatch>> {
         let mut controls = self.homogeneous_rows();
-        let mut u_knots = self.knots.0.clone();
-        let mut v_knots = self.knots.1.clone();
+        let mut u_knots = self.knots.0.to_vec();
+        let mut v_knots = self.knots.1.to_vec();
         let (u_degree, v_degree) = self.degrees;
 
         let u_start = u_knots[u_degree];
@@ -4101,10 +4106,7 @@ impl NurbsSurface3 {
             ));
         }
         if jet[0][0].w == 0.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "NURBS surface has zero homogeneous weight",
-            ));
+            return Err(geometry_error("NURBS surface has zero homogeneous weight"));
         }
 
         Ok(jet)
@@ -4148,16 +4150,10 @@ impl NurbsSurface3 {
         }
         let domains = self.domains();
         let super::DomainBounds::Bounded(u_range) = domains[0].bounds else {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "NURBS surface has an unbounded U domain",
-            ));
+            return Err(geometry_error("NURBS surface has an unbounded U domain"));
         };
         let super::DomainBounds::Bounded(v_range) = domains[1].bounds else {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "NURBS surface has an unbounded V domain",
-            ));
+            return Err(geometry_error("NURBS surface has an unbounded V domain"));
         };
         let axis_candidates = |knots: &[f64], range: super::ParameterRange| {
             let mut values = vec![range.start, range.end];
@@ -4960,10 +4956,7 @@ impl OffsetSurface3 {
                 .tolerance
                 .linear_at_scale(value.du.magnitude().max(value.dv.magnitude()).max(1.0))
         {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "offset surface parent has a singular parameterization",
-            ));
+            return Err(geometry_error("offset surface parent has a singular parameterization"));
         }
         let normal = cross / magnitude;
         let project_tangent = |derivative: Vec3| derivative - normal * normal.dot(derivative);
@@ -5224,6 +5217,7 @@ impl EdgeBlendSurface3 {
         Ok(surface)
     }
 
+    /// Whether the section is a straight chamfer line rather than a circular arc.
     pub(crate) fn is_ruled(&self) -> bool {
         self.ruled
     }
@@ -5252,8 +5246,8 @@ impl EdgeBlendSurface3 {
         };
         let extended = Self::with_section(
             center,
-            *self.first_surface.clone(),
-            *self.second_surface.clone(),
+            (*self.first_surface).clone(),
+            (*self.second_surface).clone(),
             first_pcurve,
             second_pcurve,
             range,
@@ -5414,10 +5408,7 @@ impl EdgeBlendSurface3 {
         let angle = cosine.acos();
         if angle <= self.tolerance.angular || std::f64::consts::PI - angle <= self.tolerance.angular
         {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "rolling-ball contact normals do not define a regular circular span",
-            ));
+            return Err(geometry_error("rolling-ball contact normals do not define a regular circular span"));
         }
         let sine = angle.sin();
         let first_derivative = (first.1 - center_tangent) / self.radius;
@@ -5962,10 +5953,7 @@ impl Surface3 {
             Self::Sphere(sphere) => {
                 let radial = sphere.evaluate(u, v)?.point - sphere.center();
                 if radial.magnitude2() == 0.0 {
-                    return Err(KernelError::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "sphere normal is singular at its center",
-                    ));
+                    return Err(geometry_error("sphere normal is singular at its center"));
                 }
                 Ok(radial.normalize())
             }
@@ -5973,10 +5961,7 @@ impl Surface3 {
                 let (_, du, dv) = self.first_order(u, v)?;
                 let normal = du.cross(dv);
                 if normal.magnitude2() == 0.0 || !finite_vector(normal) {
-                    return Err(KernelError::new(
-                        DiagnosticKind::GeometryInvariant,
-                        "surface derivatives are singular at the requested parameter",
-                    ));
+                    return Err(geometry_error("surface derivatives are singular at the requested parameter"));
                 }
                 Ok(normal.normalize())
             }

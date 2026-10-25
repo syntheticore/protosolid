@@ -87,7 +87,7 @@ pub use intersection::{
 pub use mass_properties::{MassProperties, SurfaceProperties};
 pub use modeling::{
     ChamferMode, Compound, EdgeHandle, FaceHandle, FilletOptions, Resolution, ResolvableEntity,
-    Solid, SplitKeep, VertexHandle,
+    ShellJoin, Solid, SplitKeep, VertexHandle,
 };
 pub use naming::PersistentId;
 #[cfg(test)]
@@ -107,7 +107,6 @@ pub use planar::{CurveProjection2, CurveIntersection2, CurveContact, PointClassi
 pub use planar::{Path2, PathOffset2, OffsetOptions, JoinStyle};
 pub use planar::{ProjectedCurve2, PlaneCurveProjection};
 pub use planar::CurveApproximation2;
-pub use planar::ProfileApproximation;
 pub use planar::RigidTransform2;
 
 /// Owns one BREP state. Results of modeling operations each own a kernel.

@@ -56,45 +56,6 @@ pub struct CurveApproximation2 {
     pub estimated_error: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProfileApproximation {
-    pub profile: Profile,
-    pub estimated_error: f64,
-}
-
-impl Profile {
-    /// Retain elementary and rational curves exactly; explicitly approximate
-    /// other evaluators for consumers requiring rational section geometry.
-    pub fn approximate_rational(
-        &self,
-        tolerance: ModelTolerance,
-    ) -> KernelResult<ProfileApproximation> {
-        let mut error = 0.0_f64;
-        let mut wires = Vec::new();
-        for wire in std::iter::once(self.outer()).chain(self.holes()) {
-            let mut segments = Vec::new();
-            for segment in wire.segments() {
-                if matches!(
-                    segment.curve(),
-                    Curve2::Line(_) | Curve2::Circle(_) | Curve2::Nurbs(_)
-                ) {
-                    segments.push(segment.clone());
-                } else {
-                    let result = segment.approximate_nurbs(tolerance)?;
-                    error = error.max(result.estimated_error);
-                    segments.push(result.curve);
-                }
-            }
-            wires.push(Wire2::new(segments, self.tolerance())?);
-        }
-        let outer = wires.remove(0);
-        Ok(ProfileApproximation {
-            profile: Profile::new(outer, wires, self.tolerance())?.with_generators_from(self),
-            estimated_error: error,
-        })
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RigidTransform2 {
     angle: f64,

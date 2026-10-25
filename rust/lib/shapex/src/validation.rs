@@ -6,8 +6,9 @@ use crate::Point2;
 
 use super::{
     Coedge, CoedgeId, Diagnostic, DiagnosticKind, Face, FaceId, KernelError,
-    KernelResult, LoopKind, ModelTolerance, PersistentId, ShellKind, Topology,
+    KernelResult, LoopKind, ModelTolerance, PersistentId, ShellKind, Topology, VertexId,
 };
+use crate::geometry_error;
 
 #[derive(Debug, Clone, Default)]
 pub struct ValidationReport {
@@ -58,8 +59,9 @@ pub(crate) fn validate_structure(topology: &Topology, tolerance: ModelTolerance)
     validate_ownership(topology, &mut report);
     validate_loops(topology, &mut report);
     validate_edges(topology, &mut report);
-    validate_vertices(topology, &mut report);
-    validate_manifold_vertices(topology, &mut report);
+    let outgoing = outgoing_coedges(topology);
+    validate_vertices(topology, &outgoing, &mut report);
+    validate_manifold_vertices(topology, &outgoing, &mut report);
     validate_shell_euler_characteristic(topology, &mut report);
     validate_geometry(topology, tolerance, &mut report);
     validate_planar_face_regions(topology, tolerance, &mut report);
@@ -136,8 +138,7 @@ fn validate_curved_face_boundaries(
                             crossing |= first.distance(second) <= tolerance.linear_at_scale(scale) * 8.0;
                         }
                         if intersection.coincident || crossing {
-                            return Err(KernelError::new(DiagnosticKind::GeometryInvariant,
-                                "face boundary crosses or touches itself away from a shared vertex"));
+                            return Err(geometry_error("face boundary crosses or touches itself away from a shared vertex"));
                         }
                     }
                 }
@@ -204,10 +205,7 @@ fn validate_planar_face_regions(
                 }
             }
             let outer = outer.ok_or_else(|| {
-                KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "planar face has no outer boundary",
-                )
+                geometry_error("planar face has no outer boundary")
             })?;
             super::Profile::new(outer, holes, uv_tolerance)?;
             Ok(())
@@ -655,17 +653,24 @@ fn validate_edges(topology: &Topology, report: &mut ValidationReport) {
     }
 }
 
-fn validate_vertices(topology: &Topology, report: &mut ValidationReport) {
+/// The coedges leaving each vertex, from one pass over the coedges.
+fn outgoing_coedges(topology: &Topology) -> BTreeMap<VertexId, Vec<CoedgeId>> {
+    let mut outgoing = BTreeMap::<VertexId, Vec<CoedgeId>>::new();
+    for (id, _) in topology.coedges() {
+        if let Ok([start, _]) = topology.coedge_vertices(id) {
+            outgoing.entry(start).or_default().push(id);
+        }
+    }
+    outgoing
+}
+
+fn validate_vertices(
+    topology: &Topology,
+    outgoing: &BTreeMap<VertexId, Vec<CoedgeId>>,
+    report: &mut ValidationReport,
+) {
     for (vertex_id, vertex) in topology.vertices() {
-        let outgoing_uses: Vec<_> = topology
-            .coedges()
-            .filter_map(|(id, _)| {
-                topology
-                    .coedge_vertices(id)
-                    .ok()
-                    .and_then(|vertices| (vertices[0] == vertex_id).then_some(id))
-            })
-            .collect();
+        let outgoing_uses = outgoing.get(&vertex_id).map_or(&[][..], Vec::as_slice);
         if let Some(outgoing) = vertex.outgoing {
             match topology.coedge_vertices(outgoing) {
                 Ok([start, _]) if start == vertex_id => {}
@@ -698,7 +703,11 @@ fn validate_vertices(topology: &Topology, report: &mut ValidationReport) {
     }
 }
 
-fn validate_manifold_vertices(topology: &Topology, report: &mut ValidationReport) {
+fn validate_manifold_vertices(
+    topology: &Topology,
+    outgoing: &BTreeMap<VertexId, Vec<CoedgeId>>,
+    report: &mut ValidationReport,
+) {
     for (vertex_id, vertex) in topology.vertices() {
         let mut shell = None;
         // Use edge-end darts rather than edge ids as link-graph vertices. A
@@ -706,13 +715,10 @@ fn validate_manifold_vertices(topology: &Topology, report: &mut ValidationReport
         // collapsing those ends to one edge id would incorrectly give its
         // artificial parameter-seam vertex degree four.
         let mut link = BTreeMap::<(super::EdgeId, u8), Vec<(super::EdgeId, u8)>>::new();
-        for (coedge_id, coedge) in topology.coedges() {
-            let Ok([start, _]) = topology.coedge_vertices(coedge_id) else {
+        for coedge_id in outgoing.get(&vertex_id).into_iter().flatten().copied() {
+            let Ok(coedge) = topology.coedge(coedge_id) else {
                 continue;
             };
-            if start != vertex_id {
-                continue;
-            }
             let Ok(loop_value) = topology.loop_(coedge.loop_id) else {
                 continue;
             };

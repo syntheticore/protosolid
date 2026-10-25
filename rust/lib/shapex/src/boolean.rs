@@ -18,6 +18,7 @@ use super::{
     FaceOrientation, IntersectionSet, Kernel, KernelError, KernelResult, LoopKind, ModelTolerance,
     ParameterRange, Surface3,
 };
+use crate::{geometry_error, topology_error};
 
 /// Material-set operation requested by the high-level exact BREP Boolean API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1642,10 +1643,7 @@ pub(super) fn unchanged_face_patch(
         }
     }
     if !current.is_empty() {
-        return Err(KernelError::new(
-            DiagnosticKind::TopologyInvariant,
-            "an unchanged BREP face contains an open trim loop",
-        ));
+        return Err(topology_error("an unchanged BREP face contains an open trim loop"));
     }
     let reverse = output_orientation != source_orientation;
     let mut patch_loops = Vec::new();
@@ -1805,10 +1803,7 @@ fn polygon_interior_point(polygon: &[Point2]) -> KernelResult<Point2> {
         .windows(2)
         .max_by(|a, b| (a[1] - a[0]).total_cmp(&(b[1] - b[0])))
         .ok_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "Boolean face loop has no interior",
-            )
+            geometry_error("Boolean face loop has no interior")
         })?;
     let y = band[0] + (band[1] - band[0]) * 0.5;
     let mut crossings = Vec::new();
@@ -1826,10 +1821,7 @@ fn polygon_interior_point(polygon: &[Point2]) -> KernelResult<Point2> {
         .chunks_exact(2)
         .max_by(|a, b| (a[1] - a[0]).total_cmp(&(b[1] - b[0])))
         .ok_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "Boolean face loop has no interior",
-            )
+            geometry_error("Boolean face loop has no interior")
         })?;
     Ok(Point2::new(interval[0] + (interval[1] - interval[0]) * 0.5, y))
 }

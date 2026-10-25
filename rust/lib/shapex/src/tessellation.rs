@@ -9,6 +9,7 @@ use super::{
     nearest_uv, BodyId, Diagnostic, DiagnosticKind, Edge, EdgeId, FaceId, FaceOrientation, Kernel, KernelError,
     KernelResult, LoopId, ModelTolerance, ShellId,
 };
+use crate::{geometry_error, invalid, topology_error};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TessellationOptions {
@@ -30,10 +31,7 @@ impl TessellationOptions {
             || angular_tolerance >= std::f64::consts::PI
             || maximum_depth == 0
         {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "tessellation tolerances must be finite and positive, with nonzero depth",
-            ));
+            return Err(invalid("tessellation tolerances must be finite and positive, with nonzero depth"));
         }
         Ok(Self {
             chord_tolerance,
@@ -209,10 +207,7 @@ fn sphere_tessellation_chart(
             first_proximity.total_cmp(&second_proximity)
         })
         .ok_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "spherical face has no regular local tessellation chart",
-            )
+            geometry_error("spherical face has no regular local tessellation chart")
         })?;
     let y = z.cross(x).normalize();
     let radius = sphere.radius();
@@ -351,10 +346,7 @@ impl Kernel {
             unwrap_periodic_ring(tessellation_surface, self.tolerance(), boundary_tolerance, ring)?;
         }
         if rings.is_empty() || rings[0].len() < 3 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "a tessellated face needs an outer loop with at least three boundary samples",
-            ));
+            return Err(geometry_error("a tessellated face needs an outer loop with at least three boundary samples"));
         }
 
         // Unwrapping makes each loop continuous, but its first coedge can
@@ -477,10 +469,7 @@ impl Kernel {
     ) -> KernelResult<Vec<BoundaryVertex>> {
         let loop_value = self.topology().loop_(loop_id)?;
         let first = loop_value.first().ok_or_else(|| {
-            KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "cannot tessellate an empty loop",
-            )
+            topology_error("cannot tessellate an empty loop")
         })?;
         let face = self.topology().face(loop_value.face())?;
         let mut output = Vec::new();
@@ -1020,10 +1009,7 @@ fn finish_surface_triangulation(
         let (lifted, mut normal) = surface_point_normal(surface, uv.x, uv.y)?;
         let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()).max(boundary_tolerance);
         if lifted.distance(*point) > allowed {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "tessellation chart does not lift its exact BREP boundary",
-            ));
+            return Err(geometry_error("tessellation chart does not lift its exact BREP boundary"));
         }
         if orientation == FaceOrientation::Reversed {
             normal = -normal;
@@ -1204,17 +1190,11 @@ fn unwrap_periodic_ring(
         // with an arbitrary canonical angle can make a small face appear to
         // wind almost a full turn in its tessellation chart.
         if singular_periodic_coordinate {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "periodic face boundary does not lie on its retained surface",
-            ));
+            return Err(geometry_error("periodic face boundary does not lie on its retained surface"));
         }
         let projection = surface.project(vertex.point, tolerance)?;
         if projection.distance > allowed {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "periodic face boundary does not lie on its retained surface",
-            ));
+            return Err(geometry_error("periodic face boundary does not lie on its retained surface"));
         }
         vertex.uv = Point2::new(projection.parameters.0, projection.parameters.1);
     }
@@ -1543,10 +1523,7 @@ fn surface_point_normal(surface: &super::Surface3, u: f64, v: f64) -> KernelResu
         || !normal.y.is_finite()
         || !normal.z.is_finite()
     {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "surface derivatives are singular at the requested parameter",
-        ));
+        return Err(geometry_error("surface derivatives are singular at the requested parameter"));
     }
     Ok((point, normal.normalize()))
 }
@@ -1639,10 +1616,7 @@ impl TessellationOptions {
             self.maximum_depth,
         )?;
         if self.chord_tolerance < model.linear {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "tessellation chord tolerance may not be smaller than model tolerance",
-            ));
+            return Err(invalid("tessellation chord tolerance may not be smaller than model tolerance"));
         }
         Ok(())
     }

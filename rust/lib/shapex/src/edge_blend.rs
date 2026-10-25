@@ -37,6 +37,11 @@ use super::{
     RollingBallSurface3, Sphere3, Surface3, SurfaceCurve3, SurfaceIntersectionCurve,
     SurfaceProjectionPcurve2, SurfaceSurfaceCurve, Torus3, TrimmedCurve2, VertexId,
 };
+use crate::{topology_error, unsupported};
+
+/// Diagnostic operation tags that `Compound::blend_edges` turns into staged retries.
+pub(crate) const MIXED_TRIHEDRAL_SETBACK: &str = "blend.mixed-trihedral-setback";
+pub(crate) const CROSSING_CORNER_SEQUENCE: &str = "blend.crossing-corner-sequence";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EdgeBlendKind {
@@ -464,10 +469,7 @@ impl Transaction<'_> {
                         continue;
                     }
                     let spine = spines.get(&junction_sources[vertex]).ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "blend junction source edge was not retained",
-                        )
+                        topology_error("blend junction source edge was not retained")
                     })?;
                     if let BlendJunctionKind::Smooth {
                         seam_edge,
@@ -508,10 +510,7 @@ impl Transaction<'_> {
                         .iter()
                         .position(|candidate| candidate == vertex)
                         .ok_or_else(|| {
-                            KernelError::new(
-                                DiagnosticKind::TopologyInvariant,
-                                "blend network junction has no incident rolling patch",
-                            )
+                            topology_error("blend network junction has no incident rolling patch")
                         })?;
                     if let BlendJunctionKind::TangentChain { tangent_faces } = junction_kind {
                         junctions.insert(
@@ -636,10 +635,7 @@ impl Transaction<'_> {
                         })
                         .collect::<Vec<_>>();
                     if incident.len() != 2 {
-                        return Err(KernelError::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "a miter needs two rolling patches",
-                        ));
+                        return Err(topology_error("a miter needs two rolling patches"));
                     }
                     for side in 0..2 {
                         let (index, end) = incident[side];
@@ -742,10 +738,7 @@ impl Transaction<'_> {
                 return Ok(());
             }
             if selected.len() > 256 {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "blend transition propagation exceeded the connected regular edge network",
-                ));
+                return Err(unsupported("blend transition propagation exceeded the connected regular edge network"));
             }
         }
     }
@@ -761,10 +754,7 @@ impl Transaction<'_> {
         } else if vertices[1] == vertex {
             Ok(self.working.coedge(selected_use)?.next)
         } else {
-            Err(KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "selected coedge is not incident to its blend endpoint",
-            ))
+            Err(topology_error("selected coedge is not incident to its blend endpoint"))
         }
     }
 }

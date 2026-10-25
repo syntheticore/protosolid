@@ -11,7 +11,7 @@ use shapex::{
     Axis3, BooleanKind, Circle2, Curve2, Curve3, Line2, NurbsCurve2, Origin, ParameterRange,
     RigidTransform3, Surface3, SurfaceChart,
     ChamferMode, Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
-    ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, Solid, SplitKeep,
+    ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, ShellJoin, Solid, SplitKeep,
     StepAssembly, StepLengthUnit, StepOccurrence, StepProduct,
     TessellationOptions, TriangleMesh, TrimmedCurve2, Vec2, Vec3, VertexHandle, Wire2,
 };
@@ -1315,8 +1315,13 @@ impl NativeCompound {
         distance: f64,
         join_type: &str,
     ) -> Result<Self, JsValue> {
+        let join = match join_type {
+            "sharp" => ShellJoin::Sharp,
+            "rounded" => ShellJoin::Rounded,
+            _ => return Err(JsValue::from_str("shell join type must be sharp or rounded")),
+        };
         self.inner
-            .shell_with_join(&openings.values, distance, join_type)
+            .shell_with_join(&openings.values, distance, join)
             .map(|inner| Self { inner })
             .map_err(js_error)
     }

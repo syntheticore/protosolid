@@ -2,6 +2,7 @@
 //! rolling, cap and junction faces, and removal of the consumed topology.
 
 use super::*;
+use crate::{invalid, topology_error};
 
 impl Transaction<'_> {
     pub(super) fn rewrite_blend_network(
@@ -13,16 +14,13 @@ impl Transaction<'_> {
         kind: EdgeBlendKind,
     ) -> KernelResult<()> {
         let first_patch = patches.first().ok_or_else(|| {
-            KernelError::new(DiagnosticKind::InvalidInput, "blend network is empty")
+            invalid("blend network is empty")
         })?;
         let shell = self.working.face(first_patch.spine.faces[0])?.shell;
         for patch in patches {
             for face in patch.spine.faces {
                 if self.working.face(face)?.shell != shell {
-                    return Err(KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "blend network crosses shell boundaries",
-                    ));
+                    return Err(topology_error("blend network crosses shell boundaries"));
                 }
             }
         }
@@ -128,10 +126,7 @@ impl Transaction<'_> {
                         .unwrap_or(false)
                 })
                 .ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "blend boundary rail has no terminating-face use",
-                    )
+                    topology_error("blend boundary rail has no terminating-face use")
                 })?;
             uses.push(terminating_use);
         }
@@ -142,16 +137,10 @@ impl Transaction<'_> {
         } else if second[1] == vertex && first[0] == vertex {
             (uses[1], uses[0], false)
         } else {
-            return Err(KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "blend terminating-face uses do not form one vertex gap",
-            ));
+            return Err(topology_error("blend terminating-face uses do not form one vertex gap"));
         };
         if self.working.coedge(gap.0)?.next != gap.1 {
-            return Err(KernelError::new(
-                DiagnosticKind::TopologyInvariant,
-                "blend terminating-face gap is not consecutive",
-            ));
+            return Err(topology_error("blend terminating-face gap is not consecutive"));
         }
         Ok(gap)
     }
@@ -376,10 +365,7 @@ impl Transaction<'_> {
                     continue;
                 }
                 let seam_face = *seam_faces.first().ok_or_else(|| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "tangent-chain seam lost its support face",
-                    )
+                    topology_error("tangent-chain seam lost its support face")
                 })?;
                 if !tangent_faces.contains(&seam_face) {
                     continue;
@@ -634,10 +620,7 @@ impl Transaction<'_> {
                             } else if edge_vertices == [vertices[1], vertices[0]] {
                                 false
                             } else {
-                                return Err(KernelError::new(
-                                    DiagnosticKind::TopologyInvariant,
-                                    "smooth blend transition patches do not share contact vertices",
-                                ));
+                                return Err(topology_error("smooth blend transition patches do not share contact vertices"));
                             };
                             let first = patch.contact_parameters[endpoint_index][0];
                             let second = patch.contact_parameters[endpoint_index][1];
@@ -948,20 +931,14 @@ impl Transaction<'_> {
                     .copied()
                     .find(|candidate| candidate != junction_use)
                     .ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "blend junction boundary has no paired rolling-patch use",
-                        )
+                        topology_error("blend junction boundary has no paired rolling-patch use")
                     })?;
                 let blend_loop = self.working.coedge(blend_use)?.loop_id;
                 let cycle = blend_cycles
                     .iter()
                     .find_map(|(loop_id, uses, _)| (*loop_id == blend_loop).then_some(uses))
                     .ok_or_else(|| {
-                        KernelError::new(
-                            DiagnosticKind::TopologyInvariant,
-                            "blend junction boundary lost its rolling-patch cycle",
-                        )
+                        topology_error("blend junction boundary lost its rolling-patch cycle")
                     })?;
                 self.orient_closing_coedge(cycle, blend_use)?;
                 let blend_forward = self.working.coedge(blend_use)?.forward;
@@ -1002,10 +979,7 @@ impl Transaction<'_> {
                 })
                 .collect::<Vec<_>>();
             if incidents.len() != 2 {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "an inner-rim corner must join exactly two rolling patches",
-                ));
+                return Err(topology_error("an inner-rim corner must join exactly two rolling patches"));
             }
             let carrier_uses = incidents
                 .iter()
@@ -1016,10 +990,7 @@ impl Transaction<'_> {
                         .iter()
                         .position(|face| *face == carrier_face)
                         .ok_or_else(|| {
-                            KernelError::new(
-                                DiagnosticKind::TopologyInvariant,
-                                "inner-rim patch lost its carrier face",
-                            )
+                            topology_error("inner-rim patch lost its carrier face")
                         })?;
                     Ok(contact_parent_uses[&(patch.spine.edge_id, parent_index)])
                 })
@@ -1030,10 +1001,7 @@ impl Transaction<'_> {
             } else if self.working.coedge(carrier_uses[1])?.next == carrier_uses[0] {
                 (carrier_uses[1], carrier_uses[0])
             } else {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "inner-rim carrier uses are not adjacent at their corner",
-                ));
+                return Err(topology_error("inner-rim carrier uses are not adjacent at their corner"));
             };
             let start_vertex = self.working.coedge_vertices(previous)?[1];
             let end_vertex = self.working.coedge_vertices(next)?[0];
@@ -1043,10 +1011,7 @@ impl Transaction<'_> {
             let axis = match &junction_surfaces[vertex] {
                 Surface3::Revolved(surface) => surface.axis().direction().normalize(),
                 _ => {
-                    return Err(KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        "inner-rim junction lost its revolved surface",
-                    ))
+                    return Err(topology_error("inner-rim junction lost its revolved surface"))
                 }
             };
             let x_radius = start - center;
@@ -1151,27 +1116,18 @@ impl Transaction<'_> {
         for (loop_id, uses, orientation) in blend_cycles {
             self.close_loop_from_coedges(loop_id, &uses)
                 .map_err(|error| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        format!("rolling-patch boundary cycle failed: {error}"),
-                    )
+                    topology_error(format!("rolling-patch boundary cycle failed: {error}"))
                 })?;
             let face = self.working.loop_(loop_id)?.face;
             self.orient_face(face, orientation)?;
         }
         for (vertex, uses) in &rewrite.junction_uses {
             if uses.len() != 3 {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "a regular blend junction must have three boundary patches",
-                ));
+                return Err(topology_error("a regular blend junction must have three boundary patches"));
             }
             self.close_loop_from_coedges(rewrite.junction_loops[vertex], uses)
                 .map_err(|error| {
-                    KernelError::new(
-                        DiagnosticKind::TopologyInvariant,
-                        format!("blend junction boundary cycle failed: {error}"),
-                    )
+                    topology_error(format!("blend junction boundary cycle failed: {error}"))
                 })?;
             let area = self.loop_parameter_area(rewrite.junction_loops[vertex])?;
             self.orient_face(

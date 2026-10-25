@@ -2,12 +2,15 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec3, Vec4};
 
+use super::bounds::Bounds;
+use super::geometry::de_casteljau_split;
 use super::linalg::solve_linear;
 use super::{
     unsupported, Circle3, Curve2, Curve3, DiagnosticKind, DomainBounds, KernelError, KernelResult, Line2, Line3,
     ModelTolerance, NurbsCurve2, Plane3, Surface3, SurfaceIntersectionCurve,
     SurfaceProjectionPcurve2,
 };
+use crate::geometry_error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntersectionKind {
@@ -478,10 +481,7 @@ pub(crate) fn correct_surface_pair_near(
                 .magnitude()
                 <= tolerance.angular * 8.0
             {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "local surface intersection is tangential or singular",
-                ));
+                return Err(geometry_error("local surface intersection is tangential or singular"));
             }
             return Ok(parameters);
         }
@@ -1918,7 +1918,7 @@ fn trace_surface_intersections_in_domains(
             }
             let first_bounds = first_cell.bounds()?;
             let second_bounds = second_cell.bounds()?;
-            if surface_bounds_separated(first_bounds, second_bounds, tolerance.linear) {
+            if Bounds(first_bounds[0], first_bounds[1]).separated(Bounds(second_bounds[0], second_bounds[1]), tolerance.linear) {
                 continue;
             }
             let first_flat = first_cell.directional_flatness()?;
@@ -2283,10 +2283,7 @@ struct RationalSurfaceCell {
 impl RationalSurfaceCell {
     fn euclidean(control: Vec4) -> KernelResult<Point3> {
         if control.w <= 0.0 || !control.w.is_finite() {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "rational Bézier surface has a nonpositive homogeneous weight",
-            ));
+            return Err(geometry_error("rational Bézier surface has a nonpositive homogeneous weight"));
         }
         Ok(Point3::new(
             control.x / control.w,
@@ -2369,7 +2366,7 @@ impl RationalSurfaceCell {
         let (left_rows, right_rows): (Vec<_>, Vec<_>) = self
             .controls
             .into_iter()
-            .map(split_homogeneous_values)
+            .map(|row| de_casteljau_split(&row, 0.5))
             .unzip();
         let middle = (self.u_range.start + self.u_range.end) * 0.5;
         (
@@ -2397,7 +2394,7 @@ impl RationalSurfaceCell {
     fn split_v(self) -> (Self, Self) {
         let width = self.controls[0].len();
         let (left_columns, right_columns): (Vec<_>, Vec<_>) = (0..width)
-            .map(|u| split_homogeneous_values(self.controls.iter().map(|row| row[u]).collect()))
+            .map(|u| de_casteljau_split(&self.controls.iter().map(|row| row[u]).collect::<Vec<_>>(), 0.5))
             .unzip();
         let left_height = left_columns[0].len();
         let right_height = right_columns[0].len();
@@ -2458,33 +2455,6 @@ fn rational_surface_cells(surface: &Surface3, bounds: [super::ParameterRange; 2]
             "certified subdivision requires a NURBS-backed bounded surface",
         )),
     }
-}
-
-fn split_homogeneous_values(values: Vec<Vec4>) -> (Vec<Vec4>, Vec<Vec4>) {
-    let degree = values.len() - 1;
-    let mut levels = vec![values];
-    for level in 1..=degree {
-        levels.push(
-            levels[level - 1]
-                .windows(2)
-                .map(|pair| (pair[0] + pair[1]) * 0.5)
-                .collect(),
-        );
-    }
-    let left = (0..=degree).map(|level| levels[level][0]).collect();
-    let right = (0..=degree)
-        .map(|level| levels[degree - level][level])
-        .collect();
-    (left, right)
-}
-
-fn surface_bounds_separated(first: [Point3; 2], second: [Point3; 2], tolerance: f64) -> bool {
-    first[1].x < second[0].x - tolerance
-        || second[1].x < first[0].x - tolerance
-        || first[1].y < second[0].y - tolerance
-        || second[1].y < first[0].y - tolerance
-        || first[1].z < second[0].z - tolerance
-        || second[1].z < first[0].z - tolerance
 }
 
 fn surface_bounds_scale(bounds: [Point3; 2]) -> f64 {
@@ -3226,10 +3196,7 @@ fn circle_circle(
                 return Ok(IntersectionSet::Empty);
             };
             let Curve3::Line(line) = &intersection.curve else {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "plane intersection did not yield a line",
-                ));
+                return Err(geometry_error("plane intersection did not yield a line"));
             };
             let candidates = line_circle(*line, first, tolerance)?;
             filter_circle_candidates(candidates, second, tolerance)
@@ -3367,10 +3334,7 @@ fn circle_plane(
                 return Ok(IntersectionSet::Empty);
             };
             let Curve3::Line(line) = &intersection.curve else {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "plane intersection did not yield a line",
-                ));
+                return Err(geometry_error("plane intersection did not yield a line"));
             };
             let curve_hits = line_circle(*line, circle, tolerance)?;
             let IntersectionSet::Isolated(curve_hits) = curve_hits else {

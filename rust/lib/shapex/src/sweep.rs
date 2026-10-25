@@ -89,7 +89,7 @@ struct RailFrame {
 pub struct SweptSurface3 {
     profile_plane: Plane3,
     profile: TrimmedCurve2,
-    rail: Curve3,
+    rail: Box<Curve3>,
     rail_range: ParameterRange,
     tolerance: ModelTolerance,
     closed_rail: bool,
@@ -132,7 +132,7 @@ impl SweptSurface3 {
         let mut value = Self {
             profile_plane,
             profile,
-            rail,
+            rail: Box::new(rail),
             rail_range,
             tolerance,
             closed_rail,
@@ -179,14 +179,14 @@ impl SweptSurface3 {
             };
             let range = padded(self.rail_range, padding[1])?;
             if let Curve3::Nurbs(_) | Curve3::SurfaceCurve(_) | Curve3::SurfaceIntersection(_) =
-                self.rail
+                *self.rail
             {
                 let frame = Frame3::from_z(self.rail_origin, normal)?;
                 let plane = Plane3::new(frame.origin(), frame.x(), frame.y(), self.tolerance)?;
                 let flat = plane
                     .flatten_curve(&self.rail, self.tolerance)?
                     .ok_or_else(|| unsupported("extending a sweep along an implicit rail"))?;
-                result.rail = plane.lift_curve(&flat.extended(range)?, self.tolerance)?;
+                result.rail = Box::new(plane.lift_curve(&flat.extended(range)?, self.tolerance)?);
             }
             result.rail_range = range;
         }

@@ -11,6 +11,7 @@ use super::{
     BodyId, Curve2, Curve3, Diagnostic, DiagnosticKind, DomainBounds, FaceId, KernelError,
     KernelResult, MassProperties, ModelTolerance, ShellId, Surface3, Topology,
 };
+use crate::{geometry_error, topology_error, unsupported};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PhysicalCertificate {
@@ -30,18 +31,12 @@ pub(crate) fn validate_supplied_properties(
         || (properties.volume - properties.signed_volume).abs()
             > minimum_volume.max(properties.volume * f64::EPSILON * 4096.0)
     {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "analytical certificate has invalid volume",
-        ));
+        return Err(geometry_error("analytical certificate has invalid volume"));
     }
     if !properties.surface_area.is_finite()
         || properties.surface_area <= tolerance.linear_at_scale(scale).powi(2)
     {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "analytical certificate has invalid surface area",
-        ));
+        return Err(geometry_error("analytical certificate has invalid surface area"));
     }
     if !properties.centroid.x.is_finite()
         || !properties.centroid.y.is_finite()
@@ -70,17 +65,11 @@ pub(crate) fn validate_supplied_properties(
                         * 4096.0,
                 )
             {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "analytical certificate inertia is not symmetric",
-                ));
+                return Err(geometry_error("analytical certificate inertia is not symmetric"));
             }
         }
         if properties.inertia[row][row] < -inertia_tolerance {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "analytical certificate has negative principal-axis inertia",
-            ));
+            return Err(geometry_error("analytical certificate has negative principal-axis inertia"));
         }
     }
     Ok(())
@@ -133,10 +122,7 @@ fn certify_body(
 ) -> KernelResult<PhysicalCertificate> {
     let body = topology.body(body_id)?;
     if body.shells().is_empty() {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "a physical body needs at least one shell",
-        ));
+        return Err(geometry_error("a physical body needs at least one shell"));
     }
     // Analytic primitive bodies are certified by the closed-form recognizers
     // below. Other bodies integrate their exact trimmed boundary; publication
@@ -247,28 +233,19 @@ fn certify_body(
     for edge_id in &edge_ids {
         let edge = topology.edge(*edge_id)?;
         if !matches!(edge.curve(), Curve3::Line(_)) {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "certified physical publication currently requires linear edges",
-            ));
+            return Err(unsupported("certified physical publication currently requires linear edges"));
         }
         for coedge_id in edge.coedges() {
             let coedge = topology.coedge(*coedge_id)?;
             let face = topology.loop_(coedge.loop_id())?.face();
             if face_ids.contains(&face) && !matches!(coedge.pcurve(), Curve2::Line(_)) {
-                return Err(KernelError::new(
-                    DiagnosticKind::UnsupportedGeometry,
-                    "certified polyhedral publication requires linear p-curves",
-                ));
+                return Err(unsupported("certified polyhedral publication requires linear p-curves"));
             }
         }
     }
     for face_id in face_ids {
         if !matches!(topology.face(face_id)?.surface(), Surface3::Plane(_)) {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "certified physical publication currently requires planar faces",
-            ));
+            return Err(unsupported("certified physical publication currently requires planar faces"));
         }
     }
 
@@ -278,10 +255,7 @@ fn certify_body(
         validate_polyhedral_shell_intersections(topology, *shell_id, physical_tolerance)?;
         let properties = polyhedral_shell_properties(topology, *shell_id, physical_tolerance)?;
         if properties.volume <= physical_tolerance.linear.powi(3) {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "shell volume does not exceed the model tolerance volume",
-            ));
+            return Err(geometry_error("shell volume does not exceed the model tolerance volume"));
         }
         shell_properties.push((*shell_id, properties));
     }
@@ -292,10 +266,7 @@ fn certify_body(
         .filter(|(_, properties)| properties.signed_volume > 0.0)
         .collect();
     if positive.len() != 1 {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "a body must contain exactly one outward-oriented outer shell",
-        ));
+        return Err(geometry_error("a body must contain exactly one outward-oriented outer shell"));
     }
     let outer_shell = positive[0].0;
     for (shell_id, properties) in &shell_properties {
@@ -303,20 +274,14 @@ fn certify_body(
             continue;
         }
         if properties.signed_volume >= 0.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "inner shells must be oriented as cavities",
-            ));
+            return Err(geometry_error("inner shells must be oriented as cavities"));
         }
         validate_polyhedral_shells_disjoint(topology, outer_shell, *shell_id, physical_tolerance)?;
         if BrepClassifier::new(topology, outer_shell, physical_tolerance)?
             .classify(properties.centroid)?
             != PointClassification::Inside
         {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "cavity shell is not contained by the outer shell",
-            ));
+            return Err(geometry_error("cavity shell is not contained by the outer shell"));
         }
     }
     for first in 0..shell_properties.len() {
@@ -346,10 +311,7 @@ fn certify_body(
             if second_classifier.classify(first_center)? == PointClassification::Inside
                 || first_classifier.classify(second_center)? == PointClassification::Inside
             {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "cavity shells may not contain or overlap one another",
-                ));
+                return Err(geometry_error("cavity shells may not contain or overlap one another"));
             }
         }
     }
@@ -361,10 +323,7 @@ fn certify_body(
         physical_tolerance,
     )?;
     if properties.signed_volume <= physical_tolerance.linear.powi(3) {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "body has no positive physical volume after subtracting cavities",
-        ));
+        return Err(geometry_error("body has no positive physical volume after subtracting cavities"));
     }
     Ok(PhysicalCertificate { properties })
 }
@@ -650,8 +609,7 @@ pub(crate) fn face_surface_properties(
             Ok([area, area * point.x, area * point.y, area * point.z])
         })?;
     if totals[0] <= tolerance.linear.powi(2) {
-        return Err(KernelError::new(DiagnosticKind::GeometryInvariant,
-            "BREP face has zero surface area"));
+        return Err(geometry_error("BREP face has zero surface area"));
     }
     Ok(super::SurfaceProperties {
         area: totals[0],
@@ -770,10 +728,7 @@ fn brep_shell_properties(
             let parametric_normal = du.cross(dv);
             let jacobian = parametric_normal.magnitude();
             if jacobian <= f64::EPSILON * scale.powi(2) {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "physical integration encountered a singular surface point",
-                ));
+                return Err(geometry_error("physical integration encountered a singular surface point"));
             }
             let normal = parametric_normal * orientation;
             Ok([
@@ -799,10 +754,7 @@ fn brep_shell_properties(
     }
     let signed_volume = totals[1];
     if !signed_volume.is_finite() || signed_volume.abs() <= tolerance.linear.powi(3) {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "exact BREP shell integration produced zero or non-finite volume",
-        ));
+        return Err(geometry_error("exact BREP shell integration produced zero or non-finite volume"));
     }
     let centroid = Point3::new(
         totals[2] / signed_volume,
@@ -862,10 +814,7 @@ fn polyhedral_shell_properties(
     for face_id in shell.faces() {
         let face = topology.face(*face_id)?;
         let Surface3::Plane(plane) = face.surface() else {
-            return Err(KernelError::new(
-                DiagnosticKind::UnsupportedGeometry,
-                "analytical polyhedral integration requires planar faces",
-            ));
+            return Err(unsupported("analytical polyhedral integration requires planar faces"));
         };
         let effective_normal = match face.orientation() {
             super::FaceOrientation::Forward => plane.normal(),
@@ -875,10 +824,7 @@ fn polyhedral_shell_properties(
         for loop_id in face.loops() {
             let points = loop_points3(topology, *loop_id)?;
             if points.len() < 3 {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "polyhedral face loop needs at least three vertices",
-                ));
+                return Err(geometry_error("polyhedral face loop needs at least three vertices"));
             }
             let anchor = points[0];
             for index in 1..points.len() - 1 {
@@ -924,18 +870,12 @@ fn polyhedral_shell_properties(
             }
         }
         if face_area <= tolerance.linear.powi(2) {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "polyhedral face has zero or inconsistent oriented area",
-            ));
+            return Err(geometry_error("polyhedral face has zero or inconsistent oriented area"));
         }
         surface_area += face_area;
     }
     if !signed_volume.is_finite() || signed_volume.abs() <= tolerance.linear.powi(3) {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "polyhedral shell has zero or non-finite signed volume",
-        ));
+        return Err(geometry_error("polyhedral shell has zero or non-finite signed volume"));
     }
     let centroid = Point3::from_vec(first_moment / signed_volume);
     let inertia_origin = [
@@ -983,10 +923,7 @@ fn combine_signed_shell_properties(
         .map(|properties| properties.signed_volume)
         .sum::<f64>();
     if signed_volume <= tolerance.linear.powi(3) {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "body has no positive analytical volume after subtracting cavities",
-        ));
+        return Err(geometry_error("body has no positive analytical volume after subtracting cavities"));
     }
     let centroid = Point3::from_vec(
         components
@@ -1207,19 +1144,13 @@ fn validate_section_profile(
         match loop_value.kind() {
             super::LoopKind::Outer if outer.is_none() => outer = Some(wire),
             super::LoopKind::Outer => {
-                return Err(KernelError::new(
-                    DiagnosticKind::TopologyInvariant,
-                    "a planar section has more than one outer loop",
-                ));
+                return Err(topology_error("a planar section has more than one outer loop"));
             }
             super::LoopKind::Inner => holes.push(wire),
         }
     }
     let outer = outer.ok_or_else(|| {
-        KernelError::new(
-            DiagnosticKind::TopologyInvariant,
-            "a planar section has no outer loop",
-        )
+        topology_error("a planar section has no outer loop")
     })?;
     super::Profile::new(outer, holes, tolerance).map(|_| ())
 }
@@ -1510,6 +1441,39 @@ fn validate_prism_side_incidence(
     Ok(first_incidence == first_cap.edges.len() && second_incidence == second_cap.edges.len())
 }
 
+/// Whether the body is one connected shell with exactly `faces` faces and
+/// `edges` edges, the shape every primitive recognizer starts from.
+fn is_single_shell(
+    topology: &Topology,
+    body_id: BodyId,
+    face_ids: &BTreeSet<FaceId>,
+    edge_ids: &BTreeSet<super::EdgeId>,
+    faces: usize,
+    edges: usize,
+) -> KernelResult<bool> {
+    if face_ids.len() != faces || edge_ids.len() != edges {
+        return Ok(false);
+    }
+    let body = topology.body(body_id)?;
+    if body.shells().len() != 1 {
+        return Ok(false);
+    }
+    validate_shell_connected(topology, body.shells()[0])?;
+    Ok(true)
+}
+
+/// The faces whose surfaces `select` accepts, paired with the selected geometry.
+fn select_faces<S>(
+    topology: &Topology,
+    face_ids: &BTreeSet<FaceId>,
+    select: impl Fn(&Surface3) -> Option<S>,
+) -> Vec<(FaceId, S)> {
+    face_ids
+        .iter()
+        .filter_map(|face_id| Some((*face_id, select(topology.face(*face_id).ok()?.surface())?)))
+        .collect()
+}
+
 fn try_certify_torus(
     topology: &Topology,
     body_id: BodyId,
@@ -1517,21 +1481,13 @@ fn try_certify_torus(
     edge_ids: &BTreeSet<super::EdgeId>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Option<PhysicalCertificate>> {
-    if face_ids.len() != 2 || edge_ids.len() != 6 {
+    if !is_single_shell(topology, body_id, face_ids, edge_ids, 2, 6)? {
         return Ok(None);
     }
-    let body = topology.body(body_id)?;
-    if body.shells().len() != 1 {
-        return Ok(None);
-    }
-    validate_shell_connected(topology, body.shells()[0])?;
-    let toruses: Vec<_> = face_ids
-        .iter()
-        .filter_map(|face_id| match topology.face(*face_id).ok()?.surface() {
-            Surface3::Torus(torus) => Some((*face_id, *torus)),
-            _ => None,
-        })
-        .collect();
+    let toruses = select_faces(topology, face_ids, |surface| match surface {
+        Surface3::Torus(torus) => Some(*torus),
+        _ => None,
+    });
     if toruses.len() != 2 {
         return Ok(None);
     }
@@ -1660,28 +1616,17 @@ fn try_certify_cone(
     edge_ids: &BTreeSet<super::EdgeId>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Option<PhysicalCertificate>> {
-    if face_ids.len() != 3 || edge_ids.len() != 4 {
+    if !is_single_shell(topology, body_id, face_ids, edge_ids, 3, 4)? {
         return Ok(None);
     }
-    let body = topology.body(body_id)?;
-    if body.shells().len() != 1 {
-        return Ok(None);
-    }
-    validate_shell_connected(topology, body.shells()[0])?;
-    let cones: Vec<_> = face_ids
-        .iter()
-        .filter_map(|face_id| match topology.face(*face_id).ok()?.surface() {
-            Surface3::Cone(cone) => Some((*face_id, *cone)),
-            _ => None,
-        })
-        .collect();
-    let planes: Vec<_> = face_ids
-        .iter()
-        .filter_map(|face_id| match topology.face(*face_id).ok()?.surface() {
-            Surface3::Plane(plane) => Some((*face_id, *plane)),
-            _ => None,
-        })
-        .collect();
+    let cones = select_faces(topology, face_ids, |surface| match surface {
+        Surface3::Cone(cone) => Some(*cone),
+        _ => None,
+    });
+    let planes = select_faces(topology, face_ids, |surface| match surface {
+        Surface3::Plane(plane) => Some(*plane),
+        _ => None,
+    });
     if cones.len() != 2 || planes.len() != 1 {
         return Ok(None);
     }
@@ -1815,21 +1760,13 @@ fn try_certify_sphere(
     edge_ids: &BTreeSet<super::EdgeId>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Option<PhysicalCertificate>> {
-    if face_ids.len() != 4 || edge_ids.len() != 4 {
+    if !is_single_shell(topology, body_id, face_ids, edge_ids, 4, 4)? {
         return Ok(None);
     }
-    let body = topology.body(body_id)?;
-    if body.shells().len() != 1 {
-        return Ok(None);
-    }
-    validate_shell_connected(topology, body.shells()[0])?;
-    let spheres: Vec<_> = face_ids
-        .iter()
-        .filter_map(|face_id| match topology.face(*face_id).ok()?.surface() {
-            Surface3::Sphere(sphere) => Some((*face_id, *sphere)),
-            _ => None,
-        })
-        .collect();
+    let spheres = select_faces(topology, face_ids, |surface| match surface {
+        Surface3::Sphere(sphere) => Some(*sphere),
+        _ => None,
+    });
     if spheres.len() != 4 {
         return Ok(None);
     }
@@ -1921,28 +1858,17 @@ fn try_certify_cylinder(
     edge_ids: &BTreeSet<super::EdgeId>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Option<PhysicalCertificate>> {
-    if face_ids.len() != 4 || edge_ids.len() != 6 {
+    if !is_single_shell(topology, body_id, face_ids, edge_ids, 4, 6)? {
         return Ok(None);
     }
-    let body = topology.body(body_id)?;
-    if body.shells().len() != 1 {
-        return Ok(None);
-    }
-    validate_shell_connected(topology, body.shells()[0])?;
-    let cylinders: Vec<_> = face_ids
-        .iter()
-        .filter_map(|face_id| match topology.face(*face_id).ok()?.surface() {
-            Surface3::Cylinder(cylinder) => Some((*face_id, *cylinder)),
-            _ => None,
-        })
-        .collect();
-    let planes: Vec<_> = face_ids
-        .iter()
-        .filter_map(|face_id| match topology.face(*face_id).ok()?.surface() {
-            Surface3::Plane(plane) => Some((*face_id, *plane)),
-            _ => None,
-        })
-        .collect();
+    let cylinders = select_faces(topology, face_ids, |surface| match surface {
+        Surface3::Cylinder(cylinder) => Some(*cylinder),
+        _ => None,
+    });
+    let planes = select_faces(topology, face_ids, |surface| match surface {
+        Surface3::Plane(plane) => Some(*plane),
+        _ => None,
+    });
     if cylinders.len() != 2 || planes.len() != 2 {
         return Ok(None);
     }
@@ -1977,18 +1903,12 @@ fn try_certify_cylinder(
         if plane.origin().distance(start) <= linear {
             found_start = true;
             if effective_normal.dot(-axis_unit) < 1.0 - tolerance.angular {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "cylinder start cap is not outward-oriented",
-                ));
+                return Err(geometry_error("cylinder start cap is not outward-oriented"));
             }
         } else if plane.origin().distance(end) <= linear {
             found_end = true;
             if effective_normal.dot(axis_unit) < 1.0 - tolerance.angular {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "cylinder end cap is not outward-oriented",
-                ));
+                return Err(geometry_error("cylinder end cap is not outward-oriented"));
             }
         } else {
             return Ok(None);
@@ -2012,10 +1932,7 @@ fn try_certify_cylinder(
             normal = -normal;
         }
         if normal.dot(reference.x_radius().normalize()) < 1.0 - tolerance.angular {
-            return Err(KernelError::new(
-                DiagnosticKind::GeometryInvariant,
-                "cylinder wall is not outward-oriented",
-            ));
+            return Err(geometry_error("cylinder wall is not outward-oriented"));
         }
         for loop_id in face.loops() {
             for coedge_id in topology.loop_coedges(*loop_id)? {
@@ -2106,10 +2023,7 @@ fn try_certify_cylinder(
 fn face_uv_bounds(topology: &Topology, face_id: FaceId) -> KernelResult<[f64; 4]> {
     let face = topology.face(face_id)?;
     if face.loops().len() != 1 {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "analytic primitive patch must have exactly one trim loop",
-        ));
+        return Err(geometry_error("analytic primitive patch must have exactly one trim loop"));
     }
     let mut bounds = [
         f64::INFINITY,
@@ -2128,10 +2042,7 @@ fn face_uv_bounds(topology: &Topology, face_id: FaceId) -> KernelResult<[f64; 4]
         }
     }
     if bounds.iter().any(|value| !value.is_finite()) {
-        return Err(KernelError::new(
-            DiagnosticKind::GeometryInvariant,
-            "analytic primitive trim bounds are not finite",
-        ));
+        return Err(geometry_error("analytic primitive trim bounds are not finite"));
     }
     Ok(bounds)
 }
@@ -2172,10 +2083,7 @@ fn face_trim_location(
 ) -> KernelResult<TrimLocation> {
     let face = topology.face(face_id)?;
     let Surface3::Plane(plane) = face.surface() else {
-        return Err(KernelError::new(
-            DiagnosticKind::UnsupportedGeometry,
-            "polyhedral containment requires planar faces",
-        ));
+        return Err(unsupported("polyhedral containment requires planar faces"));
     };
     let projection = plane.project(point)?;
     if projection.distance > tolerance.linear {
@@ -2249,10 +2157,7 @@ fn validate_polyhedral_face_pair(
     let (Surface3::Plane(first_plane), Surface3::Plane(second_plane)) =
         (first_face.surface(), second_face.surface())
     else {
-        return Err(KernelError::new(
-            DiagnosticKind::UnsupportedGeometry,
-            "polyhedral intersection validation requires planar faces",
-        ));
+        return Err(unsupported("polyhedral intersection validation requires planar faces"));
     };
     let first_edges = BTreeSet::from_iter(topology.face_edges(first)?);
     let second_edges = BTreeSet::from_iter(topology.face_edges(second)?);
@@ -2274,19 +2179,13 @@ fn validate_polyhedral_face_pair(
         for vertex in first_vertices.iter().copied() {
             let point = topology.vertex(vertex)?.point();
             if face_trim_location(topology, second, point, tolerance)? == TrimLocation::Inside {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "distinct coplanar BREP faces overlap",
-                ));
+                return Err(geometry_error("distinct coplanar BREP faces overlap"));
             }
         }
         for vertex in second_vertices.iter().copied() {
             let point = topology.vertex(vertex)?.point();
             if face_trim_location(topology, first, point, tolerance)? == TrimLocation::Inside {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "distinct coplanar BREP faces overlap",
-                ));
+                return Err(geometry_error("distinct coplanar BREP faces overlap"));
             }
         }
         return Ok(());
@@ -2323,10 +2222,7 @@ fn validate_polyhedral_face_pair(
                     tolerance.linear,
                 )
             {
-                return Err(KernelError::new(
-                    DiagnosticKind::GeometryInvariant,
-                    "polyhedral BREP faces intersect away from shared topology",
-                ));
+                return Err(geometry_error("polyhedral BREP faces intersect away from shared topology"));
             }
         }
     }
@@ -2337,10 +2233,7 @@ fn validate_shell_connected(topology: &Topology, shell_id: ShellId) -> KernelRes
     let shell = topology.shell(shell_id)?;
     let faces: BTreeSet<_> = shell.faces().iter().copied().collect();
     let Some(start) = shell.faces().first().copied() else {
-        return Err(KernelError::new(
-            DiagnosticKind::TopologyInvariant,
-            "shell has no faces",
-        ));
+        return Err(topology_error("shell has no faces"));
     };
     let mut visited = BTreeSet::new();
     let mut queue = VecDeque::from([start]);
@@ -2370,10 +2263,7 @@ fn validate_shell_connected(topology: &Topology, shell_id: ShellId) -> KernelRes
         }
     }
     if visited != faces {
-        return Err(KernelError::new(
-            DiagnosticKind::TopologyInvariant,
-            "all faces of a physical shell must be edge-connected",
-        ));
+        return Err(topology_error("all faces of a physical shell must be edge-connected"));
     }
     Ok(())
 }

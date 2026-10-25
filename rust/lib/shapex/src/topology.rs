@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::arena::Arena;
 use super::{Curve2, Curve3, Handle, KernelResult, ParameterRange, PersistentId, Surface3};
+use crate::topology_error;
 
 pub type VertexId = Handle<Vertex>;
 pub type EdgeId = Handle<Edge>;
@@ -546,6 +547,31 @@ impl Topology {
             })
     }
 
+    /// Every live entity by persistent name, for batches of lookups.
+    pub(crate) fn entity_index(&self) -> BTreeMap<PersistentId, EntityId> {
+        let mut index = BTreeMap::new();
+        index.extend(self.vertices().map(|(id, value)| (value.name, EntityId::Vertex(id))));
+        index.extend(self.edges().map(|(id, value)| (value.name, EntityId::Edge(id))));
+        index.extend(self.coedges().map(|(id, value)| (value.name, EntityId::Coedge(id))));
+        index.extend(self.loops().map(|(id, value)| (value.name, EntityId::Loop(id))));
+        index.extend(self.faces().map(|(id, value)| (value.name, EntityId::Face(id))));
+        index.extend(self.shells().map(|(id, value)| (value.name, EntityId::Shell(id))));
+        index.extend(self.bodies().map(|(id, value)| (value.name, EntityId::Body(id))));
+        index
+    }
+
+    /// The edges incident to each vertex, from one pass over the edges.
+    pub(crate) fn vertex_edge_index(&self) -> BTreeMap<VertexId, Vec<EdgeId>> {
+        let mut index = BTreeMap::<VertexId, Vec<EdgeId>>::new();
+        for (id, edge) in self.edges() {
+            index.entry(edge.vertices[0]).or_default().push(id);
+            if edge.vertices[1] != edge.vertices[0] {
+                index.entry(edge.vertices[1]).or_default().push(id);
+            }
+        }
+        index
+    }
+
     pub fn coedge_vertices(&self, id: CoedgeId) -> KernelResult<[VertexId; 2]> {
         let coedge = self.coedge(id)?;
         let edge = self.edge(coedge.edge)?;
@@ -569,10 +595,7 @@ impl Topology {
                 return Ok(result);
             }
             if result.len() > self.coedges.len() {
-                return Err(super::KernelError::new(
-                    super::DiagnosticKind::TopologyInvariant,
-                    "coedge cycle does not terminate",
-                ));
+                return Err(topology_error("coedge cycle does not terminate"));
             }
         }
     }
@@ -662,9 +685,10 @@ impl Topology {
     pub(crate) fn reidentify_body(&mut self, body: BodyId, namespace: uuid::Uuid) -> KernelResult<super::OperationHistory> {
         let names = self.body_entity_names(body)?;
         let mut history = super::OperationHistory::default();
+        let index = self.entity_index();
         for (local, old) in names.into_iter().enumerate() {
             let new = PersistentId { namespace, local: local as u64 };
-            match self.entity(old).unwrap() {
+            match index[&old] {
                 EntityId::Vertex(id) => self.vertices.get_mut(id)?.name = new,
                 EntityId::Edge(id) => self.edges.get_mut(id)?.name = new,
                 EntityId::Coedge(id) => self.coedges.get_mut(id)?.name = new,

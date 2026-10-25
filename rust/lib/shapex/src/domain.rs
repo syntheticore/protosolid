@@ -1,6 +1,7 @@
 use crate::{Point2, Vec2};
 
-use super::{DiagnosticKind, KernelError, KernelResult, ModelTolerance};
+use super::{KernelResult, ModelTolerance};
+use crate::invalid;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParameterRange {
@@ -11,10 +12,7 @@ pub struct ParameterRange {
 impl ParameterRange {
     pub fn new(start: f64, end: f64) -> KernelResult<Self> {
         if !start.is_finite() || !end.is_finite() || start == end {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "a parameter range must have two distinct finite bounds",
-            ));
+            return Err(invalid("a parameter range must have two distinct finite bounds"));
         }
         Ok(Self { start, end })
     }
@@ -76,10 +74,7 @@ impl ParameterDomain {
     pub fn periodic(start: f64, end: f64, period: f64) -> KernelResult<Self> {
         let range = ParameterRange::new(start, end)?;
         if !period.is_finite() || period <= 0.0 {
-            return Err(KernelError::new(
-                DiagnosticKind::InvalidInput,
-                "a periodic domain requires a finite positive period",
-            ));
+            return Err(invalid("a periodic domain requires a finite positive period"));
         }
         Ok(Self {
             bounds: DomainBounds::Bounded(range),

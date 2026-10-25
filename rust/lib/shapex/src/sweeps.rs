@@ -1,4 +1,5 @@
 //! Exact section-based feature construction. Display triangles never enter BREP.
+use super::geometry::{basis_values, de_casteljau_split};
 use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment};
 use super::*;
 use crate::{Point2, Point3, Vec2, Vec3};
@@ -433,21 +434,6 @@ impl SectionCurve {
         }
     }
 }
-fn split_controls(controls: &[Vec3], t: f64) -> (Vec<Vec3>, Vec<Vec3>) {
-    let mut row = controls.to_vec();
-    let mut left = vec![row[0]];
-    let mut right = vec![*row.last().unwrap()];
-    while row.len() > 1 {
-        row = row
-            .windows(2)
-            .map(|p| p[0] * (1.0 - t) + p[1] * t)
-            .collect();
-        left.push(row[0]);
-        right.push(*row.last().unwrap());
-    }
-    right.reverse();
-    (left, right)
-}
 fn section_from_controls(controls: Vec<Vec3>, source: usize) -> SectionCurve {
     let degree = controls.len() - 1;
     SectionCurve {
@@ -511,7 +497,7 @@ fn compatible_sections(sections: &mut [Vec<SectionCurve>]) -> KernelResult<()> {
                 if remaining == 1 {
                     result.push(section_from_controls(controls.clone(), curve.source));
                 } else {
-                    let (first, rest) = split_controls(&controls, 1.0 / remaining as f64);
+                    let (first, rest) = de_casteljau_split(&controls, 1.0 / remaining as f64);
                     result.push(section_from_controls(first, curve.source));
                     controls = rest;
                 }
@@ -576,11 +562,11 @@ fn section_curves(profile: &Profile) -> KernelResult<Vec<SectionCurve>> {
                     }
                     let end_fraction = (end - span.start) / span.span();
                     if end_fraction < 1.0 {
-                        controls = split_controls(&controls, end_fraction).0;
+                        controls = de_casteljau_split(&controls, end_fraction).0;
                     }
                     let start_fraction = (start - span.start) / (end - span.start);
                     if start_fraction > 0.0 {
-                        controls = split_controls(&controls, start_fraction).1;
+                        controls = de_casteljau_split(&controls, start_fraction).1;
                     }
                     spans.push(section_from_controls(controls, source));
                 }
@@ -626,29 +612,6 @@ fn section_cap(
     }
     Ok(patch)
 }
-fn basis(index: usize, degree: usize, t: f64, knots: &[f64], count: usize) -> f64 {
-    if t == 1.0 {
-        return if index == count - 1 { 1.0 } else { 0.0 };
-    }
-    if degree == 0 {
-        return if knots[index] <= t && t < knots[index + 1] {
-            1.0
-        } else {
-            0.0
-        };
-    }
-    let mut value = 0.0;
-    let first = knots[index + degree] - knots[index];
-    let second = knots[index + degree + 1] - knots[index + 1];
-    if first > 0.0 {
-        value += (t - knots[index]) / first * basis(index, degree - 1, t, knots, count);
-    }
-    if second > 0.0 {
-        value += (knots[index + degree + 1] - t) / second
-            * basis(index + 1, degree - 1, t, knots, count);
-    }
-    value
-}
 /// Interpolate homogeneous section controls with one common cubic B-spline
 /// basis; the resulting surface passes through every supplied section exactly.
 fn interpolation(count: usize) -> KernelResult<(usize, Vec<f64>, Vec<Vec<f64>>)> {
@@ -664,10 +627,10 @@ fn interpolation(count: usize) -> KernelResult<(usize, Vec<f64>, Vec<Vec<f64>>)>
     let mut matrix = parameters
         .iter()
         .map(|t| {
-            (0..count)
-                .map(|i| basis(i, degree, *t, &knots, count))
-                .chain(std::iter::repeat(0.0).take(count))
-                .collect::<Vec<_>>()
+            let mut row = vec![0.0; 2 * count];
+            let (first, values) = basis_values(degree, &knots, count, *t);
+            row[first..first + values.len()].copy_from_slice(&values);
+            row
         })
         .collect::<Vec<_>>();
     for i in 0..count {
@@ -964,7 +927,7 @@ mod tests {
             );
         }
         for distance in [-1.0, 1.0] {
-            filleted.shell_with_join(&[], distance, "sharp").unwrap();
+            filleted.shell_with_join(&[], distance, ShellJoin::Sharp).unwrap();
         }
         let shell = filleted.shell(&[], -1.0).unwrap();
         assert!(shell.mass_properties().volume > 0.0);
@@ -1785,7 +1748,7 @@ mod tests {
             })
             .unwrap()
             .clone();
-        let body = body.shell_with_join(&[opening], 6.0, "rounded").unwrap();
+        let body = body.shell_with_join(&[opening], 6.0, ShellJoin::Rounded).unwrap();
         let edge = body
             .edges()
             .find(|e| {
@@ -1873,12 +1836,12 @@ mod tests {
         let opening = body.faces().find(|f| matches!(f.surface(), Surface3::Plane(p) if p.normal().z.abs() > 0.99 && p.origin().z.abs() < 1e-6)).unwrap().clone();
         for openings in [vec![], vec![opening]] {
             for distance in [-2.0, -1.0, -0.5, 0.5, 1.0, 2.0] {
-                for join in ["sharp", "rounded"] {
+                for join in [ShellJoin::Sharp, ShellJoin::Rounded] {
                     let result = body
                         .shell_with_join(&openings, distance, join)
                         .unwrap_or_else(|error| {
                             panic!(
-                                "openings {:?}, distance {distance}, join {join}: {error}",
+                                "openings {:?}, distance {distance}, join {join:?}: {error}",
                                 openings.iter().map(|f| f.topology_id()).collect::<Vec<_>>()
                             )
                         });

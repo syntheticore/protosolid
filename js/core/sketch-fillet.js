@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { Line, Arc, Spline } from './geom2d.js'
 import { EPSILON, cross2d } from './utils.js'
-import { modelTolerance, point2 } from './shapex.js'
+import { modelTolerance, getSketchTessellationTolerance } from './shapex.js'
 import { isModelingFailure } from './errors.js'
 
 const vector = point => new THREE.Vector3(point.x, point.y, 0)
@@ -55,9 +55,10 @@ export function curveFillet(left, right, radius) {
   return { ends, parameters, points, center, middle, start, sweep }
 }
 
-// Keep a curve from its tangent point to its far end, in its own traversal
-// direction. Returns the replacement and the handle index meeting the fillet.
-export function trimToFillet(elem, end, parameter, point) {
+// Keep a curve from a point on it to its other end, in its own traversal
+// direction, cutting off the given end. Returns the replacement and the
+// handle index at the point.
+export function trimToPoint(elem, end, parameter, point) {
   if(elem instanceof Line) {
     const points = elem.points.map(point => point.clone())
     points[end] = point
@@ -72,16 +73,47 @@ export function trimToFillet(elem, end, parameter, point) {
 }
 
 // The solver can only attach to the ends of a sketch spline's control
-// polygon, so a trimmed piece is refit as a clamped uniform spline with the
-// same control point count. Endpoints and end tangents are kept exactly. With
-// at most degree + 1 control points the fit is the exact Bezier subdivision;
-// with interior knots it is a least-squares approximation of the piece.
+// polygon, so a trimmed piece is refit as a clamped uniform spline.
+// Endpoints and end tangents are kept exactly. The fit uses the fewest
+// control points that stay within the sketch display tolerance, starting at
+// four, the fewest that keep both end tangents, and at most the original
+// count. A piece within a single polynomial span is reproduced exactly by at
+// most six points. When no count is within tolerance, the closest fit is used.
 function fitSplinePiece(spline, bounds, parameter) {
   const basis = spline.geom().curve()
-  const degree = basis.degree(), knots = basis.knots(), count = spline.points.length
-  const domain = count - degree
+  const original = spline.points.length
   const [low, high] = bounds[0] < bounds[1] ? bounds : [bounds[1], bounds[0]]
-  const first = vector(basis.evaluate(low).point), last = vector(basis.evaluate(high).point)
+  const sampleCount = original * 16
+  const targets = Array.from({ length: sampleCount + 1 }, (_, k) =>
+    vector(basis.evaluate(low + (high - low) * k / sampleCount).point))
+  const tangents = [low, high].map(u => vector(basis.evaluate(u).firstDerivative).normalize())
+  const tolerance = getSketchTessellationTolerance()
+
+  let best
+  for(let count = Math.min(4, original); count <= original; count++) {
+    const fit = fitSpline(targets, tangents, count, tolerance)
+    if(!best || fit.error < best.error) best = fit
+    if(fit.error <= tolerance) break
+  }
+  // Clamped uniform knots are symmetric, so reversing the control points
+  // reverses the traversal without changing the curve.
+  const reversed = bounds[0] > bounds[1]
+  const { points } = best
+  return {
+    curve: new Spline(reversed ? points.toReversed() : points),
+    index: (parameter == low) != reversed ? 0 : points.length - 1,
+  }
+}
+
+// Least-squares fit of a clamped uniform spline with the given control
+// point count to samples along a curve, keeping the end points and, from four
+// control points, the end tangent directions. Returns the control points and
+// the largest distance of a sample from the fit.
+function fitSpline(targets, tangents, count, tolerance) {
+  const degree = Math.min(5, count - 1), domain = count - degree
+  const [values, multiplicities] = Spline.clampedKnots(count, degree)
+  const knots = values.flatMap((value, i) => Array(multiplicities[i]).fill(value))
+  const first = targets[0], last = targets.at(-1)
 
   // Each control point is a constant plus a combination of the unknowns.
   const unit = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)]
@@ -91,17 +123,12 @@ function fitSplinePiece(spline, bounds, parameter) {
   poles[0] = { constant: first, terms: [] }
   poles[count - 1] = { constant: last, terms: [] }
   if(count > 3) {
-    const tangent = u => vector(basis.evaluate(u).firstDerivative).normalize()
-    poles[1] = { constant: first, terms: [[unknowns++, tangent(low)]] }
-    poles[count - 2] = { constant: last, terms: [[unknowns++, tangent(high).negate()]] }
+    poles[1] = { constant: first, terms: [[unknowns++, tangents[0]]] }
+    poles[count - 2] = { constant: last, terms: [[unknowns++, tangents[1].clone().negate()]] }
   }
   for(let i = 1; i < count - 1; i++) poles[i] ||= free()
 
-  const sampleCount = count * 16
-  const samples = Array.from({ length: sampleCount + 1 }, (_, k) => ({
-    t: domain * k / sampleCount,
-    target: vector(basis.evaluate(low + (high - low) * k / sampleCount).point),
-  }))
+  const samples = targets.map((target, k) => ({ t: domain * k / (targets.length - 1), target }))
   const fit = () => {
     const matrix = Array.from({ length: unknowns }, () => Array(unknowns).fill(0))
     const rhs = Array(unknowns).fill(0)
@@ -122,19 +149,34 @@ function fitSplinePiece(spline, bounds, parameter) {
     return poles.map(pole => pole.terms.reduce((point, [unknown, direction]) =>
       point.addScaledVector(direction, solution[unknown]), pole.constant.clone()))
   }
-  let points = fit()
   // Reproject the samples onto each fit, so the parametrization stops
-  // contributing to the shape error.
-  for(let iteration = 0; iteration < 8 && count > degree + 1; iteration++) {
+  // contributing to the shape error. Stop once that no longer helps.
+  let previous = Infinity
+  for(let iteration = 0; ; iteration++) {
+    const points = fit()
     const geom = new Spline(points).geom()
-    samples.slice(1, -1).forEach(sample => sample.t = geom.closestPoint(point2(sample.target), modelTolerance).parameter)
-    points = fit()
+    const projections = samples.map(sample => projectNear(geom, sample.target, sample.t, domain))
+    const error = Math.max(...projections.map(projection => projection.distance))
+    if(error <= tolerance || error > previous * 0.95 || iteration == 8) return { points, error }
+    previous = error
+    samples.slice(1, -1).forEach((sample, k) => sample.t = projections[k + 1].t)
   }
-  const reversed = bounds[0] > bounds[1]
-  return {
-    curve: new Spline(points, reversed ? [domain, 0] : null),
-    index: parameter == low ? 0 : count - 1,
+}
+
+// Closest point on a curve near a parameter, by Newton steps. A sample
+// starts close to its projection, and this is far cheaper than a global
+// closest point search.
+function projectNear(geom, target, t, domain) {
+  let distance
+  for(let step = 0; step < 4; step++) {
+    const { point, firstDerivative: d1, secondDerivative: d2 } = geom.evaluate(t)
+    const dx = point.x - target.x, dy = point.y - target.y
+    distance = Math.hypot(dx, dy)
+    const slope = d1.x * d1.x + d1.y * d1.y + dx * d2.x + dy * d2.y
+    if(slope <= 0) break
+    t = THREE.MathUtils.clamp(t - (dx * d1.x + dy * d1.y) / slope, 0, domain)
   }
+  return { t, distance }
 }
 
 // Cox-de Boor recursion; the closing knot belongs to the last nonempty span.

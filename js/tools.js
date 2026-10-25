@@ -24,8 +24,9 @@ import {
   Profile,
   Solid,
 } from './core/geom3d.js'
-import { getViewportTessellationTolerance } from './core/shapex.js'
+import { getViewportTessellationTolerance, shapex as sx, point2, modelTolerance } from './core/shapex.js'
 import { PlaneHelper, PointHelper } from './core/helpers.js'
+import { ScreenPointObject } from './three/helper-objects.js'
 
 import {
   CoincidentConstraint,
@@ -52,7 +53,7 @@ import {
   worldTransform,
 } from './core/assembly.js'
 import { EPSILON } from './core/utils.js'
-import { supportsFillet, curveFillet, trimToFillet } from './core/sketch-fillet.js'
+import { supportsFillet, curveFillet, trimToPoint } from './core/sketch-fillet.js'
 import { pasteSketchSelection } from './sketch-clipboard.js'
 import materials, { DRAFT_DIRECTIONS } from './materials.js'
 import { supportsOffset, connectedOffsetChain, profileOffsetGroups, nearestOffsetFrame, buildOffsetCurves } from './core/sketch-offset.js'
@@ -986,7 +987,7 @@ export class SketchFilletTool extends HighlightTool {
     this.fillets.push({ arc, position: this.dimensionPosition() })
     this.arc = null
     curves.forEach((curve, i) => {
-      const { curve: replacement, index } = trimToFillet(curve, ends[i], parameters[i], points[i])
+      const { curve: replacement, index } = trimToPoint(curve, ends[i], parameters[i], points[i])
       replacement.isReference = curve.isReference
       this.sketch.replaceElement(curve, [replacement])
       this.sketch.addConstraint(new CoincidentConstraint(new ElemRef(replacement, index), new ElemRef(arc, i + 1)))
@@ -1051,9 +1052,8 @@ export class SketchFilletTool extends HighlightTool {
 }
 
 
-export class TrimTool extends Tool {
-  static icon = 'sketch-trim'
-
+// Base for tools that replace a clicked sketch curve with edited pieces.
+class CurveEditTool extends Tool {
   constructor(component, viewport, sketch) {
     super(component, viewport)
     this.sketch = sketch
@@ -1067,34 +1067,252 @@ export class TrimTool extends Tool {
     return curve && curve.sketch == this.sketch && !curve.projection && !(curve instanceof OffsetCurve) ? curve : null
   }
 
-  click(vec, coords) {
-    const curve = this.curveAt(coords)
-    if(!curve) return this.viewport.renderer.render()
-
-    const pieces = curve.split(this.sketch.elements)
-    if(pieces.length < 2) {
-      window.bus.emit('toast', 'Curve has no intersection to trim to')
-      return this.viewport.renderer.render()
-    }
-
-    const removed = pieces.minMaxBy(Math.min, piece => piece.distanceTo(vec))
-    const replacements = pieces.filter(piece => piece != removed)
-    this.sketch.replaceElement(curve, replacements)
-    removed.clear()
+  finish(curve) {
     this.viewport.document.selection.delete(curve)
     this.viewport.$emit('update:highlight', null)
     this.viewport.updateRegions(true)
     this.viewport.renderer.render()
   }
 
-  mouseDown(vec, coords) {
-    super.mouseDown(vec, coords)
-  }
-
   mouseMove(vec, coords) {
     const curve = this.curveAt(coords)
     this.viewport.$emit('update:highlight', curve)
   }
+}
+
+
+// Base for tools editing a curve split at its intersections. Subclasses plan
+// the edit for the hovered segment as { preview, cuts, replacements, joins }:
+// the piece the click affects, the points the curve is cut at, the curves
+// replacing it and optional [curve, index, curve, index] handle pairs to
+// keep coincident. That piece and those points are previewed instead of
+// highlighting the whole curve.
+class SegmentEditTool extends CurveEditTool {
+  // Split the hovered curve at all intersections, reusing the split and its
+  // plans while the same curve stays hovered.
+  planAt(coords, vec) {
+    const curve = this.curveAt(coords)
+    if(!curve) return {}
+    if(this.split?.curve != curve) {
+      this.split = { curve, pieces: curve.split(this.sketch.elements), plans: new Map() }
+    }
+    const pieces = this.split.pieces
+    if(pieces.length < 2) return { curve }
+    const segment = pieces.minMaxBy(Math.min, piece => piece.distanceTo(vec))
+    return { curve, plan: this.plan(curve, pieces, segment, vec) }
+  }
+
+  // Plans are cached so the preview is only rebuilt when the edit changes.
+  cachedPlan(key, build) {
+    if(!this.split.plans.has(key)) this.split.plans.set(key, build())
+    return this.split.plans.get(key)
+  }
+
+  mouseMove(vec, coords) {
+    const { curve, plan } = this.planAt(coords, vec)
+    this.viewport.$emit('update:highlight', null)
+    if(plan == this.previewed) return
+    this.clearPreview()
+    if(plan) this.showPreview(curve, plan)
+    this.viewport.renderer.render()
+  }
+
+  click(vec, coords) {
+    const { curve, plan } = this.planAt(coords, vec)
+    if(curve && !plan) window.bus.emit('toast', this.constructor.noSegmentMessage)
+    if(!plan) return this.viewport.renderer.render()
+
+    const { replacements } = plan
+    replacements.forEach(piece => piece.isReference = curve.isReference)
+    this.split.pieces.filter(piece => !replacements.includes(piece)).forEach(piece => piece.clear())
+    this.sketch.replaceElement(curve, replacements)
+    plan.joins?.forEach(([left, leftIndex, right, rightIndex]) => this.sketch.addConstraint(
+      new CoincidentConstraint(new ElemRef(left, leftIndex), new ElemRef(right, rightIndex))
+    ))
+    this.split = null
+    this.clearPreview()
+    this.finish(curve)
+  }
+
+  showPreview(curve, plan) {
+    const renderer = this.viewport.renderer
+    this.previewed = plan
+    this.preview = markRaw(new THREE.Group())
+    this.preview.matrix.copy(curve.mesh().matrix)
+    this.preview.matrix.decompose(this.preview.position, this.preview.quaternion, this.preview.scale)
+    const line = renderer.convertLine(plan.preview.tesselate(), this.constructor.previewMaterial)
+    renderer.offsetSketchObject(line)
+    // Draw over the curve's own line, which lies at the same depth.
+    line.renderOrder = 1
+    this.preview.add(line)
+    plan.cuts.forEach(point => {
+      const dot = new ScreenPointObject(9, materials.highlightUiPoint)
+      dot.position.copy(point)
+      this.preview.add(dot)
+    })
+    renderer.add(this.preview)
+  }
+
+  clearPreview() {
+    this.viewport.renderer.remove(this.preview)
+    this.preview = null
+    this.previewed = null
+  }
+
+  dispose() {
+    this.clearPreview()
+    this.viewport.renderer.render()
+  }
+}
+
+
+export class TrimTool extends SegmentEditTool {
+  static icon = 'sketch-trim'
+  static noSegmentMessage = 'Curve has no intersection to trim to'
+  static previewMaterial = materials.trimLine
+
+  // The rest of a closed curve stays one arc. An open curve keeps one piece
+  // before and one after the segment, rather than every split piece.
+  plan(curve, pieces, segment) {
+    return this.cachedPlan(segment, () => {
+      if(curve.isClosed()) {
+        return { preview: segment, cuts: segment.endpoints(), replacements: [circleRest(segment)] }
+      }
+      const index = pieces.indexOf(segment)
+      const [start, end] = segment.endpoints()
+      return {
+        preview: segment,
+        cuts: [index > 0 && start, index < pieces.length - 1 && end].filter(Boolean),
+        replacements: [
+          index > 0 && trimToPoint(curve, 1, curve.unsample(start), start.clone()),
+          index < pieces.length - 1 && trimToPoint(curve, 0, curve.unsample(end), end.clone()),
+        ].filter(Boolean).map(part => part.curve),
+      }
+    })
+  }
+}
+
+
+// Split the clicked curve at the intersection nearest to the cursor. The
+// preview shows the resulting piece on the cursor's side.
+export class BreakTool extends SegmentEditTool {
+  static icon = 'sketch-break'
+  static noSegmentMessage = 'Curve has no intersection to break at'
+  static previewMaterial = materials.highlightLine
+
+  plan(curve, pieces, segment, vec) {
+    // A closed curve needs two cuts, so the hovered segment is broken out.
+    if(curve.isClosed()) return this.cachedPlan(segment, () => {
+      const rest = circleRest(segment)
+      return {
+        preview: segment,
+        cuts: segment.endpoints(),
+        replacements: [segment, rest],
+        joins: [[segment, 2, rest, 1], [rest, 2, segment, 1]],
+      }
+    })
+
+    // Open curve pieces are in traversal order, so cut i joins piece i to
+    // piece i + 1.
+    const index = pieces.indexOf(segment)
+    const cut = [index - 1, index].filter(i => i >= 0 && i < pieces.length - 1)
+      .minMaxBy(Math.min, i => pieces[i].endpoints()[1].distanceTo(vec))
+    return this.cachedPlan(cut, () => {
+      const point = pieces[cut].endpoints()[1]
+      const parameter = curve.unsample(point)
+      // Cut pieces get a handle at the cut, so they can be joined there.
+      const [first, second] = [1, 0].map(end => trimToPoint(curve, end, parameter, point.clone()))
+      return {
+        preview: (index > cut ? second : first).curve,
+        cuts: [point],
+        replacements: [first.curve, second.curve],
+        joins: [[first.curve, first.index, second.curve, second.index]],
+      }
+    })
+  }
+}
+
+// The arc completing a circle from the end of one of its arc pieces back to
+// that piece's start.
+function circleRest(segment) {
+  const direction = Math.sign(segment.sweep)
+  return new Arc(segment.center(), segment.radius,
+    segment.start + segment.sweep, direction * (Math.PI * 2 - Math.abs(segment.sweep)))
+}
+
+
+// Lengthen the end nearest to the click up to the closest curve it meets.
+export class ExtendTool extends CurveEditTool {
+  static icon = 'sketch-extend'
+
+  click(vec, coords) {
+    const curve = this.curveAt(coords)
+    if(!curve) return this.viewport.renderer.render()
+    if(!(curve instanceof Line || curve instanceof Arc)) {
+      window.bus.emit('toast', 'Only lines and arcs can be extended')
+      return this.viewport.renderer.render()
+    }
+
+    const endpoints = curve.endpoints()
+    const end = endpoints[0].distanceTo(vec) < endpoints[1].distanceTo(vec) ? 0 : 1
+    const point = endpoints[end]
+    const targets = [
+      ...this.sketch.elements,
+      ...this.sketch.projections.map(projection => projection.geometry()).filter(Boolean),
+    ].filter(elem => elem != curve && elem.geom)
+    const extension = curve instanceof Line ? lineExtension(curve, end, targets) : arcExtension(curve, end)
+    const start = extension.range().start
+    const hits = targets.flatMap(target => extension.intersections(target.geom(), modelTolerance)
+      .filter(hit => hit.kind == 'point')
+      .map(hit => ({
+        target,
+        point: new THREE.Vector3(hit.point.x, hit.point.y, 0),
+        distance: Math.abs(hit.firstParameter - start),
+      }))
+      .filter(hit => hit.point.distanceTo(point) > EPSILON))
+    if(!hits.length) {
+      window.bus.emit('toast', 'No curve to extend to')
+      return this.viewport.renderer.render()
+    }
+
+    const hit = hits.minMaxBy(Math.min, hit => hit.distance)
+    const replacement = extendedCurve(curve, end, hit)
+    replacement.isReference = curve.isReference
+    this.sketch.replaceElement(curve, [replacement])
+    const targetIndex = hit.target.handles().findIndex(handle => handle.almost(hit.point))
+    const snap = isConstrainablePoint(hit.target, targetIndex) ?
+      { elem: hit.target, index: targetIndex } : { curve: hit.target }
+    addCapturedSnapConstraint(this.sketch, snap, replacement, curve instanceof Line ? end : end + 1, true)
+    this.finish(curve)
+  }
+}
+
+// A segment from the line's end, long enough to reach every target.
+function lineExtension(line, end, targets) {
+  const point = line.points[end]
+  const direction = point.clone().sub(line.points[1 - end]).normalize()
+  const reach = Math.max(0, ...targets.flatMap(target =>
+    target.tesselate().map(([x, y]) => point.distanceTo(new THREE.Vector3(x, y, 0)))))
+  return sx.TrimmedCurve2.line(point2(point), point2(point.clone().addScaledVector(direction, reach + 1)))
+}
+
+// The rest of the arc's circle, traversed away from the given end.
+function arcExtension(arc, end) {
+  const geom = arc.geom(), range = geom.range()
+  const direction = Math.sign(arc.sweep) * (end ? 1 : -1)
+  const from = end ? range.end : range.start
+  return sx.TrimmedCurve2.new(geom.curve(),
+    sx.ParameterRange.new(from, from + direction * (Math.PI * 2 - Math.abs(arc.sweep))))
+}
+
+function extendedCurve(curve, end, hit) {
+  if(curve instanceof Line) {
+    const points = curve.points.map(point => point.clone())
+    points[end] = hit.point
+    return new Line(...points)
+  }
+  const growth = Math.sign(curve.sweep) * hit.distance
+  return new Arc(curve.center(), curve.radius, end ? curve.start : curve.start - growth, curve.sweep + growth)
 }
 
 

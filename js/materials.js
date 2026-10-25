@@ -32,6 +32,9 @@ class Materials {
     this.highlightLine.color.set('#2590e1')
     this.highlightLine.depthTest = false
 
+    this.trimLine = this.highlightLine.clone()
+    this.trimLine.color.set('#e5484d')
+
     this.visibleHighlightLine = this.highlightLine.clone()
     this.visibleHighlightLine.depthTest = true
 

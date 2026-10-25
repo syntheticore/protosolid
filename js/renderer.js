@@ -711,6 +711,7 @@ export default class Renderer {
     materials.line.resolution.set(width, height)
     materials.selectionLine.resolution.set(width, height)
     materials.highlightLine.resolution.set(width, height)
+    materials.trimLine.resolution.set(width, height)
     materials.visibleHighlightLine.resolution.set(width, height)
     materials.visibleCutHighlightLine.resolution.set(width, height)
     materials.referenceLine.resolution.set(width, height)

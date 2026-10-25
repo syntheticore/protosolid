@@ -273,6 +273,8 @@
     PolygonTool,
     ArcTool,
     TrimTool,
+    BreakTool,
+    ExtendTool,
     SketchFilletTool,
     TouchConstraintTool,
     PerpendicularConstraintTool,
@@ -372,7 +374,6 @@
               { title: 'Slot', tool: SlotTool },
               { title: 'Polygon', tool: PolygonTool },
               { title: 'Text', icon: 'font' },
-              { title: 'Split all', action: this.splitAll, icon: 'file-export' },
             ]
           },
           {
@@ -381,8 +382,8 @@
             tools: [
               { title: 'Trim', tool: TrimTool, hotKey: 'T', keyCode: 84},
               { title: 'Fillet', tool: SketchFilletTool, hotKey: 'F', keyCode: 70 },
-              { title: 'Break', icon: 'sketch-break' },
-              { title: 'Extend', icon: 'sketch-extend' },
+              { title: 'Break', tool: BreakTool },
+              { title: 'Extend', tool: ExtendTool },
               { title: 'Offset', tool: OffsetTool },
               { title: 'Mirror', tool: SketchMirrorTool },
               { title: 'Project', tool: ProjectTool, hotKey: 'P', keyCode: 80 },
@@ -655,15 +656,6 @@
               elem.sketch.profileUpdateNeeded = true
             })
         }
-      },
-
-      splitAll: function() {
-        const elems = this.document.activeSketch.elements
-        const elements = this.document.activeSketch.removeEmpties(elems)
-        elems.forEach(elem => this.document.activeSketch.remove(elem))
-        const cutElements = elements.flatMap(elem => elem.split(elements) )
-        const removed = this.document.activeSketch.removeDanglingSegments(cutElements)
-        removed.forEach(elem => this.document.activeSketch.add(elem) )
       },
     },
   }

@@ -34,7 +34,7 @@
         v-model:highlight="highlight"
       )
 
-    .side-bar.right
+    .side-bar.right(:class="{ 'always-labels': alwaysShowSideLabels }")
 
       section.side-section
 
@@ -207,6 +207,9 @@
         &:hover
           .side-label
             opacity: 1
+
+      &.always-labels .side-label
+        opacity: 1
 
       .view-chooser
       .radio-bar
@@ -386,6 +389,7 @@
         previewColorMode: null,
         sketchSection: true,
         previewOnHover: preferences.previewOnHover,
+        alwaysShowSideLabels: preferences.alwaysShowSideLabels,
       }
     },
 
@@ -446,7 +450,10 @@
     mounted() {
       this.bus.on('keydown', this.keyDown)
       this.bus.emit('activate-tool', ManipulationTool)
-      this.unbindPrefs = prefEmitter.on('updated', () => this.previewOnHover = preferences.previewOnHover )
+      this.unbindPrefs = prefEmitter.on('updated', () => {
+        this.previewOnHover = preferences.previewOnHover
+        this.alwaysShowSideLabels = preferences.alwaysShowSideLabels
+      })
     },
 
     unmounted() {

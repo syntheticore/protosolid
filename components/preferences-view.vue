@@ -91,6 +91,12 @@
               small Blur content behind floating controls
             input.input(type="checkbox" v-model="preferences.blurredOverlays")
 
+          label
+            span.setting-label
+              strong Always show side bar labels
+              small Display tooltips for view & render settings constantly, instead of on hover.
+            input.input(type="checkbox" v-model="preferences.alwaysShowSideLabels")
+
       section(v-else-if="activeSection === 'behaviour'")
         header
           h1 Behaviour

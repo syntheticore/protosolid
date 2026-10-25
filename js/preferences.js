@@ -12,6 +12,7 @@ const preferences = {
   antiAlias: true,
   shadowMaps: true,
   blurredOverlays: true,
+  alwaysShowSideLabels: true,
   timelineFeatureVisibility: 'all',
   previewOnHover: true,
   debugMode: false,

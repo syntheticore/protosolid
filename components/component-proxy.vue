@@ -5,7 +5,7 @@
   template(v-for="solid in compound ? compound.solids() : []")
 
     SolidProxy(
-      v-if="!component.isItemHidden(solid.id)"
+      v-if="!component.isItemHidden(solid.id) || solid.id == highlight?.id"
       :solid="solid"
       :key="solid.id"
       :document="document"

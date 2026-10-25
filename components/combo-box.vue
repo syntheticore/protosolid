@@ -10,7 +10,7 @@
       :aria-label="label"
       :aria-expanded="open"
       :aria-controls="menuId"
-      :aria-activedescendant="open ? `${menuId}-${activeIndex}` : undefined"
+      :aria-activedescendant="open && activeIndex >= 0 ? `${menuId}-${activeIndex}` : undefined"
       :disabled="disabled"
       @click="open ? close() : show()"
       @blur="close"
@@ -18,7 +18,7 @@
 
       span.value {{ selected?.label || placeholder }}
 
-      Icon.expander(icon="angle-down")
+      Icon.expander(icon="angle-down" :class="{ open }")
 
     Teleport(to="body")
 
@@ -30,6 +30,7 @@
         :aria-label="label"
         :style="menuStyle"
         @pointerdown.prevent.stop
+        @pointermove="activeIndex = -1"
         @click.stop
       )
 
@@ -40,7 +41,6 @@
           role="option"
           :aria-selected="option.value === modelValue"
           :class="{ active: index === activeIndex, selected: option.value === modelValue }"
-          @pointermove="activeIndex = index"
           @click="choose(index)"
         )
 
@@ -65,15 +65,17 @@
   const trigger = ref(null)
   const menu = ref(null)
   const open = ref(false)
-  const activeIndex = ref(0)
+  // Option highlighted by keyboard navigation, the mouse uses :hover
+  const activeIndex = ref(-1)
   const menuStyle = ref({})
-  const selected = computed(() => props.options.find(option => option.value === props.modelValue))
+  const selectedIndex = computed(() => props.options.findIndex(option => option.value === props.modelValue))
+  const selected = computed(() => props.options[selectedIndex.value])
   let search = ''
   let searchTimer
 
   async function show() {
     if(props.disabled || !props.options.length) return
-    activeIndex.value = Math.max(0, props.options.findIndex(option => option.value === props.modelValue))
+    activeIndex.value = -1
     const rect = trigger.value.getBoundingClientRect()
     const below = window.innerHeight - rect.bottom - 8
     const above = rect.top - 8
@@ -122,7 +124,8 @@
   }
 
   function revealActive() {
-    nextTick(() => menu.value?.children[activeIndex.value]?.scrollIntoView({ block: 'nearest' }))
+    const index = activeIndex.value >= 0 ? activeIndex.value : selectedIndex.value
+    nextTick(() => menu.value?.children[index]?.scrollIntoView({ block: 'nearest' }))
   }
 
   function onKeydown(event) {
@@ -135,14 +138,21 @@
       close()
     } else if(['Enter', ' '].includes(event.key)) {
       event.preventDefault()
-      if(open.value) choose(activeIndex.value)
-      else show()
+      if(!open.value) show()
+      else if(activeIndex.value >= 0) choose(activeIndex.value)
+      else close()
     } else if(['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault()
       if(!open.value) show()
       else if(event.key === 'Home') activeIndex.value = 0
       else if(event.key === 'End') activeIndex.value = props.options.length - 1
-      else activeIndex.value = (activeIndex.value + (event.key === 'ArrowDown' ? 1 : -1) + props.options.length) % props.options.length
+      else {
+        // Continue from the selected option when nothing is highlighted yet
+        const index = activeIndex.value >= 0 ? activeIndex.value : selectedIndex.value
+        const step = event.key === 'ArrowDown' ? 1 : -1
+        activeIndex.value = index < 0 ? (step > 0 ? 0 : props.options.length - 1) :
+          (index + step + props.options.length) % props.options.length
+      }
       revealActive()
     } else if(event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault()
@@ -180,9 +190,12 @@
     width: 100%
     min-width: 0
     height: 100%
+    border-radius: 3px
     font-size: inherit
     font-weight: inherit
-    cursor: pointer
+
+    &:focus
+      border-color: transparent
 
     &:disabled
       opacity: 0.5
@@ -194,7 +207,11 @@
 
   .expander
     flex-shrink: 0
-    font-size: 10px
+    font-size: 12px
+    transition: transform 0.15s
+
+    &.open
+      transform: rotate(180deg)
 
   .combo-menu
     position: fixed
@@ -215,11 +232,11 @@
     min-height: 30px
     padding: 0 8px
     border-radius: optionRadius
-    cursor: pointer
 
     &.selected
       color: white
 
+    &:hover
     &.active
       color: white
       background: $highlight

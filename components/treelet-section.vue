@@ -33,34 +33,30 @@
             @click.stop="deleteSection"
           )
 
-      .content.form(v-if="expanded" @input="document.markChanged()")
+      .content.form(v-if="expanded")
 
         fieldset
 
           label
-
-            .flex.gap.section-fields
-              input.input(type="number" v-model.number="section.position.x" step="0.1")
-              input.input(type="number" v-model.number="section.position.y" step="0.1")
-              input.input(type="number" v-model.number="section.position.z" step="0.1")
-
+            VectorInput(
+              :value="section.position"
+              :step="0.1"
+              @update="(axis, value) => set(section.position, axis, value)"
+            )
             span Position
 
           label
-
-            .flex.gap.section-fields
-
-              input.input(type="number" v-model="section.orientation.x" min="0.0" step="1.0" max="360.0")
-
-              input.input(type="number" v-model="section.orientation.y" min="0.0" step="1.0" max="360.0")
-
+            VectorInput(
+              :value="section.orientation"
+              :axes="['x', 'y']"
+              :min="0"
+              :max="360"
+              @update="(axis, value) => set(section.orientation, axis, value)"
+            )
             span Orientation
 
           label
-
-            .section-fields.side-field
-              input(type="checkbox" v-model="section.side")
-
+            ToggleSwitch(v-model="section.side" @update:model-value="document.markChanged()")
             span Side
 
 </template>
@@ -82,15 +78,8 @@
     .expanded &
       transform: rotate(90deg)
 
-  .flex > *
-    width: 0 !important
-
-  .side-field
-    display: flex
-    justify-content: flex-end
-
   .form label > :first-child
-    width: 184px
+    width: 204px
 
 </style>
 
@@ -106,6 +95,11 @@
       props.document.activateInteractivePanel(value ? `section:${props.component.id}:${props.section.id}` : null)
     },
   })
+
+  function set(vector, axis, value) {
+    vector[axis] = value
+    props.document.markChanged()
+  }
 
   function toggleVisibility() {
     props.section.hidden = !props.section.hidden

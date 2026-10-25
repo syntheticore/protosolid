@@ -76,10 +76,6 @@ input, textarea, label, svg
 button:disabled
   pointer-events: none
 
-input[type="range"]
-  padding: unset
-  border: unset
-
 input[type="color"]
   border: none
   padding: 0
@@ -100,19 +96,19 @@ input[type="color"]
       margin: 0
       margin-right: 8px
 
+    // Same size as number inputs
     .combo-box,
     input[type="text"],
-    input[type="number"],
     .button
-      height: 24px
+      height: 26px
+
+    .button
+      border-radius: 3px
 
     > input[type="color"]
       height: 16px
       border-radius: 2px
       border: 2px solid $bright1
-
-    > input[type="checkbox"]
-      width: unset
 
   h3
     font-size: 12px

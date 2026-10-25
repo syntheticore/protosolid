@@ -1,9 +1,11 @@
 <template lang="pug">
 
-  .numeric-input(:class="{ 'has-tool': icon, parameterized }")
+  .numeric-input(:class="{ 'has-tool': $slots.default, labeled: label, parameterized, stretch }")
 
-    button.button(v-if="icon" type="button" tabindex="-1")
-      Icon(:icon="icon")
+    //- Optional button left of the input
+    slot
+
+    span.label(v-if="label") {{ label }}
 
     input.input(
       type="text"
@@ -18,7 +20,7 @@
       @keydown.enter="commit()"
     )
 
-    .controls
+    .spinner
 
       button.button(type="button" tabindex="-1" @mousedown.prevent @click="$emit('increase')")
         Icon(icon="caret-up")
@@ -61,24 +63,45 @@
       input::selection
         background: lighten($purple, 50%)
 
+    // Match the spinner height, also within forms
+    .input
+      height: auto
+
     &:not(.has-tool) input
       border-top-left-radius: 3px
       border-bottom-left-radius: 3px
 
-  .button
-    margin: 0
-    padding: 0px 5px
-    text-shadow: none
-    border-radius: 3px
-    border-top-right-radius: 0
-    border-bottom-right-radius: 0
+    &.stretch input
+      flex: 1 1 0
+      min-width: 0
 
-  .controls
+    // Shown inside the input, left of the value
+    .label
+      position: absolute
+      top: 0
+      bottom: 0
+      left: 6px
+      z-index: 2
+      display: flex
+      align-items: center
+      font-size: 9px
+      font-weight: 900
+      color: $bright2 * 0.6
+      pointer-events: none
+
+    &.labeled input
+      padding-left: 12px
+
+  .spinner
     display: flex
     flex-direction: column
     flex: 0 0 auto
     .button
-      padding-bottom: 1px
+      flex: 1 1 auto
+      height: auto
+      margin: 0
+      padding: 0 5px 1px
+      text-shadow: none
       border-radius: 0
       font-size: 9px
       &:first-child
@@ -99,12 +122,12 @@
       autoFocus: Boolean,
       focusOnMount: Boolean,
       problem: Boolean,
-      icon: {
-        type: String,
-        default: null,
-      },
+      // Short text shown inside the input
+      label: String,
       inputmode: String,
       parameterized: Boolean,
+      // Fill the available width instead of sizing to the value
+      stretch: Boolean,
     },
 
     emits: ['commit', 'increase', 'decrease'],
@@ -117,6 +140,7 @@
 
     computed: {
       inputStyle() {
+        if(this.stretch) return null
         const width = 24 + Math.max(2, String(this.value).length * 11)
         return { width: String(width) + 'px' }
       },

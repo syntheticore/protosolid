@@ -42,15 +42,15 @@
             span Title
 
           label
-            input.input(type="number" v-model.number="material.density" min="0.0" step="0.01" max="10.0")
+            ScalarInput(:value="material.density" :min="0" :max="10" :step="0.01" stretch @update:value="set('density', $event)")
             span Density (g/cm³)
 
           label
-            input.input(type="number" v-model.number="material.elasticModulus" min="0" step="any")
+            ScalarInput(:value="material.elasticModulus" :min="0" :step="100" stretch @update:value="set('elasticModulus', $event)")
             span Elastic modulus (MPa)
 
           label
-            input.input(type="number" v-model.number="material.poissonRatio" min="0" max="0.449" step="0.01")
+            ScalarInput(:value="material.poissonRatio" :min="0" :max="0.449" :step="0.01" stretch @update:value="set('poissonRatio', $event)")
             span Poisson ratio
 
         fieldset.visual
@@ -62,27 +62,27 @@
             span Color
 
           label
-            input(type="checkbox" v-model="material.metal")
+            ToggleSwitch(v-model="material.metal")
             span Metal
 
           label
-            input(type="range" v-model="material.roughness" min="0.0" step="0.001" max="1.0")
+            RangeSlider(v-model="material.roughness" :step="0.001")
             span Roughness
 
           label
-            input(type="range" v-model="material.emission" min="0.0" step="0.001" max="1.0")
+            RangeSlider(v-model="material.emission" :step="0.001")
             span Emission
 
           label
-            input(type="range" v-model="material.transparency" min="0.0" step="0.001" max="1.0" @input="bus.emit('render-needed')")
+            RangeSlider(v-model="material.transparency" :step="0.001" @update:model-value="bus.emit('render-needed')")
             span Transparency
 
           label(v-if="material.transparency > 0" title="Controls how strongly transmitted light bends; glass is typically 1.5.")
-            input.input(type="number" v-model.number="material.refractiveIndex" min="1.0" step="0.01" max="2.333" @input="bus.emit('render-needed')")
+            ScalarInput(:value="material.refractiveIndex" :min="1" :max="2.333" :step="0.01" stretch @update:value="set('refractiveIndex', $event)")
             span Refractive Index
 
           label
-            input(type="checkbox" v-model="material.clearcoat")
+            ToggleSwitch(v-model="material.clearcoat")
             span Clear Coat
 
 </template>
@@ -138,6 +138,12 @@
     },
 
     methods: {
+      set(key, value) {
+        this.material[key] = value
+        this.document.markChanged()
+        this.bus.emit('render-needed')
+      },
+
       cloneMaterial: function() {
         this.component.creator.material = this.material.clone()
         this.document.materials.push(this.component.creator.material)

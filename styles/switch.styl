@@ -1,0 +1,45 @@
+// Shared look of toggle switches and range sliders: a pill shaped track with
+// a dark outer ring and a lighter inner border like buttons, and a round knob
+
+$switchHeight = 20px
+$switchRing = 1px
+$switchBorder = 1px
+// Knob position from the inside of the outer ring, leaving a gap to the inner border
+$switchKnobOffset = $switchBorder + 1px
+$switchKnobSize = $switchHeight - ($switchRing + $switchKnobOffset) * 2
+$switchInnerRadius = $switchHeight / 2 - $switchRing
+$switchInsetShadow = inset 0 1px 2px rgba(black, 0.4)
+// Knob color on a highlighted track
+$switchKnobOn = white
+
+switch-track()
+  box-sizing: border-box
+  height: $switchHeight
+  border: $switchRing solid $dark2 * 0.55
+  border-radius: ($switchHeight / 2)
+  background-color: $dark1 * 1.6
+  // Keep the background from showing through the antialiased border
+  background-clip: padding-box
+
+// Drawn as a real border so it snaps to device pixels
+switch-inner-border()
+  content: ''
+  position: absolute
+  inset: 0
+  border: $switchBorder solid $dark1 * 1.5
+  border-radius: $switchInnerRadius
+  pointer-events: none
+
+switch-knob()
+  appearance: none
+  box-sizing: border-box
+  width: $switchKnobSize
+  height: $switchKnobSize
+  border: none
+  border-radius: 50%
+  background: $bright1
+  box-shadow: 0 1px 2px rgba(black, 0.4)
+
+switch-focus()
+  outline: 2px solid lighten($highlight, 40%)
+  outline-offset: 1px

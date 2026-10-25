@@ -248,6 +248,7 @@
 
         .button
           min-width: 0
+          height: 28px
 
       .buttons
         pointer-events: auto
@@ -261,6 +262,7 @@
           min-width: 0
 
           :deep(.button)
+            height: 28px
             padding: 4px
 
         .display-toggle

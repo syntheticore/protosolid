@@ -50,17 +50,20 @@
             span Plane
 
           label
-            input.canvas-fields(type="range" v-model="canvas.scale" min="0.01" step="0.001" max="10.0")
+            RangeSlider.canvas-fields(v-model="canvas.scale" :min="0.01" :max="10" :step="0.001")
             span Scale
 
           label
-            input.canvas-fields(type="range" v-model.number="canvas.transparency" min="0" step="0.01" max="1")
+            RangeSlider.canvas-fields(v-model="canvas.transparency")
             span Transparency
 
           label
-            .flex.gap.canvas-fields
-              input.input(type="number" v-model.number="canvas.x" step="0.1")
-              input.input(type="number" v-model.number="canvas.y" step="0.1")
+            VectorInput.canvas-fields(
+              :value="canvas"
+              :axes="['x', 'y']"
+              :step="0.1"
+              @update="setPosition"
+            )
             span Position
 
 </template>
@@ -99,9 +102,6 @@
     display: block
     width: 100%
 
-  .flex > *
-    min-width: 0
-
   .form label > :first-child
     width: 146px
 
@@ -127,6 +127,11 @@
   const sourceName = computed(() =>
     props.canvas.src?.split(/[\\/]/).pop() || 'Canvas'
   )
+
+  function setPosition(axis, value) {
+    props.canvas[axis] = value
+    props.document.markChanged()
+  }
 
   function toggleVisibility() {
     props.canvas.hidden = !props.canvas.hidden

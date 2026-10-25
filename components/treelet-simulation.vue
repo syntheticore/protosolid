@@ -58,28 +58,28 @@
 
           label(v-for="input in configuration.inputs" :key="input.key")
             span {{ input.label }}
-            input.input(
-              type="number"
-              :step="input.step || 'any'"
+            ScalarInput.value(
+              :value="simulation[input.key]"
+              :step="input.step"
               :min="input.min"
               :max="input.max"
-              :value="simulation[input.key]"
-              @change="changed(input.key, $event)"
+              stretch
+              @update:value="changed(input.key, $event)"
             )
 
           label.quality(v-if="simulation.mode == 'static'")
             span Quality {{ simulation.quality }} / 5
-            input(type="range" min="1" max="5" step="1" title="Refines the solver grid and animated display mesh" :value="simulation.quality" @change="changed('quality', $event)")
+            RangeSlider(:min="1" :max="5" :step="1" title="Refines the solver grid and animated display mesh" :model-value="simulation.quality" @change="changed('quality', $event)")
 
           template(v-if="simulation.mode == 'fluid'")
 
             label.display-option
               span Flow vectors
-              input(type="checkbox" :checked="simulation.showFlowVectors" @change="displayChanged('showFlowVectors', $event)")
+              ToggleSwitch(:model-value="simulation.showFlowVectors" @update:model-value="displayChanged('showFlowVectors', $event)")
 
             label.display-option
               span Flow lines
-              input(type="checkbox" :checked="simulation.showFlowLines" @change="displayChanged('showFlowLines', $event)")
+              ToggleSwitch(:model-value="simulation.showFlowLines" @update:model-value="displayChanged('showFlowLines', $event)")
 
         fieldset.result-stats(v-if="simulation.mode == 'static'")
 
@@ -200,12 +200,12 @@
     background: $purple
     border-color: lighten($purple, 75%)
 
-  .input
-    width: 64px
+  .value
+    width: 82px
     justify-self: end
 
-  .quality input
-    width: 62px
+  .quality .range-slider
+    width: 82px
     justify-self: end
 
   .result-stats
@@ -229,10 +229,6 @@
 
   .fluid-selector
     width: 120px
-    justify-self: end
-
-  .fluid fieldset .display-option input[type="checkbox"]
-    margin-left: 0
     justify-self: end
 
   fieldset label
@@ -533,8 +529,9 @@
         this.$nextTick(this.updatePaths)
       },
 
-      changed(key, event) {
-        this.simulation[key] = Number(event.target.value)
+      changed(key, value) {
+        if(this.simulation[key] === value) return
+        this.simulation[key] = value
         if(this.simulation.mode == 'fluid' && (key == 'density' || key == 'viscosity')) this.simulation.fluid = 'custom'
         this.document.markChanged()
         this.solve()
@@ -546,8 +543,8 @@
         this.solve()
       },
 
-      displayChanged(key, event) {
-        this.simulation[key] = event.target.checked
+      displayChanged(key, value) {
+        this.simulation[key] = value
         this.document.markChanged()
         this.bus.emit('fluid-result')
       },

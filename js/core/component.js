@@ -130,8 +130,8 @@ export class SectionView {
       const normal = new THREE.Vector3().setFromMatrixColumn(transform, 2).normalize()
       const x = Math.atan2(-normal.y, normal.z)
       const y = Math.atan2(normal.x, Math.hypot(normal.y, normal.z))
-      this.orientation.x = THREE.MathUtils.euclideanModulo(THREE.MathUtils.radToDeg(x), 360)
-      this.orientation.y = THREE.MathUtils.euclideanModulo(THREE.MathUtils.radToDeg(y), 360)
+      this.orientation.x = Number(THREE.MathUtils.euclideanModulo(THREE.MathUtils.radToDeg(x), 360).toFixed(1))
+      this.orientation.y = Number(THREE.MathUtils.euclideanModulo(THREE.MathUtils.radToDeg(y), 360).toFixed(1))
     }
   }
 

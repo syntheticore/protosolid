@@ -380,9 +380,6 @@
         fieldset + fieldset
           border-top: 1px solid $dark1 * 1.4
 
-        input[type="checkbox"]
-          margin-left: 82px
-
 </style>
 
 

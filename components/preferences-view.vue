@@ -71,31 +71,31 @@
             span.setting-label
               strong Anti-aliasing
               small Smooth jagged edges in the viewport
-            input.input(type="checkbox" v-model="preferences.antiAlias" @change="restartRequired = true")
+            ToggleSwitch(v-model="preferences.antiAlias" @update:model-value="restartRequired = true")
 
           label(:disabled="!isHighDPI")
             span.setting-label
               strong High-DPI rendering
               small Render the viewport at the display's native resolution
-            input.input(type="checkbox" v-model="preferences.highDPI")
+            ToggleSwitch(v-model="preferences.highDPI")
 
           label
             span.setting-label
               strong Display shadows
               small Show real-time shadows in the viewport
-            input.input(type="checkbox" v-model="preferences.shadowMaps" @change="restartRequired = true")
+            ToggleSwitch(v-model="preferences.shadowMaps" @update:model-value="restartRequired = true")
 
           label
             span.setting-label
               strong Blurred overlays
               small Blur content behind floating controls
-            input.input(type="checkbox" v-model="preferences.blurredOverlays")
+            ToggleSwitch(v-model="preferences.blurredOverlays")
 
           label
             span.setting-label
               strong Always show side bar labels
               small Display tooltips for view & render settings constantly, instead of on hover.
-            input.input(type="checkbox" v-model="preferences.alwaysShowSideLabels")
+            ToggleSwitch(v-model="preferences.alwaysShowSideLabels")
 
       section(v-else-if="activeSection === 'behaviour'")
         header
@@ -107,7 +107,7 @@
             span.setting-label
               strong Preview on hover
               small Preview zoom, projection, shading and material options while hovering them
-            input.input(type="checkbox" v-model="preferences.previewOnHover")
+            ToggleSwitch(v-model="preferences.previewOnHover")
 
           label
             span.setting-label
@@ -119,7 +119,7 @@
             span.setting-label
               strong Debug mode
               small Show detailed internal error messages when features fail
-            input.input(type="checkbox" v-model="preferences.debugMode")
+            ToggleSwitch(v-model="preferences.debugMode")
 
       section(v-else)
         header
@@ -131,36 +131,45 @@
             span.setting-label
               strong Center of mass deviation
               small Allowed deviation when calculating mass properties
-            input.input.measurement(type="text" v-model="preferences.centerOfMassTolerance")
+            ExpressionInput.measurement(
+              stretch
+              :expression="preferences.centerOfMassTolerance"
+              :step="0.01"
+              @expression="preferences.centerOfMassTolerance = $event"
+            )
 
           label
             span.setting-label
               strong Linear tessellation
               small Maximum deviation of the display mesh
-            input.input.measurement(
-              type="text"
-              v-model="preferences.tessellationTolerance"
-              @change="restartRequired = true"
+            ExpressionInput.measurement(
+              stretch
+              :expression="preferences.tessellationTolerance"
+              :step="0.01"
+              @expression="setRestartPreference('tessellationTolerance', $event)"
             )
 
           label
             span.setting-label
               strong Angular tessellation
               small Maximum angular deviation of the display mesh
-            input.input.measurement(
-              type="text"
-              v-model="preferences.tessellationAngularTolerance"
-              @change="restartRequired = true"
+            ExpressionInput.measurement(
+              stretch
+              :expression="preferences.tessellationAngularTolerance"
+              dimension="angle"
+              :step="0.01"
+              @expression="setRestartPreference('tessellationAngularTolerance', $event)"
             )
 
           label
             span.setting-label
               strong Sketch tessellation
               small Maximum deviation of drawn sketch curves
-            input.input.measurement(
-              type="text"
-              v-model="preferences.sketchTessellationTolerance"
-              @change="restartRequired = true"
+            ExpressionInput.measurement(
+              stretch
+              :expression="preferences.sketchTessellationTolerance"
+              :step="0.01"
+              @expression="setRestartPreference('sketchTessellationTolerance', $event)"
             )
 
       transition(name="fade")
@@ -304,16 +313,8 @@
         width: 224px
 
     .measurement
-      box-sizing: border-box
       width: 112px
       height: 28px
-      text-align: right
-
-    input[type="checkbox"]
-      width: 16px
-      height: 16px
-      margin: 0
-      accent-color: $highlight
 
   .setting-label
     display: flex
@@ -403,6 +404,12 @@
         } else {
           window.close()
         }
+      },
+
+      setRestartPreference(key, expression) {
+        if(preferences[key] == expression) return
+        preferences[key] = expression
+        this.restartRequired = true
       },
 
       restart: function() {

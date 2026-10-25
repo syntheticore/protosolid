@@ -159,7 +159,6 @@
     color: var(--color)
     font-size: 11px
     font-weight: bold
-    cursor: pointer
 
     &.current
       background: var(--color)

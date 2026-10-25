@@ -31,7 +31,7 @@
           @click.stop="remove"
         )
 
-    .content.form(v-if="expanded" @input="document.markChanged()")
+    .content.form(v-if="expanded")
 
       fieldset
 
@@ -44,11 +44,11 @@
         template(v-if="isMesh")
 
           label
-            input.input(type="number" v-model="config.maxDistance" min="0.0" step="0.01" max="10.0")
+            ScalarInput(:value="config.maxDistance" :min="0" :max="10" :step="0.01" stretch @update:value="set('maxDistance', $event)")
             span Max Deviation
 
           label
-            input.input(type="number" v-model="config.maxAngle" min="0.0" step="0.1" max="360.0")
+            ScalarInput(:value="config.maxAngle" :min="0" :max="360" stretch @update:value="set('maxAngle', $event)")
             span Max Angular Deviation
 
         label
@@ -67,15 +67,15 @@
             span Units
 
           label(title="Export hidden components and bodies")
-            input(type="checkbox" v-model="config.includeHidden")
+            ToggleSwitch(v-model="config.includeHidden" @update:model-value="document.markChanged()")
             span Include Hidden
 
           label(title="Export component colors")
-            input(type="checkbox" :checked="config.colors !== false" @change="set('colors', $event.target.checked)")
+            ToggleSwitch(:model-value="config.colors !== false" @update:model-value="set('colors', $event)")
             span Colors
 
         label(title="Auto-export when saving document")
-          input(type="checkbox" v-model="config.autoSave")
+          ToggleSwitch(v-model="config.autoSave" @update:model-value="document.markChanged()")
           span Export on Save
 
 </template>

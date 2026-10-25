@@ -7748,3 +7748,75 @@ fn transverse_circle_on_open_torus_shell() {
         }
     }
 }
+
+#[test]
+fn fillet_spline_prism_cap_edges() {
+    let tolerance = ModelTolerance::default();
+    let bezier = |points: &[(f64, f64)]| {
+        let degree = points.len() - 1;
+        let knots = [vec![0.0; degree + 1], vec![1.0; degree + 1]].concat();
+        TrimmedCurve2::new(
+            NurbsCurve2::new(
+                degree,
+                points.iter().map(|(x, y)| Point2::new(*x, *y)).collect(),
+                vec![1.0; points.len()],
+                knots,
+            )
+            .unwrap(),
+            ParameterRange::new(0.0, 1.0).unwrap(),
+        )
+        .unwrap()
+    };
+    let a = Point2::new(21.075321066969174, -53.50849373430962);
+    let p = Point2::new(-3.0051181743448665, 24.680402354050287);
+    let q = Point2::new(29.778056848718805, 44.963876532934194);
+    let r = Point2::new(69.96151398539615, -60.03632364917461);
+    let wire = Wire2::new(
+        [
+            TrimmedCurve2::line(p, q).unwrap(),
+            bezier(&[
+                (q.x, q.y),
+                (31.374786044094865, -9.119250315072938),
+                (86.64374599030397, -43.0639658712998),
+                (r.x, r.y),
+            ]),
+            TrimmedCurve2::line(r, a).unwrap(),
+            bezier(&[
+                (a.x, a.y),
+                (19.044440649207882, -13.326074037749922),
+                (-13.157746049310175, -14.295445894327267),
+                (-12.597521875747521, -0.07939109751598394),
+                (p.x, p.y),
+            ]),
+        ],
+        tolerance,
+    )
+    .unwrap();
+    let body = Profile::new(wire, [], tolerance)
+        .unwrap()
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 22.5))
+        .unwrap();
+    let curved = body
+        .edges()
+        .filter(|edge| {
+            let p = edge.endpoints().unwrap();
+            (p[0].z - p[1].z).abs() < 1e-9 && !matches!(edge.curve(), Curve3::Line(_))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(curved.len(), 4);
+    // Where a spline meets a line at about 143 degrees, the cap contact ends
+    // on the line beyond the spline's end, outside its support's domain.
+    let volume = body.volume();
+    for radius in [1.0, 3.0] {
+        for edges in curved.iter().map(|edge| vec![edge.clone()]).chain([curved.clone()]) {
+            let result = body.check_edge_blends(&edges, radius).unwrap();
+            assert_eq!(result.solids().len(), 1);
+            assert_eq!(result.faces().count(), body.faces().count() + edges.len());
+            assert!(result.volume() < volume && result.volume() > volume * 0.9);
+            result
+                .tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                .unwrap();
+        }
+    }
+}

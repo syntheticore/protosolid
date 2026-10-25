@@ -386,9 +386,28 @@ impl Transaction<'_> {
             self.working.face(faces[0])?.surface.clone(),
             self.working.face(faces[1])?.surface.clone(),
         ];
+        // A local guide continues an open curved edge by whole sixteenths of
+        // its length. Past an obtuse corner, the contact can meet its
+        // terminating edge beyond the source end, so the supports must cover
+        // that collar and not only the blend size.
+        let collar = if edge.vertices[0] == edge.vertices[1] || matches!(edge.curve, Curve3::Line(_)) {
+            0.0
+        } else {
+            let mut step: f64 = 0.0;
+            let mut previous = edge.curve.evaluate(edge.range.start)?.point;
+            for index in 1..=16 {
+                let point = edge
+                    .curve
+                    .evaluate(edge.range.start + edge.range.span() * index as f64 / 16.0)?
+                    .point;
+                step = step.max(point.distance(previous));
+                previous = point;
+            }
+            step
+        };
         for (index, surface) in parent_surfaces.iter_mut().enumerate() {
             let bounds = super::super::features::face_parameter_bounds(&self.working, faces[index], tolerance)?;
-            *surface = super::super::features::extended_support(surface, bounds, size, tolerance)?;
+            *surface = super::super::features::extended_support(surface, bounds, size.abs() + collar, tolerance)?;
         }
         let midpoint = edge
             .curve

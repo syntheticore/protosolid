@@ -39,7 +39,7 @@
             :disabled="tool.disabled || tool.isDisabled?.() || (!tool.tool && !tool.feature && !tool.action)"
             @click="activateTool(tool)"
           )
-            Icon(:icon="(tool.feature && tool.feature.icon) || (tool.tool && tool.tool.icon) || tool.icon" fixed-width)
+            Icon(:icon="toolIcon(tool)" fixed-width)
             .title(v-html="tool.title")
             .hot-key(v-if="tool.hotKey") {{ tool.hotKey }}
 
@@ -72,7 +72,11 @@
     border-top-right-radius: 3px
     border-bottom-left-radius: 6px
     border-bottom-right-radius: 6px
-    width: 630px
+    // Fit the active tab's tools, leaving room for the side bars.
+    // All tabs share the minimum width at the window's minimum width of 1000px
+    width: max-content
+    max-width: calc(100% - 370px)
+    min-width: 630px
 
   .main
     display: flex
@@ -312,6 +316,23 @@
       'document.activeSketch': function(sketch) {
         if(!this.feature) this.activeTab = this.document.activeSketch ? 1 : 4
       },
+
+      // Animate between the old and new tab's natural widths,
+      // as CSS can't transition max-content to max-content
+      activeTab: async function() {
+        const from = this.$el.offsetWidth
+        await this.$nextTick()
+        this.widthAnimation?.cancel()
+        const to = this.$el.offsetWidth
+        const animation = this.$el.animate({ width: [from + 'px', to + 'px'] }, { duration: 200, easing: 'ease-out' })
+        this.widthAnimation = animation
+        // Keep picker lines attached to the moving feature box
+        const followPaths = () => {
+          this.$refs.featureBox?.[0]?.updatePaths()
+          if(animation.playState == 'running') requestAnimationFrame(followPaths)
+        }
+        requestAnimationFrame(followPaths)
+      },
     },
 
     computed: {
@@ -498,6 +519,10 @@
     },
 
     methods: {
+      toolIcon: function(tool) {
+        return (tool.feature && tool.feature.icon) || (tool.tool && tool.tool.icon) || tool.icon
+      },
+
       onScroll: function(event) {
         this.scrolled = event.currentTarget.scrollLeft
         this.$nextTick(() => this.$refs.featureBox?.[0]?.updatePaths())

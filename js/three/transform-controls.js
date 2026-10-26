@@ -23,6 +23,7 @@ import {
   Vector3
 } from 'three';
 import { snapTranslation, translationSnapStep } from './gizmo-snapping.js';
+import { setRaycasterFromCamera } from './dual-camera.js';
 
 // Screen size of one gizmo unit in CSS pixels at size 1
 const GIZMO_PIXEL_SIZE = 60;
@@ -230,7 +231,7 @@ class TransformControls extends Object3D {
 
     if ( this.object === undefined || this.dragging === true ) return;
 
-    _raycaster.setFromCamera( pointer, this.camera );
+    setRaycasterFromCamera( _raycaster, pointer, this.camera );
 
     const intersect = intersectObjectWithRay( this._gizmo.picker[ this.mode ], _raycaster );
 
@@ -252,7 +253,7 @@ class TransformControls extends Object3D {
 
     if ( this.axis !== null ) {
 
-      _raycaster.setFromCamera( pointer, this.camera );
+      setRaycasterFromCamera( _raycaster, pointer, this.camera );
 
       const planeIntersect = intersectObjectWithRay( this._plane, _raycaster, true );
 
@@ -326,7 +327,7 @@ class TransformControls extends Object3D {
 
     if ( object === undefined || axis === null || this.dragging === false || pointer.button !== - 1 ) return;
 
-    _raycaster.setFromCamera( pointer, this.camera );
+    setRaycasterFromCamera( _raycaster, pointer, this.camera );
 
     const planeIntersect = intersectObjectWithRay( this._plane, _raycaster, true );
 

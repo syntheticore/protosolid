@@ -2,6 +2,7 @@ import * as THREE from 'three'
 
 import { Circle, Arc } from '../core/geom2d.js'
 import materials from '../materials.js'
+import { setRaycasterFromCamera } from './dual-camera.js'
 
 const LEADER_LENGTH_PX = 50
 const ARC_EXTENSION_STEPS = 32
@@ -174,7 +175,7 @@ function makeCircularDimension(controls, renderer, circle, constraint, isDiamete
     if(view.equals(lastView) && width === lastWidth) return
     const label = position.clone().applyMatrix4(transform).project(camera)
     const elbows = [-1, 1].map(direction => {
-      raycaster.setFromCamera(new THREE.Vector2(label.x + direction * 2 * LEADER_LENGTH_PX / width, label.y), camera)
+      setRaycasterFromCamera(raycaster, new THREE.Vector2(label.x + direction * 2 * LEADER_LENGTH_PX / width, label.y), camera)
       return raycaster.ray.intersectPlane(plane, new THREE.Vector3())?.applyMatrix4(inverse)
     })
     // Seen edge-on, or before the camera is set up, the screen offsets miss

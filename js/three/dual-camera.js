@@ -1,5 +1,16 @@
 import * as THREE from 'three'
 
+// Raycaster.setFromCamera starts orthographic rays in the camera plane, but
+// the orthographic near plane lies behind the camera, which zooming moves
+// close to its target. Start at the near plane so everything that renders
+// can also be picked.
+export function setRaycasterFromCamera(raycaster, coords, camera) {
+  const near = new THREE.Vector3(coords.x, coords.y, -1).unproject(camera)
+  const far = new THREE.Vector3(coords.x, coords.y, 1).unproject(camera)
+  raycaster.ray.set(near, far.sub(near).normalize())
+  raycaster.camera = camera
+}
+
 export default class DualCamera {
   constructor() {
     this.perspective = new THREE.PerspectiveCamera(70, 1, 0.5, 10000)
@@ -155,12 +166,7 @@ export default class DualCamera {
   }
 
   setRaycaster(raycaster, coords) {
-    if(!this.transition) return raycaster.setFromCamera(coords, this.active)
-
-    const near = new THREE.Vector3(coords.x, coords.y, -1).unproject(this.active)
-    const far = new THREE.Vector3(coords.x, coords.y, 1).unproject(this.active)
-    raycaster.ray.set(near, far.sub(near).normalize())
-    raycaster.camera = this.active
+    setRaycasterFromCamera(raycaster, coords, this.active)
   }
 
   prepareMaterials(root) {

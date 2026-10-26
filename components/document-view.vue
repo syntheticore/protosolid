@@ -251,7 +251,14 @@
           height: 28px
 
       .buttons
+      .display-row
+        pointer-events: none
+
+      .view-row > :not(.side-label)
+      .display-row > :not(.side-label)
         pointer-events: auto
+
+      .buttons
         row-gap: 0.25rem
 
       .display-row

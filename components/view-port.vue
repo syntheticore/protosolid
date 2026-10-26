@@ -4,6 +4,7 @@
     :style="{ cursor: (activeTool && activeTool.cursor) || 'auto' }"
     :class="{ orbiting: isOrbiting, merging: !!document.activeMerge }"
     @contextmenu.prevent
+    @mouseleave="$emit('update:highlight', null)"
   )
 
     //- GL Viewport

@@ -406,6 +406,7 @@ export class DiagnosticShadingTool extends Tool {
         type: 'integer',
         min: 1,
         max: 64,
+        focus: true,
         visible: tool => tool.diagnosticMode == 'zebra',
       },
     }

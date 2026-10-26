@@ -381,7 +381,12 @@ class Materials {
         `
           vec3 diagnosticView = normalize(vViewPosition);
           vec3 diagnosticReflection = reflect(-diagnosticView, normal);
-          float stripe = step(0.0, sin(dot(diagnosticReflection, normalize(vec3(1.0, 0.65, 0.35))) * diagnosticFrequency));
+          float stripePosition = dot(diagnosticReflection, normalize(vec3(1.0, 0.65, 0.35))) * diagnosticFrequency / (2.0 * PI);
+          // Box filter the square wave over the pixel footprint (integral of the wave, differenced across fwidth)
+          float stripeWidth = max(fwidth(stripePosition), 1e-5);
+          vec2 stripeBounds = stripePosition + vec2(-0.5, 0.5) * stripeWidth;
+          vec2 stripeIntegral = floor(stripeBounds) * 0.5 + min(fract(stripeBounds), 0.5);
+          float stripe = (stripeIntegral.y - stripeIntegral.x) / stripeWidth;
           diffuseColor.rgb = mix(vec3(0.03), vec3(0.95), stripe);
         `
         :

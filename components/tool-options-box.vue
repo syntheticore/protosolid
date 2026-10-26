@@ -40,6 +40,7 @@
               :value="activeTool[key]"
               :min="setting.min"
               :max="setting.max"
+              :focus-on-mount="setting.focus"
               @update:value="setSetting(key, $event)"
             )
 
@@ -89,13 +90,13 @@
     > :not(span)
       margin-top: 6px
 
-    input
+    // Match the number input's natural height, independent of which settings are visible
     .radio-bar
     .icon-toggle
-    .info-list
-      flex: 1 1 auto
+      height: 26px
 
     .info-list
+      flex: 1 1 auto
       display: flex
       flex-direction: column
       gap: 6px

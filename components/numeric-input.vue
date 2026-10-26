@@ -104,6 +104,8 @@
       text-shadow: none
       border-radius: 0
       font-size: 9px
+      // Explicit, as browsers round the normal line height differently
+      line-height: 10px
       &:first-child
         border-top-right-radius: 3px
       &:last-child

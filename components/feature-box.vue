@@ -316,7 +316,7 @@
   import { DummyTool, ManipulationTool } from './../js/tools.js'
   import { shallowEqual } from './../js/utils.js'
   import { CreateSketchFeature } from './../js/core/features.js'
-  import { CurveReference, JointReference, PatternInputReference } from './../js/core/references.js'
+  import { CurveReference, JointReference, PatternInputReference, AxialReference } from './../js/core/references.js'
   import { SketchElement } from './../js/core/geom2d.js'
   import { referenceComponentId, worldTransform } from './../js/core/assembly.js'
   import PickerSession from './../js/picker-session.js'
@@ -598,6 +598,8 @@
       },
 
       getCenter(item, reference) {
+        // Axis frames sit at one end of the axis; aim at the picked item instead
+        if(reference instanceof AxialReference) item = reference.item.getItem()
         let center
         if(item instanceof THREE.Matrix4) {
           center = new THREE.Vector3().setFromMatrixPosition(item)

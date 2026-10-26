@@ -45,6 +45,11 @@ export class AxisHelper extends ConstructionHelper {
 
   typename() { return 'Axis' }
 
+  // Middle of the displayed axis line
+  center() {
+    return new THREE.Vector3(0, 0, 5).applyMatrix4(this.transform)
+  }
+
   axialReference() {
     return new AxialReference(new HelperReference(this))
   }

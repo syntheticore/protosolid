@@ -677,6 +677,7 @@ impl NativeFace {
             Surface3::Nurbs(_) => "nurbs",
             Surface3::Offset(_) => "offset",
             Surface3::RollingBall(_) => "rolling-ball",
+            Surface3::Blend(_) => "edge-blend",
             Surface3::Ruled(_) => "ruled",
         }
         .to_owned()
@@ -1330,11 +1331,14 @@ impl NativeCompound {
         edges: &NativeEdgeList,
         radius: f64,
         follow_tangent_edges: bool,
+        constant_width: bool,
+        curvature_continuous: bool,
     ) -> Result<Self, JsValue> {
         self.inner
             .fillet_with_options(
                 &edges.values,
-                FilletOptions::new(radius).with_tangent_propagation(follow_tangent_edges),
+                FilletOptions::new(radius).with_tangent_propagation(follow_tangent_edges)
+                    .with_constant_width(constant_width).with_curvature_continuity(curvature_continuous),
             )
             .map(|inner| Self { inner })
             .map_err(js_error)

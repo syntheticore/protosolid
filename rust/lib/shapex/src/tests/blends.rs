@@ -3,6 +3,323 @@
 use super::*;
 
 #[test]
+fn fillet_modes_build_and_tessellate_an_isolated_box_edge() {
+    let body = owned_cuboid(Point3::origin(), Point3::new(20.0, 10.0, 5.0));
+    let edge = body.edges().find(|edge| {
+        let points = edge.endpoints().unwrap();
+        (points[1].z - points[0].z).abs() > 4.9
+    }).unwrap().clone();
+    for width in [false, true] {
+        for curvature in [false, true] {
+            let result = body.fillet_with_options(&[edge.clone()], FilletOptions::new(1.0)
+                .with_constant_width(width).with_curvature_continuity(curvature)).unwrap();
+            assert_eq!(result.faces().count(), 7);
+            assert!(result.volume() > 0.0 && result.volume() < body.volume());
+            result.tessellate(TessellationOptions::new(0.05, 0.1, 24).unwrap()).unwrap();
+            if !width && !curvature { continue; }
+            let blend = result.faces().find_map(|face| match face.surface() {
+                Surface3::Blend(blend) => Some(blend), _ => None,
+            }).unwrap();
+            let parameter = blend.center_range().middle();
+            let first = result.faces().find(|face| face.surface() == blend.first_surface()).unwrap();
+            let second = result.faces().find(|face| face.surface() == blend.second_surface()).unwrap();
+            let contacts = [blend.first_pcurve(), blend.second_pcurve()].map(|pcurve| pcurve.evaluate(parameter).unwrap().point);
+            let points = [first, second].into_iter().zip(contacts).map(|(face, uv)| {
+                face.surface().evaluate(uv.x, uv.y).unwrap().point
+            }).collect::<Vec<_>>();
+            let expected_width = if width { 1.0 } else { 2.0_f64.sqrt() };
+            assert!((points[0].distance(points[1]) - expected_width).abs() < 1.0e-8);
+            if curvature {
+                let surface = Surface3::Blend(blend.clone());
+                for v in [0.0, 1.0] {
+                    let value = surface.evaluate(parameter, v).unwrap();
+                    let normal = surface.normal(parameter, v).unwrap();
+                    assert!(normal.dot(value.dvv).abs() < 1.0e-8, "planar rail must have zero transverse curvature");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn fillet_modes_build_and_tessellate_a_closed_cylinder_rim() {
+    let tolerance = ModelTolerance::default();
+    let body = Profile::new(Wire2::new([TrimmedCurve2::circle(Point2::origin(), 5.0).unwrap()], tolerance).unwrap(),
+        [], tolerance).unwrap().extrude(Plane3::xy(), Vec3::unit_z() * 10.0).unwrap();
+    let edge = body.edges().find(|edge| matches!(edge.curve(), Curve3::Circle(_))
+        && edge.endpoints().unwrap().iter().all(|point| point.z > 9.9)).unwrap().clone();
+    for width in [false, true] {
+        for curvature in [false, true] {
+            let result = body.fillet_with_options(&[edge.clone()], FilletOptions::new(0.5)
+                .with_constant_width(width).with_curvature_continuity(curvature))
+                .unwrap_or_else(|error| panic!("width {width}, G2 {curvature}: {error}"));
+            assert!(result.volume() > 0.0 && result.volume() < body.volume());
+            result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn fillet_modes_build_a_constant_width_on_a_tilted_cylinder_rim() {
+    let tolerance = ModelTolerance::default();
+    let cylinder = Profile::new(Wire2::new([TrimmedCurve2::circle(Point2::origin(), 5.0).unwrap()], tolerance).unwrap(),
+        [], tolerance).unwrap().extrude(Plane3::xy(), Vec3::unit_z() * 15.0).unwrap();
+    let cap = Plane3::new(Point3::new(0.0, 0.0, 10.0), Vec3::new(1.0, 0.0, 0.4), Vec3::unit_y(), tolerance).unwrap();
+    let body = cylinder.split(cap, SplitKeep::Left).unwrap();
+    let rim = body.edges().find(|edge| !matches!(edge.curve(), Curve3::Line(_))
+        && edge.endpoints().unwrap().iter().all(|point| point.z > 7.0)).unwrap().clone();
+    for curvature in [false, true] {
+        let result = body.fillet_with_options(&[rim.clone()], FilletOptions::new(0.5)
+            .with_constant_width(true).with_curvature_continuity(curvature)).unwrap();
+        assert!(result.volume() > 0.0 && result.volume() < body.volume());
+        result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+        for face in result.faces() {
+            let Surface3::Blend(blend) = face.surface() else { continue; };
+            let range = blend.center_range();
+            for index in 0..=16 {
+                let u = range.start + range.span() * index as f64 / 16.0;
+                let points = [(&blend.first_surface(), blend.first_pcurve()),
+                    (&blend.second_surface(), blend.second_pcurve())].map(|(surface, pcurve)| {
+                    let uv = pcurve.evaluate(u).unwrap().point;
+                    surface.evaluate(uv.x, uv.y).unwrap().point
+                });
+                assert!((points[0].distance(points[1]) - 0.5).abs() < 1.0e-8);
+                for (v, parent) in [(0.0, blend.first_surface()), (1.0, blend.second_surface())] {
+                    let point = face.surface().evaluate(u, v).unwrap().point;
+                    let uv = parent.project(point, tolerance).unwrap().parameters;
+                    let normal = parent.normal(uv.0, uv.1).unwrap();
+                    assert!(normal.cross(face.surface().normal(u, v).unwrap()).magnitude() < 1.0e-7);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn g2_fillet_follows_a_rim_across_existing_g2_corner_blends() {
+    let body = owned_cuboid(
+        Point3::new(-29.827522056939532, 0.0, -22.259344819724575),
+        Point3::new(33.88366933499765, 37.5, 26.810144205090438),
+    );
+    let vertical = body.edges().filter(|edge| {
+        let points = edge.endpoints().unwrap();
+        (points[0].y - points[1].y).abs() > 37.4
+    }).cloned().collect::<Vec<_>>();
+    assert_eq!(vertical.len(), 4);
+    for first_g2 in [false, true] {
+        let rounded = body.fillet_with_options(&vertical,
+            FilletOptions::new(12.5).with_curvature_continuity(first_g2)).unwrap();
+        let rim = rounded.edges().find(|edge| matches!(edge.curve(), Curve3::Line(_))
+            && edge.endpoints().unwrap().iter().all(|point| point.y > 37.4 && point.z > 26.8))
+            .unwrap().clone();
+        let result = rounded.fillet_with_options(&[rim],
+            FilletOptions::new(5.0).with_curvature_continuity(true)).unwrap();
+        assert_eq!(result.solids().len(), 1);
+        assert_eq!(result.faces().count(), rounded.faces().count() + 8,
+            "the fillet must propagate around all eight straight and rounded rim segments");
+        assert!(result.volume() > 0.0 && result.volume() < rounded.volume());
+        result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn width_fillet_follows_a_rim_across_existing_corner_blends() {
+    let body = owned_cuboid(
+        Point3::new(0.0, -27.898378837931627, -52.23526250506349),
+        Point3::new(45.0, 20.37966681068764, 21.962553553265337),
+    );
+    let vertical = body.edges().filter(|edge| {
+        let points = edge.endpoints().unwrap();
+        (points[0].y - points[1].y).abs() > 48.0
+    }).cloned().collect::<Vec<_>>();
+    for (first_g2, curvature, width) in [(true, false, 10.0), (true, true, 10.0), (false, false, 6.0)] {
+        let rounded = body.fillet_with_options(&vertical,
+            FilletOptions::new(12.5).with_curvature_continuity(first_g2)).unwrap();
+        let rim = rounded.edges().find(|edge| matches!(edge.curve(), Curve3::Line(_))
+            && edge.endpoints().unwrap().iter().all(|point|
+                (point.x - 45.0).abs() < 1.0e-7 && point.y < -27.8)).unwrap().clone();
+        let result = rounded.fillet_with_options(std::slice::from_ref(&rim),
+            FilletOptions::new(width).with_constant_width(true).with_curvature_continuity(curvature)).unwrap();
+        assert_eq!(result.faces().count(), 18);
+        assert!(result.volume() > 0.0 && result.volume() < rounded.volume());
+        result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+        for face in result.faces() {
+            let Surface3::Blend(blend) = face.surface() else { continue; };
+            if !matches!(blend.center_curve(), Curve3::SurfaceIntersection(curve) if curve.constant_width.is_some()) {
+                continue;
+            }
+            for fraction in [0.0, 0.5, 1.0] {
+                let u = blend.center_range().start + blend.center_range().span() * fraction;
+                let contacts = [(blend.first_surface(), blend.first_pcurve()),
+                    (blend.second_surface(), blend.second_pcurve())].map(|(surface, pcurve)| {
+                    let uv = pcurve.evaluate(u).unwrap().point;
+                    surface.evaluate(uv.x, uv.y).unwrap().point
+                });
+                assert!((contacts[0].distance(contacts[1]) - width).abs() < 1.0e-7);
+            }
+        }
+        let opening = result.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane)
+            if (plane.origin().y - 20.37966681068764).abs() < 1.0e-7)).unwrap().clone();
+        let shell = result.shell(std::slice::from_ref(&opening), 1.0).unwrap();
+        assert!(shell.volume() > 0.0);
+        shell.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+        let error = result.shell(&[opening], -8.0).unwrap_err();
+        assert!(error.diagnostics().iter().all(|diagnostic|
+            diagnostic.kind == super::super::DiagnosticKind::UnsupportedGeometry));
+    }
+}
+
+#[test]
+fn width_fillet_keeps_its_chord_across_smooth_supports_on_an_inclined_rim() {
+    let tolerance = ModelTolerance::default();
+    let centers = [(16.0, 4.0), (16.0, 16.0), (4.0, 16.0), (4.0, 4.0)];
+    let corners = centers.iter().enumerate().map(|(index, center)| {
+        TrimmedCurve2::new(crate::Circle2::new(Point2::new(center.0, center.1), 4.0).unwrap(),
+            ParameterRange::new((index as f64 - 1.0) * std::f64::consts::FRAC_PI_2,
+                index as f64 * std::f64::consts::FRAC_PI_2).unwrap()).unwrap()
+    }).collect::<Vec<_>>();
+    let mut segments = Vec::new();
+    for index in 0..4 {
+        segments.push(corners[index].clone());
+        segments.push(TrimmedCurve2::line(corners[index].end().unwrap(), corners[(index + 1) % 4].start().unwrap()).unwrap());
+    }
+    let body = Profile::new(Wire2::new(segments, tolerance).unwrap(), [], tolerance).unwrap()
+        .extrude(Plane3::xy(), Vec3::unit_z() * 20.0).unwrap();
+    let cap = Plane3::new(Point3::new(0.0, 0.0, 7.0), Vec3::new(1.0, 0.0, 0.1),
+        Vec3::new(0.0, 1.0, 0.2), tolerance).unwrap();
+    let body = body.split(cap, SplitKeep::Left).unwrap();
+    let rim = body.edges().find(|edge| matches!(edge.curve(), Curve3::Line(_))
+        && edge.endpoints().unwrap().iter().all(|point|
+            (*point - cap.origin()).dot(cap.normal()).abs() < tolerance.linear)).unwrap().clone();
+    let result = body.fillet_with_options(&[rim], FilletOptions::new(1.0).with_constant_width(true)).unwrap();
+    assert_eq!(result.faces().count(), 18);
+    result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+    let mut minimum_radius = f64::INFINITY;
+    let mut maximum_radius = 0.0_f64;
+    for face in result.faces() {
+        let Surface3::Blend(blend) = face.surface() else { continue; };
+        for fraction in [0.0, 0.5, 1.0] {
+            let u = blend.center_range().start + blend.center_range().span() * fraction;
+            let contacts = [(blend.first_surface(), blend.first_pcurve()),
+                (blend.second_surface(), blend.second_pcurve())].map(|(surface, pcurve)| {
+                let uv = pcurve.evaluate(u).unwrap().point;
+                surface.evaluate(uv.x, uv.y).unwrap().point
+            });
+            assert!((contacts[0].distance(contacts[1]) - 1.0).abs() < 1.0e-7);
+            let radius = contacts[0].distance(blend.center_curve().evaluate(u).unwrap().point);
+            minimum_radius = minimum_radius.min(radius);
+            maximum_radius = maximum_radius.max(radius);
+        }
+    }
+    assert!(maximum_radius - minimum_radius > 0.05);
+}
+
+#[test]
+fn shell_after_two_g2_fillets_meshes_offset_corner_charts() {
+    let body = owned_cuboid(
+        Point3::new(0.0, -27.898378837931627, -52.23526250506349),
+        Point3::new(45.0, 20.37966681068764, 21.962553553265337),
+    );
+    let vertical = body.edges().filter(|edge| {
+        let points = edge.endpoints().unwrap();
+        (points[0].y - points[1].y).abs() > 48.0
+    }).cloned().collect::<Vec<_>>();
+    assert_eq!(vertical.len(), 4);
+    let rounded = body.fillet_with_options(&vertical,
+        FilletOptions::new(12.5).with_curvature_continuity(true)).unwrap();
+    let rim = rounded.edges().find(|edge| matches!(edge.curve(), Curve3::Line(_))
+        && edge.endpoints().unwrap().iter().all(|point|
+            (point.x - 45.0).abs() < 1.0e-7 && point.y < -27.8)).unwrap().clone();
+    let rounded = rounded.fillet_with_options(&[rim],
+        FilletOptions::new(5.0).with_curvature_continuity(true)).unwrap();
+    let opening = rounded.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane)
+        if (plane.origin().y - 20.37966681068764).abs() < 1.0e-7)).unwrap().clone();
+    let options = TessellationOptions::new(0.1, 0.1, 24).unwrap();
+    // Slow inner meshing, noisy outer integration, and the wrong projection branch.
+    for distance in [-1.0, 2.0, 4.5] {
+        let shell = rounded.shell(std::slice::from_ref(&opening), distance)
+            .unwrap_or_else(|error| panic!("shell {distance}: {error}"));
+        assert_eq!(shell.solids().len(), 1);
+        assert_eq!(shell.faces().count(), 35);
+        assert!(shell.volume() > 0.0);
+        if distance == -1.0 {
+            assert!((shell.volume() - 13101.785164818531).abs() < 0.01);
+        }
+        let mut corners = 0;
+        for face in shell.faces() {
+            let mesh = face.tessellate(options).unwrap();
+            assert!(!mesh.triangles.is_empty());
+            assert!(mesh.positions.iter().all(|point| point.x.is_finite() && point.y.is_finite() && point.z.is_finite()));
+            assert!(mesh.normals.iter().all(|normal| normal.x.is_finite() && normal.y.is_finite() && normal.z.is_finite()));
+            if let Surface3::Offset(offset) = face.surface() {
+                if let Surface3::Blend(blend) = offset.base() {
+                    if matches!(blend.first_surface(), Surface3::Blend(_))
+                        || matches!(blend.second_surface(), Surface3::Blend(_)) {
+                        corners += 1;
+                        assert!(mesh.triangles.len() < 2000,
+                            "offset corner must use a grid rather than refine a long triangle fan: {} triangles", mesh.triangles.len());
+                    }
+                }
+            }
+        }
+        assert_eq!(corners, 4);
+    }
+    // Just past the curvature limit, reject the folded skin before tessellation.
+    let error = rounded.shell(std::slice::from_ref(&opening), -4.2).unwrap_err();
+    assert!(error.diagnostics().iter().all(|diagnostic|
+        diagnostic.kind == super::super::DiagnosticKind::UnsupportedGeometry));
+}
+
+#[test]
+fn shell_after_g2_rim_over_circular_corner_fillets() {
+    let body = owned_cuboid(
+        Point3::new(0.0, -27.898378837931627, -52.23526250506349),
+        Point3::new(45.0, 20.37966681068764, 21.962553553265337),
+    );
+    let vertical = body.edges().filter(|edge| {
+        let points = edge.endpoints().unwrap();
+        (points[0].y - points[1].y).abs() > 48.0
+    }).cloned().collect::<Vec<_>>();
+    let rounded = body.fillet(&vertical, 12.5).unwrap();
+    let rim = rounded.edges().find(|edge| matches!(edge.curve(), Curve3::Line(_))
+        && edge.endpoints().unwrap().iter().all(|point|
+            (point.x - 45.0).abs() < 1.0e-7 && point.y < -27.8)).unwrap().clone();
+    let rounded = rounded.fillet_with_options(&[rim],
+        FilletOptions::new(5.0).with_curvature_continuity(true)).unwrap();
+    let opening = rounded.faces().find(|face| matches!(face.surface(), Surface3::Plane(plane)
+        if (plane.origin().y - 20.37966681068764).abs() < 1.0e-7)).unwrap().clone();
+    let shell = rounded.shell(std::slice::from_ref(&opening), -1.0)
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(shell.solids().len(), 1);
+    assert!(shell.volume() > 0.0);
+    for face in shell.faces() {
+        assert!(!face.tessellate(TessellationOptions::default()).unwrap().triangles.is_empty());
+    }
+}
+
+#[test]
+fn fillet_modes_support_miters_and_reject_unimplemented_corner_patches() {
+    let body = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
+    let miter = body.edges().filter(|edge| {
+        let points = edge.endpoints().unwrap();
+        points.iter().all(|p| p.z > 9.9)
+            && (points.iter().all(|p| p.x.abs() < 1.0e-8) || points.iter().all(|p| p.y.abs() < 1.0e-8))
+    }).cloned().collect::<Vec<_>>();
+    assert_eq!(miter.len(), 2);
+    for width in [false, true] {
+        for curvature in [false, true] {
+            let options = FilletOptions::new(0.5).with_constant_width(width).with_curvature_continuity(curvature);
+            let result = body.fillet_with_options(&miter, options).unwrap();
+            result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+            if !width && !curvature { continue; }
+            let all = body.edges().cloned().collect::<Vec<_>>();
+            let error = body.fillet_with_options(&all, options).unwrap_err();
+            assert!(error.to_string().contains("three-edge corners"));
+        }
+    }
+}
+
+#[test]
 fn fillet_upper_cut_shell_rim_after_lower_corner_fillets() {
     let body = cut_shell_after_lower_corner_fillets();
     let edges = upper_cut_shell_rims(&body);

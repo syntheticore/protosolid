@@ -481,11 +481,16 @@ pub(crate) struct ChamferSettings {
     pub reference_faces: BTreeMap<PersistentId, PersistentId>,
 }
 
-/// Controls rolling-ball edge fillet construction.
+/// Controls fillet sizing, tangent propagation and support continuity.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FilletOptions {
+    /// Rolling radius, or contact-rail chord when `constant_width` is enabled.
     pub radius: f64,
     pub follow_tangent_edges: bool,
+    /// Measure the chord between the two contact rails instead of the ball radius.
+    pub constant_width: bool,
+    /// Match curvature at both contact rails using quintic sections.
+    pub curvature_continuous: bool,
 }
 
 impl FilletOptions {
@@ -493,11 +498,23 @@ impl FilletOptions {
         Self {
             radius,
             follow_tangent_edges: true,
+            constant_width: false,
+            curvature_continuous: false,
         }
     }
 
     pub fn with_tangent_propagation(mut self, enabled: bool) -> Self {
         self.follow_tangent_edges = enabled;
+        self
+    }
+
+    pub fn with_constant_width(mut self, enabled: bool) -> Self {
+        self.constant_width = enabled;
+        self
+    }
+
+    pub fn with_curvature_continuity(mut self, enabled: bool) -> Self {
+        self.curvature_continuous = enabled;
         self
     }
 }
@@ -1104,7 +1121,7 @@ impl Compound {
             edges,
             options.radius,
             options.follow_tangent_edges,
-            super::edge_blend::EdgeBlendKind::Fillet,
+            super::edge_blend::EdgeBlendKind::fillet(options.constant_width, options.curvature_continuous),
             None,
         )
     }

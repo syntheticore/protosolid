@@ -907,6 +907,7 @@ pub enum Surface3 {
     Nurbs(NurbsSurface3),
     Offset(OffsetSurface3),
     RollingBall(RollingBallSurface3),
+    Blend(EdgeBlendSurface3),
     Ruled(EdgeBlendSurface3),
 }
 
@@ -924,6 +925,7 @@ impl Surface3 {
             Self::Nurbs(_) => "NURBS",
             Self::Offset(_) => "offset",
             Self::RollingBall(_) => "rolling-ball",
+            Self::Blend(_) => "edge blend",
             Self::Ruled(_) => "ruled",
         }
     }
@@ -934,7 +936,7 @@ impl Surface3 {
                 let (u, v) = surface.knots();
                 if axis == 0 { u.to_vec() } else { v.to_vec() }
             }
-            Self::RollingBall(surface) if axis == 0 => {
+            Self::RollingBall(surface) | Self::Blend(surface) if axis == 0 => {
                 let mut knots = Vec::new();
                 surface.center_curve.collect_parameter_breaks(&mut knots);
                 surface.first_pcurve.collect_parameter_breaks(&mut knots);
@@ -950,7 +952,7 @@ impl Surface3 {
     fn parameter_periods(&self, uv: (f64, f64)) -> KernelResult<[Option<f64>; 2]> {
         let mut periods = self.domains().map(|domain| domain.period);
         match self {
-            Self::RollingBall(surface) => periods[1] = surface.blend_period(uv.0)?,
+            Self::RollingBall(surface) | Self::Blend(surface) => periods[1] = surface.blend_period(uv.0)?,
             Self::Offset(surface) => return surface.base.parameter_periods(uv),
             _ => {}
         }
@@ -1136,7 +1138,7 @@ impl Surface3 {
             Self::Nurbs(surface) => surface.first_order(u, v),
             Self::Swept(surface) => surface.first_order(u, v),
             Self::Offset(surface) => surface.first_order(u, v),
-            Self::RollingBall(surface) | Self::Ruled(surface) => surface.first_order(u, v),
+            Self::RollingBall(surface) | Self::Blend(surface) | Self::Ruled(surface) => surface.first_order(u, v),
             _ => self
                 .evaluate(u, v)
                 .map(|value| (value.point, value.du, value.dv)),
@@ -1164,7 +1166,7 @@ impl Surface3 {
             Self::Swept(surface) => surface.domains(),
             Self::Nurbs(surface) => surface.domains(),
             Self::Offset(surface) => surface.base.domains(),
-            Self::RollingBall(surface) | Self::Ruled(surface) => [
+            Self::RollingBall(surface) | Self::Blend(surface) | Self::Ruled(surface) => [
                 ParameterDomain {
                     bounds: DomainBounds::Bounded(surface.center_range()),
                     period: surface.center_period,
@@ -1185,7 +1187,7 @@ impl Surface3 {
             Self::Swept(surface) => surface.evaluate(u, v),
             Self::Nurbs(surface) => surface.evaluate(u, v),
             Self::Offset(surface) => surface.evaluate(u, v),
-            Self::RollingBall(surface) | Self::Ruled(surface) => surface.evaluate(u, v),
+            Self::RollingBall(surface) | Self::Blend(surface) | Self::Ruled(surface) => surface.evaluate(u, v),
         }
     }
 
@@ -1221,7 +1223,7 @@ impl Surface3 {
             Self::Swept(surface) => surface.project(point),
             Self::Nurbs(surface) => surface.project(point, tolerance),
             Self::Offset(surface) => surface.project(point),
-            Self::RollingBall(surface) | Self::Ruled(surface) => surface.project(point),
+            Self::RollingBall(surface) | Self::Blend(surface) | Self::Ruled(surface) => surface.project(point),
         }
     }
 
@@ -1310,6 +1312,8 @@ impl From<RollingBallSurface3> for Surface3 {
     fn from(value: RollingBallSurface3) -> Self {
         if value.is_ruled() {
             Self::Ruled(value)
+        } else if !value.is_circular() {
+            Self::Blend(value)
         } else {
             Self::RollingBall(value)
         }

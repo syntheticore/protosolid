@@ -48,6 +48,26 @@ and reusable. Native topology snapshots (`Face`, `Edge`, `Vertex`, `Solid`, and
 `Compound`) can be passed directly to subsequent operations from the same
 ShapexJS instance.
 
+## Fillets
+
+Fillets default to a constant rolling radius and G1 (tangent) continuity.
+`FilletOptions.new(size).withConstantWidth(true)` measures `size` as the straight
+distance between the two contact rails, allowing the rolling radius to vary
+along the edge. `withCurvatureContinuity(true)` creates quintic sections that
+match the supports' tangent planes and curvatures at both rails. In radius mode,
+the radius sizes the contact rails; a G2 section has varying curvature between
+them. Both options can be combined with `withTangentPropagation(enabled)` and
+passed to `compound.filletWithOptions(edges, options)`.
+
+Constant-width and G2 fillets support isolated edges, closed rims and miter or
+tangent-chain joins. Both modes also follow smooth transitions between
+different support pairs, including rims over earlier G1 or G2 corner fillets.
+Three-edge and inner-rim corner patches remain unsupported for these modes.
+Shelling preserves the exact normal offset of these fillets while it stays on
+a regular branch. Offsets crossing a curvature limit are rejected: removing a
+collapsed G2 or constant-width blend and constructing its replacement envelope
+is not supported.
+
 ## Curves and planar geometry
 
 Parameters are native geometric parameters: line parameters, circle angles in

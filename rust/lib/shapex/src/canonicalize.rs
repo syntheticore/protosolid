@@ -168,6 +168,7 @@ impl Transaction<'_> {
                 Surface3::Cylinder(_)
                     | Surface3::Torus(_)
                     | Surface3::RollingBall(_)
+                    | Surface3::Blend(_)
                     | Surface3::Ruled(_)
             ) {
                 candidates.insert(id);

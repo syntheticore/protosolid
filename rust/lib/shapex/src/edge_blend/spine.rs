@@ -386,6 +386,13 @@ impl Transaction<'_> {
             .evaluate((edge.range.start + edge.range.end) * 0.5)?
             .point;
         let concave = self.blend_edge_is_concave(&edge, uses, faces, &parent_surfaces, midpoint)?;
+        let support_normals = || {
+            (0..2).map(|index| {
+                let uv = parent_surfaces[index].project(midpoint, tolerance)?.parameters;
+                let sign = if self.working.face(faces[index])?.orientation == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                Ok(parent_surfaces[index].normal(uv.0, uv.1)? * sign)
+            }).collect::<KernelResult<Vec<_>>>()
+        };
         // Equal setbacks on planar supports correspond to r = d cot(theta/2),
         // where theta is the angle between outward normals. Perpendicular rims
         // retain r = d, including plane/cylinder tangent chains.
@@ -417,21 +424,7 @@ impl Transaction<'_> {
                 source.offsets[index]
             })
         } else if kind == EdgeBlendKind::Chamfer {
-            let normals = (0..2)
-                .map(|index| {
-                    let uv = parent_surfaces[index]
-                        .project(midpoint, tolerance)?
-                        .parameters;
-                    let sign = if self.working.face(faces[index])?.orientation
-                        == FaceOrientation::Forward
-                    {
-                        1.0
-                    } else {
-                        -1.0
-                    };
-                    Ok(parent_surfaces[index].normal(uv.0, uv.1)? * sign)
-                })
-                .collect::<KernelResult<Vec<_>>>()?;
+            let normals = support_normals()?;
             let cosine = normals[0].dot(normals[1]).clamp(-1.0, 1.0);
             if let Some(settings) = chamfer {
                 let reference = settings.reference_faces.get(&edge.name).ok_or_else(|| {
@@ -467,6 +460,13 @@ impl Transaction<'_> {
             } else {
                 [size * ((1.0 + cosine) / (1.0 - cosine)).sqrt(); 2]
             }
+        } else if kind.constant_width() {
+            let normals = support_normals()?;
+            let chord_factor = (normals[0] - normals[1]).magnitude();
+            if chord_factor <= tolerance.angular {
+                return Err(unsupported("constant-width fillet requires distinct support normals"));
+            }
+            [size / chord_factor; 2]
         } else {
             [size; 2]
         };
@@ -487,7 +487,7 @@ impl Transaction<'_> {
         let candidates = if let Some(shared) = shared {
             vec![shared.center.clone()]
         } else {
-            let intersection = if kind == EdgeBlendKind::Fillet {
+            let intersection = if kind != EdgeBlendKind::Chamfer {
                 match (&offsets[0], &offsets[1]) {
                     (Surface3::Plane(plane), Surface3::Torus(torus)) => {
                         super::super::intersection::parallel_plane_torus_section(*plane, *torus, tolerance)
@@ -594,7 +594,7 @@ impl Transaction<'_> {
         };
         let seed_span = (endpoint_seeds[1] - endpoint_seeds[0]).abs().max(1.0);
         let center_domain = center.curve.domain();
-        let provisional_range = match center_domain.bounds {
+        let mut provisional_range = match center_domain.bounds {
             _ if center_domain.period.is_some() => ParameterRange::new(
                 endpoint_seeds[0].min(endpoint_seeds[1]) - seed_span,
                 endpoint_seeds[0].max(endpoint_seeds[1]) + seed_span,
@@ -609,6 +609,28 @@ impl Transaction<'_> {
         // Continue the guides on their unwrapped charts over the support range.
         center.first_pcurve = center.first_pcurve.extended(provisional_range)?;
         center.second_pcurve = center.second_pcurve.extended(provisional_range)?;
+        if kind.constant_width() && shared.is_none() {
+            // The implicit width guide is bounded, unlike an analytical
+            // circle. Keep the unwrapped interval needed by an open rim's
+            // contact rails; only a closed source needs a complete turn.
+            let range = if edge.vertices[0] == edge.vertices[1] {
+                center_domain.period.map(|period| ParameterRange::new(0.0, period))
+                    .transpose()?.unwrap_or(provisional_range)
+            } else { provisional_range };
+            let signs = faces.map(|face| {
+                let outward = if self.working.face(face).unwrap().orientation == FaceOrientation::Forward { 1.0 } else { -1.0 };
+                if concave { outward } else { -outward }
+            });
+            let guide = SurfaceIntersectionCurve::new_with_width(
+                parent_surfaces[0].clone(), parent_surfaces[1].clone(),
+                center.first_pcurve.extended(range)?, center.second_pcurve.extended(range)?, range, tolerance,
+                tolerance.linear, Some(crate::geometry::ConstantWidthConstraint { width: size, signs }),
+            )?;
+            let [first_pcurve, second_pcurve] = guide.exact_pcurves();
+            center = SurfaceSurfaceCurve { curve: guide.into(), first_pcurve, second_pcurve,
+                achieved_error: tolerance.linear };
+            provisional_range = range;
+        }
         Ok(BlendSpine {
             edge_id,
             edge,

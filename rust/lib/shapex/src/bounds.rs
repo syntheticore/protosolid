@@ -70,6 +70,7 @@ pub(crate) fn curve2(curve: &Curve2, range: ParameterRange) -> KernelResult<Boun
         Curve2::Projected(c) => parameter_bounds(&Surface3::Plane(c.plane()), curve3(c.curve(),range)?)?,
         // Derive parameters from the retained spatial curve, never its guide.
         Curve2::SurfaceIntersection(c) => {
+            if c.is_contact_rail() { return Err(unavailable()); }
             parameter_bounds(c.surface(), curve3(&c.spatial_curve(), range)?)?
         }
         Curve2::SurfaceProjection(c) => parameter_bounds(c.surface(), curve3(c.curve(), range)?)?,
@@ -153,6 +154,7 @@ pub(super) fn curve3(curve: &Curve3, range: ParameterRange) -> KernelResult<Boun
         Curve3::Nurbs(c) => Bounds::points(c.control_points().iter().copied()),
         Curve3::SurfaceCurve(c) => surface_curve(c.surface(), c.pcurve(), range)?,
         Curve3::SurfaceIntersection(c) => {
+            if c.constant_width.is_some() { return Err(unavailable()); }
             // A curve lies on both supports. A finite enclosure of either is
             // sufficient, independent of the Newton-corrected parameter guides.
             surface(c.first_surface(), None)
@@ -168,6 +170,7 @@ fn surface_curve(
     range: ParameterRange,
 ) -> KernelResult<Bounds> {
     match pcurve {
+        Curve2::SurfaceIntersection(p) if p.is_contact_rail() => Err(unavailable()),
         Curve2::SurfaceIntersection(p) if p.lies_on(support) => {
             curve3(&p.spatial_curve(), range)
         }
@@ -409,6 +412,7 @@ fn surface(s: &Surface3, boundary: Option<Bounds>) -> KernelResult<Bounds> {
         Surface3::RollingBall(b) => {
             curve3(b.center_curve(), b.center_range())?.expanded(b.radius())
         }
+        Surface3::Blend(_) => return Err(unavailable()),
         Surface3::Ruled(b) => {
             // Ruled blends interpolate their contacts, not a circular section.
             let first = surface_curve(

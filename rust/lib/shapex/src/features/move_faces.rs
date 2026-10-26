@@ -44,7 +44,7 @@ pub(crate) fn move_faces(
         let id = face.topology_id();
         let original_bounds = face_parameter_bounds(topology, id, tolerance)?;
         let mut surface = extended_support(face.surface(), original_bounds, displacement, tolerance)?;
-        if let Surface3::RollingBall(blend) | Surface3::Ruled(blend) = &surface {
+        if let Surface3::RollingBall(blend) | Surface3::Blend(blend) | Surface3::Ruled(blend) = &surface {
             // Extend only a spine that is too short: an edited support also
             // rebuilds the blend's boundaries with its unchanged neighbors.
             // A spine continues only while its supports still admit the blend
@@ -65,7 +65,7 @@ pub(crate) fn move_faces(
             surface = crate::transform::transform_surface(surface, transform, tolerance)?;
         }
         let mut face_bounds = expanded_offset_bounds(&surface, original_bounds, displacement, tolerance)?;
-        if matches!(surface, Surface3::RollingBall(_)) {
+        if matches!(surface, Surface3::RollingBall(_) | Surface3::Blend(_)) {
             // A rolling-ball section spans less than half a turn between its
             // rails. Padding it by its displacement on a long move would wrap
             // the circle, so iso-curves across it would no longer be simple;
@@ -91,6 +91,18 @@ pub(crate) fn move_faces(
         &contacts,
         &mut supports,
     )?);
+    // Re-rolled blends can have a shorter guide than the extended source.
+    // Their reconstruction bounds must stay inside that replacement domain.
+    for id in &changed_supports {
+        for (bound, domain) in bounds.get_mut(id).unwrap().iter_mut().zip(supports[id].domains()) {
+            if domain.period.is_none() {
+                if let crate::DomainBounds::Bounded(range) = domain.bounds {
+                    *bound = ParameterRange::new(bound.start.max(range.start.min(range.end)),
+                        bound.end.min(range.start.max(range.end)))?;
+                }
+            }
+        }
+    }
     let result = rebuild_supports(
         source,
         SupportEdit {
@@ -439,7 +451,7 @@ pub(super) fn adjust_move_blends(
                 };
                 if let Some(motion) = motion {
                     crate::transform::transform_surface(original.clone(), motion, tolerance)?
-                } else if let Surface3::RollingBall(blend) = original {
+                } else if let Surface3::RollingBall(blend) | Surface3::Blend(blend) = original {
                     // No rigid motion keeps both contacts. Roll the same ball
                     // between the edited supports instead.
                     let Some(surface) = rolled_blend(topology, *id, blend, &rails, supports, tolerance)? else {
@@ -515,8 +527,13 @@ pub(super) fn rolled_blend(
         };
     }
     let mut guides = [Vec::new(), Vec::new()];
-    for index in 0..=32 {
-        let parameter = range.start + range.span() * index as f64 / 32.0;
+    let period = blend.center_period();
+    let steps = period.map_or(32, |period| (range.span().abs() / period * 32.0).round() as i32);
+    let indices = if period.is_some() { -1..=steps + 1 } else { 0..=steps };
+    for index in indices {
+        let parameter = range.start + range.span() * index as f64 / steps as f64;
+        let parameter = period.map_or(parameter, |period|
+            range.start.min(range.end) + (parameter - range.start.min(range.end)).rem_euclid(period));
         let first = pcurves[0].evaluate(parameter)?.point;
         let second = pcurves[1].evaluate(parameter)?.point;
         let Ok(corrected) = crate::intersection::correct_surface_pair_near(
@@ -530,21 +547,44 @@ pub(super) fn rolled_blend(
     for side in 0..2 {
         crate::intersection::unwrap_periodic_points(&mut guides[side], offsets[side].domains());
     }
+    let width = match blend.center_curve() {
+        Curve3::SurfaceIntersection(curve) => curve.constant_width,
+        _ => None,
+    };
     let rolled = (|| -> KernelResult<Surface3> {
-        let center = SurfaceIntersectionCurve::new(
-            offsets[0].clone(),
-            offsets[1].clone(),
-            crate::intersection::smooth_nurbs_guide(&guides[0], range)?.into(),
-            crate::intersection::smooth_nurbs_guide(&guides[1], range)?.into(),
-            range,
-            tolerance,
-            tolerance.linear,
-        )?;
+        // A closed spine must retain its period throughout the support range.
+        // Clamping a multi-turn guide changes its spacing near the ends, so
+        // points one period apart no longer meet when the blend wraps them.
+        let guide = |mut points: Vec<Point2>| -> KernelResult<Curve2> {
+            if period.is_some() {
+                let range = if range.span() < 0.0 { points.reverse(); range.reversed() } else { range };
+                Ok(crate::intersection::periodic_nurbs_guide(&points, range)?.into())
+            } else {
+                Ok(crate::intersection::smooth_nurbs_guide(&points, range)?.into())
+            }
+        };
+        let [first, second] = guides;
+        let first_guide = guide(first)?;
+        let second_guide = guide(second)?;
+        // Offsets share their parents' charts, so the nominal ball seeds a
+        // width guide that then solves its varying radius on the parents.
+        let center = if width.is_some() {
+            SurfaceIntersectionCurve::new_with_width(
+                parents[0].clone(), parents[1].clone(), first_guide, second_guide,
+                range, tolerance, tolerance.linear, width,
+            )?
+        } else {
+            SurfaceIntersectionCurve::new(
+                offsets[0].clone(), offsets[1].clone(), first_guide, second_guide,
+                range, tolerance, tolerance.linear,
+            )?
+        };
         let [first, second] = center.exact_pcurves();
         Ok(crate::RollingBallSurface3::new(
             center.into(), parents[0].clone(), parents[1].clone(), first, second,
             range, blend.radius(), tolerance,
         )?
+        .with_curvature_continuity(blend.is_curvature_continuous())?
         .with_center_period(blend.center_period())
         .into())
     })();

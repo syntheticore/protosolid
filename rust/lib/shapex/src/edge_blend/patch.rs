@@ -505,6 +505,14 @@ impl Transaction<'_> {
         };
         let (blend_surface, blend_parameterization) = if kind == EdgeBlendKind::Chamfer {
             self.chamfer_surface(&spine, blend_support_range)?
+        } else if kind.constant_width() || kind.curvature_continuous() {
+            (RollingBallSurface3::new(
+                spine.center.curve.clone(), spine.parent_surfaces[0].clone(), spine.parent_surfaces[1].clone(),
+                spine.center.first_pcurve.clone(), spine.center.second_pcurve.clone(),
+                if spine.shared_seam.is_some() { spine.provisional_range } else { blend_support_range },
+                spine.offset, tolerance,
+            )?.with_curvature_continuity(kind.curvature_continuous())?
+                .with_center_period(spine.center_domain().period).into(), BlendSurfaceParameterization::CONTACT_RAILS)
         } else {
             self.most_implicit_fillet_surface(&spine, blend_support_range, spine.offset)?
         };

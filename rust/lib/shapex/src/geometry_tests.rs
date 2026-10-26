@@ -2,6 +2,73 @@ use super::*;
 use super::super::{IntersectionKind, IntersectionSet};
 
 #[test]
+fn fillet_modes_preserve_width_and_curvature_along_varying_support_normals() {
+    let tolerance = ModelTolerance::default();
+    let plane: Surface3 = Plane3::new(Point3::origin(), Vec3::new(1.0, 0.0, 0.4), Vec3::unit_y(), tolerance).unwrap().into();
+    let cylinder: Surface3 = Cylinder3::new(Point3::origin(), Vec3::unit_z(), Vec3::unit_x() * 5.0,
+        Vec3::unit_y() * 5.0, tolerance).unwrap().into();
+    let range = ParameterRange::new(0.0, std::f64::consts::TAU).unwrap();
+    let guide = SurfaceIntersectionCurve::new_with_width(plane.clone(), cylinder.clone(),
+        Circle2::new(Point2::origin(), 4.5).unwrap().into(),
+        Line2::new(Point2::new(0.0, -0.5), Vec2::unit_x()).unwrap().into(), range, tolerance, 0.0,
+        Some(ConstantWidthConstraint { width: 0.75, signs: [-1.0, -1.0] })).unwrap();
+    let [first, second] = guide.exact_pcurves();
+    let blend: Surface3 = EdgeBlendSurface3::new(guide.clone().into(), plane.clone(), cylinder.clone(),
+        first.clone(), second.clone(), range, 0.5, tolerance).unwrap().with_curvature_continuity(true).unwrap().into();
+    let mut radii = Vec::new();
+    for index in 0..=32 {
+        let u = range.start + range.span() * index as f64 / 32.0;
+        let contacts = [(&plane, &first), (&cylinder, &second)].map(|(surface, pcurve)| {
+            let uv = pcurve.evaluate(u).unwrap().point;
+            surface.evaluate(uv.x, uv.y).unwrap().point
+        });
+        assert!((contacts[0].distance(contacts[1]) - 0.75).abs() < 1.0e-9);
+        radii.push(contacts[0].distance(guide.evaluate(u).unwrap().point));
+        for (v, surface) in [(0.0, &plane), (1.0, &cylinder)] {
+            let value = blend.evaluate(u, v).unwrap();
+            let normal = blend.normal(u, v).unwrap();
+            let uv = surface.project(value.point, tolerance).unwrap().parameters;
+            let parent_normal = surface.normal(uv.0, uv.1).unwrap();
+            assert!(normal.cross(parent_normal).magnitude() < 1.0e-7);
+            let expected = if v == 0.0 { 0.0 } else {
+                -(value.dv.x * value.dv.x + value.dv.y * value.dv.y) / 5.0
+            };
+            assert!((parent_normal.dot(value.dvv) - expected).abs() < 1.0e-7);
+        }
+    }
+    let minimum = radii.iter().copied().fold(f64::INFINITY, f64::min);
+    let maximum = radii.iter().copied().fold(0.0_f64, f64::max);
+    assert!(maximum - minimum > 0.1, "varying dihedral angles must vary the radius to retain constant width");
+    let translation = crate::RigidTransform3::from_translation(Vec3::new(3.0, -4.0, 7.0));
+    let reflection = crate::Reflection3::new(Plane3::yz());
+    let moved = crate::transform::transform_surface(blend.clone(), translation, tolerance).unwrap();
+    let mirrored = crate::transform::transform_surface(blend.clone(), reflection, tolerance).unwrap();
+    for u in [0.2, 1.1, 3.7, 5.9] {
+        for v in [0.0, 0.3, 0.7, 1.0] {
+            let value = blend.evaluate(u, v).unwrap();
+            // Check the prepared section derivatives against independent
+            // differences, including the exact rail tangents at v=0 and v=1.
+            let step = 1.0e-4;
+            let before_u = blend.first_order(u - step, v).unwrap();
+            let after_u = blend.first_order(u + step, v).unwrap();
+            let before_v = blend.first_order(u, v - step).unwrap();
+            let after_v = blend.first_order(u, v + step).unwrap();
+            assert!((value.du - (after_u.0 - before_u.0) / (2.0 * step)).magnitude() < 1.0e-6);
+            assert!((value.duu - (after_u.1 - before_u.1) / (2.0 * step)).magnitude() < 1.0e-3);
+            assert!((value.duv - (after_u.2 - before_u.2) / (2.0 * step)).magnitude() < 1.0e-5);
+            assert!((value.duv - (after_v.1 - before_v.1) / (2.0 * step)).magnitude() < 1.0e-5);
+            assert!((value.dvv - (after_v.2 - before_v.2) / (2.0 * step)).magnitude() < 1.0e-5);
+            let moved = moved.evaluate(u, v).unwrap();
+            let mirrored = mirrored.evaluate(u, v).unwrap();
+            assert!(moved.point.distance(translation.transform_point(value.point)) < 1.0e-8);
+            assert!(mirrored.point.distance(reflection.transform_point(value.point)) < 1.0e-8);
+            assert!((mirrored.dv - reflection.transform_vector(value.dv)).magnitude() < 1.0e-8);
+            assert!((mirrored.dvv - reflection.transform_vector(value.dvv)).magnitude() < 1.0e-7);
+        }
+    }
+}
+
+#[test]
 fn boundary_intersection_retains_identity_only_on_its_parameter_chart() {
     let tolerance = ModelTolerance::default();
     let first: Surface3 = Plane3::xy().into();

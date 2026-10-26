@@ -633,6 +633,7 @@ pub(super) fn patch_complexity_key(patch: &BrepPatch) -> (u8, u8) {
         Surface3::Swept(_)
         | Surface3::Offset(_)
         | Surface3::RollingBall(_)
+        | Surface3::Blend(_)
         | Surface3::Ruled(_) => 4,
     };
     (boundary_complexity, surface_complexity)

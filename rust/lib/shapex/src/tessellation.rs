@@ -640,9 +640,15 @@ impl Kernel {
         options: TessellationOptions,
     ) -> KernelResult<Option<SurfaceTriangulationSeed>> {
         let face = self.topology().face(face_id)?;
+        // Normal offsets retain their parent's UV chart, including the
+        // rectangular trims of a fillet. Give those faces the same grid seed.
+        let mut chart_surface = face.surface();
+        while let super::Surface3::Offset(offset) = chart_surface {
+            chart_surface = offset.base();
+        }
         if !matches!(
-            face.surface(),
-            super::Surface3::Swept(_) | super::Surface3::RollingBall(_) | super::Surface3::Ruled(_)
+            chart_surface,
+            super::Surface3::Swept(_) | super::Surface3::RollingBall(_) | super::Surface3::Blend(_) | super::Surface3::Ruled(_)
         ) || face.loops().len() != 1
         {
             return Ok(None);

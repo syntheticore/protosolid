@@ -307,11 +307,15 @@ export class TessellationOptions {
 }
 
 export class FilletOptions {
-  constructor(radius: number, followTangentEdges?: boolean)
+  constructor(radius: number, followTangentEdges?: boolean, constantWidth?: boolean, curvatureContinuous?: boolean)
   static new(radius: number): FilletOptions
   readonly radius: number
   readonly followTangentEdges: boolean
+  readonly constantWidth: boolean
+  readonly curvatureContinuous: boolean
   withTangentPropagation(enabled: boolean): FilletOptions
+  withConstantWidth(enabled: boolean): FilletOptions
+  withCurvatureContinuity(enabled: boolean): FilletOptions
 }
 
 export const BooleanKind: Readonly<{

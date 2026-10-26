@@ -80,7 +80,7 @@
             v-if="setting.type == 'select' || setting.type == 'enum'"
             :items="settingOptions(key, setting)"
             :label="setting.title"
-            v-model:chosen="activeFeature[key]"
+            :chosen="activeFeature[key]"
             @update:chosen="updateSetting(key, $event)"
           )
 
@@ -647,7 +647,12 @@
       },
 
       updateSetting: async function(key, value) {
+        const pickerKeys = () => Object.keys(this.activeFeature.settings)
+          .filter(key => this.activeFeature.needsPicker(key, true))
+        const previousPickers = pickerKeys()
+        this.activeFeature[key] = value
         this.activeFeature.settingChanged?.(key, value)
+        const pickersChanged = !shallowEqual(previousPickers, pickerKeys())
         // Options may change the visible fields, so focus the first one again
         this.focusedSetting = null
         if(this.activePicker && !this.activeFeature.needsPicker(this.activePicker, true)) {
@@ -655,7 +660,7 @@
         }
         await this.update()
         if(this.destroyed) return
-        if(!this.activePicker) this.$nextTick(() => this.pickAll())
+        if(pickersChanged && !this.activePicker) this.$nextTick(() => this.pickAll())
       },
 
       previewFeature: function() {

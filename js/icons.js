@@ -242,6 +242,12 @@ const strokedCube = cube(28, 28, 280, 176)
 // Ghost of the sharp corner at (x, y) replaced by a fillet or chamfer
 const ghostCorner = (x, y, arm) => lines([[x, y + arm], [x, y], [x + arm, y]], THIN)
 
+// Wall profile with its top left corner rounded, for fillet options
+const FILLET_CENTER = 412
+const filletProfile = seg(28, 484, 28, FILLET_CENTER) +
+  arc(FILLET_CENTER, FILLET_CENTER, FILLET_CENTER - 28, 180, 270) +
+  seg(FILLET_CENTER, 28, 484, 28)
+
 // Corner brackets around the grid, framing the content of zoom icons
 const viewFrame = (arm = 112) => [
   [[28, 28 + arm], [28, 28], [28 + arm, 28]],
@@ -665,6 +671,18 @@ const definitions = {
   ],
 
   // Feature options
+  'fillet-constant-radius': [
+    filletProfile,
+    circle(FILLET_CENTER, FILLET_CENTER, 48),
+    seg(FILLET_CENTER, FILLET_CENTER, ...polar(FILLET_CENTER, FILLET_CENTER, 176, 176, 225), 56),
+    arrow(...polar(FILLET_CENTER, FILLET_CENTER, 324, 324, 225), 225, 160, 208),
+  ],
+  'fillet-constant-width': [
+    filletProfile,
+    seg(168, 344, 344, 168, 56),
+    arrow(88, 424, 135, 120, 176),
+    arrow(424, 88, -45, 120, 176),
+  ],
   'extent-to-face': [
     rect(0, 0, 512, 96),
     seg(256, 288, 256, 464, 96),

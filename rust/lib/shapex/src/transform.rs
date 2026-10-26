@@ -291,7 +291,7 @@ pub(crate) fn transform_curve(
             curve.knots().to_vec(),
         )?
         .into(),
-        Curve3::SurfaceIntersection(curve) => SurfaceIntersectionCurve::new(
+        Curve3::SurfaceIntersection(curve) => SurfaceIntersectionCurve::new_with_width(
             transform_surface(curve.first_surface().clone(), transform, tolerance)?,
             transform_surface(curve.second_surface().clone(), transform, tolerance)?,
             curve.first_pcurve().clone(),
@@ -299,6 +299,10 @@ pub(crate) fn transform_curve(
             curve.range(),
             tolerance,
             curve.achieved_error(),
+            curve.constant_width.map(|mut constraint| {
+                if transform.reflects() { constraint.signs = constraint.signs.map(|sign| -sign); }
+                constraint
+            }),
         )?
         .into(),
         Curve3::SurfaceCurve(curve) => SurfaceCurve3::new(
@@ -421,7 +425,7 @@ pub(crate) fn transform_surface(
             tolerance,
         )?
         .into(),
-        Surface3::RollingBall(surface) | Surface3::Ruled(surface) => {
+        Surface3::RollingBall(surface) | Surface3::Blend(surface) | Surface3::Ruled(surface) => {
             RollingBallSurface3::with_section(
                 transform_curve(surface.center_curve().clone(), transform, tolerance)?,
                 transform_surface(surface.first_surface().clone(), transform, tolerance)?,
@@ -432,7 +436,8 @@ pub(crate) fn transform_surface(
                 surface.radius(),
                 tolerance,
                 surface.is_ruled(),
-            )?
+            )?.with_curvature_continuity(surface.is_curvature_continuous())?
+            .with_center_period(surface.center_period())
             .into()
         }
     })

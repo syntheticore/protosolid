@@ -2644,16 +2644,42 @@ export class FilletFeature extends SolidFeature {
         type: 'edge',
         multi: true,
       },
+      filletType: {
+        title: 'Mode',
+        type: 'select',
+        options: {
+          radius: { title: 'Constant radius', icon: 'fillet-constant-radius' },
+          width: { title: 'Constant width', icon: 'fillet-constant-width' },
+        },
+      },
       radius: {
         title: 'Radius',
         type: 'length',
         gizmo: true,
+        when: feature => feature.filletType == 'radius',
+      },
+      width: {
+        title: 'Width',
+        type: 'length',
+        gizmo: true,
+        when: feature => feature.filletType == 'width',
+      },
+      continuity: {
+        title: 'Continuity',
+        type: 'select',
+        options: {
+          g1: { title: 'G1 — tangent continuity', label: 'G1' },
+          g2: { title: 'G2 — curvature continuity', label: 'G2' },
+        },
       },
       propagation: edgePropagationSetting(),
     })
 
     this.edges = null
     this.radius = 1.0
+    this.width = 1.0
+    this.filletType = 'radius'
+    this.continuity = 'g1'
     this.propagation = 'tangent'
   }
 
@@ -2662,8 +2688,9 @@ export class FilletFeature extends SolidFeature {
     try {
       comp.compound = comp.compound.fillet(
         references.edges,
-        this.radius,
+        this.filletType == 'width' ? this.width : this.radius,
         this.propagation === 'tangent',
+        { constantWidth: this.filletType == 'width', curvatureContinuous: this.continuity == 'g2' },
       )
     } catch(err) { this.error = featureError(err, 'Fillet could not be built') }
   }
@@ -2683,11 +2710,12 @@ export class FilletFeature extends SolidFeature {
       distance: {
         center,
         direction,
-        distance: this.radius,
+        distance: this.filletType == 'width' ? this.width : this.radius,
         side: true,
         cb: (dist, _side) => {
-          this.setExpression('radius', null)
-          this.radius = dist
+          const key = this.filletType == 'width' ? 'width' : 'radius'
+          this.setExpression(key, null)
+          this[key] = dist
         },
       }
     }

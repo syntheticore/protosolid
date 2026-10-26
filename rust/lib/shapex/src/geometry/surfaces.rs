@@ -964,10 +964,25 @@ impl OffsetSurface3 {
         let normal_u = project_tangent(cross_u) / magnitude;
         let normal_v = project_tangent(cross_v) / magnitude;
         let distance = self.distance + self.v_slope * v;
+        let offset_du = value.du + normal_u * distance;
+        let offset_dv = value.dv + normal_v * distance + normal * self.v_slope;
+        if matches!(self.base.as_ref(), Surface3::Blend(_))
+            && (0.0..=1.0).contains(&v)
+        {
+            // Between a fillet's contact rails, stay on the regular offset
+            // branch. Crossing a focal radius needs a new trimmed envelope,
+            // not a folded skin that only fails later during tessellation.
+            let first = value.du.dot(offset_du);
+            let mixed = (value.du.dot(offset_dv) + value.dv.dot(offset_du)) * 0.5;
+            let second = value.dv.dot(offset_dv);
+            if first <= 0.0 || first * second - mixed * mixed <= 0.0 {
+                return Err(crate::unsupported("Fillet offset crosses its curvature limit; collapsed blend removal is not supported"));
+            }
+        }
         Ok((
             value.point + normal * distance,
-            value.du + normal_u * distance,
-            value.dv + normal_v * distance + normal * self.v_slope,
+            offset_du,
+            offset_dv,
         ))
     }
 

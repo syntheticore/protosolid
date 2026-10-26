@@ -1146,6 +1146,84 @@ fn move_faces_preserves_fillet_radius_when_translating_and_rotating_a_support() 
 }
 
 #[test]
+fn move_faces_preserves_fillet_modes_when_rotating_a_support() {
+    let tolerance = ModelTolerance::default();
+    let block = owned_cuboid(Point3::origin(), Point3::new(20.0, 10.0, 5.0));
+    let edge = block.edges().find(|edge| edge.endpoints().unwrap().iter()
+        .all(|point| point.x.abs() < 1e-7 && point.y.abs() < 1e-7)).unwrap().clone();
+    for (width, g2) in [(false, true), (true, false), (true, true)] {
+        let rounded = block.fillet_with_options(&[edge.clone()], FilletOptions::new(1.0)
+            .with_constant_width(width).with_curvature_continuity(g2)).unwrap();
+        let side = rounded.faces().find(|face| matches!(face.surface(), Surface3::Plane(p)
+            if p.normal().x.abs() > 0.9 && p.origin().x.abs() < 1e-7)).unwrap().clone();
+        let motion = RigidTransform3::new(Matrix3::from_angle_z(cgmath::Rad(0.1)),
+            Vec3::new(-0.25, 0.0, 0.0), tolerance).unwrap();
+        let result = rounded.move_faces(&[side], motion)
+            .unwrap_or_else(|error| panic!("width={width} G2={g2}: {error}"));
+        assert_eq!(result.faces().count(), rounded.faces().count());
+        let blend = result.faces().find_map(|face| match face.surface() {
+            Surface3::Blend(blend) => Some(blend), _ => None,
+        }).unwrap();
+        assert_eq!(blend.is_curvature_continuous(), g2);
+        if width {
+            let u = blend.center_range().middle();
+            let points = [(blend.first_surface(), blend.first_pcurve()),
+                (blend.second_surface(), blend.second_pcurve())].map(|(surface, pcurve)| {
+                let uv = pcurve.evaluate(u).unwrap().point;
+                surface.evaluate(uv.x, uv.y).unwrap().point
+            });
+            assert!((points[0].distance(points[1]) - 1.0).abs() < 1e-8);
+        }
+        result.tessellate(TessellationOptions::default()).unwrap();
+    }
+}
+
+#[test]
+fn move_faces_rotates_a_fillet_on_an_inclined_cylinder_cap() {
+    let tolerance = ModelTolerance::default();
+    let cylinder = Profile::new(Wire2::new([TrimmedCurve2::circle(Point2::origin(), 5.0).unwrap()], tolerance).unwrap(),
+        [], tolerance).unwrap().extrude(Plane3::xy(), Vec3::unit_z() * 15.0).unwrap();
+    let cap = Plane3::new(Point3::new(0.0, 0.0, 10.0), Vec3::new(1.0, 0.0, 0.4), Vec3::unit_y(), tolerance).unwrap();
+    let body = cylinder.split(cap, SplitKeep::Left).unwrap();
+    let rim = body.edges().find(|edge| !matches!(edge.curve(), Curve3::Line(_))
+        && edge.endpoints().unwrap().iter().all(|point| point.z > 7.0)).unwrap().clone();
+    for (width, g2) in [(false, false), (false, true), (true, false), (true, true)] {
+        let rounded = body.fillet_with_options(&[rim.clone()], FilletOptions::new(0.5)
+            .with_constant_width(width).with_curvature_continuity(g2)).unwrap();
+        let side = rounded.faces().find(|face| matches!(face.surface(), Surface3::Plane(p)
+            if p.normal().z.abs() > 0.9 && p.origin().z > 1.0)).unwrap().clone();
+        let rotation = Matrix3::from_angle_y(cgmath::Rad(0.1));
+        let center = Vec3::new(0.0, 0.0, 10.0);
+        let motion = RigidTransform3::new(rotation,
+            center - rotation * center + Vec3::new(0.0, 0.0, 0.25), tolerance).unwrap();
+        let result = rounded.move_faces(&[side], motion)
+            .unwrap_or_else(|error| panic!("width={width} G2={g2}: {error}"));
+        assert_eq!(result.faces().count(), rounded.faces().count());
+        assert!(result.volume() > 0.0);
+        let blend = result.faces().find_map(|face| match face.surface() {
+            Surface3::RollingBall(blend) | Surface3::Blend(blend) => Some(blend), _ => None,
+        }).unwrap();
+        assert_eq!(blend.is_curvature_continuous(), g2);
+        let period = blend.center_period().unwrap();
+        let u = blend.center_range().middle() - period * 0.25;
+        let center = blend.center_curve().evaluate(u).unwrap().point;
+        let next_turn = blend.center_curve().evaluate(u + period).unwrap().point;
+        assert!(center.distance(next_turn) < 1e-8,
+            "the rebuilt guide must close before the surface wraps its parameter");
+        if width {
+            let points = [(blend.first_surface(), blend.first_pcurve()),
+                (blend.second_surface(), blend.second_pcurve())].map(|(surface, pcurve)| {
+                let uv = pcurve.evaluate(u).unwrap().point;
+                surface.evaluate(uv.x, uv.y).unwrap().point
+            });
+            assert!((points[0].distance(points[1]) - 0.5).abs() < 1e-8);
+        }
+        result.tessellate(TessellationOptions::default())
+            .unwrap_or_else(|error| panic!("width={width} G2={g2}: {error}"));
+    }
+}
+
+#[test]
 fn move_faces_resizes_round_slot_ends_between_parallel_walls() {
     let tolerance = ModelTolerance::default();
     let capsule = |radius: f64| {

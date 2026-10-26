@@ -880,10 +880,22 @@ pub(crate) fn shell(
         let tangent = sample.first_derivative.normalize() * uses[0].range().span().signum();
         let normals = faces
             .iter()
-            .map(|face| face.oriented_normal_near(sample.point, source.tolerance()))
+            .zip(&uses)
+            .map(|(face, coedge)| {
+                // The retained p-curve already identifies the exact edge
+                // chart. Reprojection can move a smooth seam off its rail
+                // and give its two sides an artificial dihedral angle.
+                let uv = coedge.pcurve().evaluate(coedge.range().middle())?.point;
+                face.oriented_normal(uv.x, uv.y)
+            })
             .collect::<KernelResult<Vec<_>>>()?;
+        // Width and G2 sections include numerical derivatives. Their angular
+        // roundoff must not turn a smooth patch join into an outward crease.
+        let angular = if faces.iter().any(|face| matches!(face.surface(), Surface3::Blend(_))) {
+            source.tolerance().angular.max(f64::EPSILON.sqrt()) * 8.0
+        } else { source.tolerance().angular };
         if tangent.dot(normals[0].cross(normals[1])) * distance.signum()
-            > source.tolerance().angular
+            > angular
         {
             let mut pair = [faces[0].name(), faces[1].name()];
             pair.sort();

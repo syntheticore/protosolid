@@ -566,6 +566,35 @@ impl Transaction<'_> {
         } else {
             -tangent_outward
         };
+        if let Curve3::SurfaceIntersection(curve) = &spine.center.curve {
+            if let Some(constraint) = curve.constant_width {
+                // A width-constrained spine changes its rolling radius with
+                // the support normals. Locate its exact contact at the seam
+                // instead of intersecting a nominal fixed-radius offset.
+                let pcurves = [&spine.center.first_pcurve, &spine.center.second_pcurve];
+                let rail: Curve3 = SurfaceCurve3::new(
+                    spine.parent_surfaces[tangent_index].clone(),
+                    pcurves[tangent_index].clone(), spine.provisional_range, tolerance,
+                )?.into();
+                let endpoint = usize::from(spine.edge.vertices[0] != vertex);
+                let hit = rail.intersect_curve_near(
+                    &seam.curve, spine.endpoint_seeds[endpoint], seam_parameter, tolerance,
+                )?;
+                let center = spine.center.curve.first_order(hit.first_parameter)?.0;
+                let seam_contact = rail.first_order(hit.first_parameter)?.0;
+                let other = 1 - tangent_index;
+                let uv = pcurves[other].first_order(hit.first_parameter)?.0;
+                let common_contact = spine.parent_surfaces[other].first_order(uv.x, uv.y)?.0;
+                let allowed = tolerance.linear_at_scale(center.to_vec().magnitude().max(1.0)) * 16.0;
+                if (seam_contact.distance(common_contact) - constraint.width).abs() > allowed
+                    || (center.distance(seam_contact) - center.distance(common_contact)).abs() > allowed
+                {
+                    return Err(geometry_error("smooth constant-width junction misses its contact rails"));
+                }
+                return self.finish_smooth_fillet_junction(vertex_faces, center,
+                    seam_contact, common_contact, common_face, seam_edge, tangent_faces, second_seam, allowed);
+            }
+        }
         let common_surface = self.working.face(common_face)?.surface.clone();
         let common_outward = match self.working.face(common_face)?.orientation {
             FaceOrientation::Forward => common_radius,
@@ -694,6 +723,24 @@ impl Transaction<'_> {
                 return Err(geometry_error("smooth blend junction contact is not at the requested rolling-ball radius"));
             }
         }
+        self.finish_smooth_fillet_junction(vertex_faces, center,
+            seam_contact, common_contact, common_face, seam_edge, tangent_faces, second_seam, allowed)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish_smooth_fillet_junction(
+        &self,
+        vertex_faces: Vec<FaceId>,
+        center: Point3,
+        seam_contact: Point3,
+        common_contact: Point3,
+        common_face: FaceId,
+        seam_edge: EdgeId,
+        tangent_faces: [FaceId; 2],
+        second_seam: Option<(EdgeId, [FaceId; 2])>,
+        allowed: f64,
+    ) -> KernelResult<BlendJunction> {
+        let tolerance = self.kernel.tolerance;
         let mut contact_points = BTreeMap::from([
             (tangent_faces[0], seam_contact),
             (tangent_faces[1], seam_contact),

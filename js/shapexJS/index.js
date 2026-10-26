@@ -689,13 +689,17 @@ export class TessellationOptions {
 }
 
 export class FilletOptions {
-  constructor(radius, followTangentEdges = true) {
+  constructor(radius, followTangentEdges = true, constantWidth = false, curvatureContinuous = false) {
     this.radius = positive(radius, 'radius')
     this.followTangentEdges = Boolean(followTangentEdges)
+    this.constantWidth = Boolean(constantWidth)
+    this.curvatureContinuous = Boolean(curvatureContinuous)
     Object.freeze(this)
   }
   static new(radius) { return new this(radius) }
-  withTangentPropagation(enabled) { return new FilletOptions(this.radius, enabled) }
+  withTangentPropagation(enabled) { return new FilletOptions(this.radius, enabled, this.constantWidth, this.curvatureContinuous) }
+  withConstantWidth(enabled) { return new FilletOptions(this.radius, this.followTangentEdges, enabled, this.curvatureContinuous) }
+  withCurvatureContinuity(enabled) { return new FilletOptions(this.radius, this.followTangentEdges, this.constantWidth, enabled) }
 }
 
 export const BooleanKind = Object.freeze({
@@ -1119,7 +1123,7 @@ export function createShapex(bindings) {
       const list = new bindings.NativeEdgeList()
       try {
         array(edges, 'edges').forEach((edge, index) => list.add(instance(edge, Edge, `edges[${index}]`)._raw()))
-        return nativeCall(() => new Compound(this._raw().fillet(list, options.radius, options.followTangentEdges)))
+        return nativeCall(() => new Compound(this._raw().fillet(list, options.radius, options.followTangentEdges, options.constantWidth, options.curvatureContinuous)))
       } finally { free(list) }
     }
     chamfer(edges, distance, followTangentEdges=false, { type = 'equal', referenceFaces = [], value = distance } = {}) {

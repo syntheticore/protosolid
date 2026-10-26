@@ -151,14 +151,11 @@ pub(super) fn translate_pcurve(
         }
         Curve2::SurfaceIntersection(intersection) => {
             let spatial = intersection.spatial_curve();
-            let Curve3::SurfaceIntersection(curve) = &spatial else {
-                unreachable!()
-            };
             // A projection can retain an intersection on a different support as
             // its guide. Translate that guide on its own selected side, not on
             // the outer projection's destination surface.
             let guide = translate_pcurve(intersection.guide(), offset, tolerance)?;
-            let range = curve.range();
+            let range = intersection.range();
             Ok(super::SurfaceProjectionPcurve2::new(
                 spatial,
                 intersection.surface().clone(),

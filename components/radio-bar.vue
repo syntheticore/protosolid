@@ -33,6 +33,9 @@
     position: relative
 
   .button
+    display: flex
+    align-items: center
+    justify-content: center
     margin: 0
     border-radius: 0
     flex: 1 1 auto
@@ -60,6 +63,8 @@
 
   .label
     display: block
+    margin: 0
+    text-align: center
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap

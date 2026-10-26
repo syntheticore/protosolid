@@ -170,6 +170,7 @@ fn certify_body(
                         | Surface3::Swept(_)
                         | Surface3::Offset(_)
                         | Surface3::RollingBall(_)
+                        | Surface3::Blend(_)
                         | Surface3::Ruled(_)
                 )
             })
@@ -357,7 +358,7 @@ pub(super) fn integrate_face<const TERMS: usize>(
             lengths[0].min(lengths[1]) < lengths[0].max(lengths[1]) * 0.1,
         _ => false,
     };
-    let primitive_axis = if matches!(support, Surface3::RollingBall(_) | Surface3::Ruled(_)) { 1 }
+    let primitive_axis = if matches!(support, Surface3::RollingBall(_) | Surface3::Blend(_) | Surface3::Ruled(_)) { 1 }
         else if thin { usize::from(lengths[1] < lengths[0]) } else { 0 };
     let primitive_domain = face.surface().domains()[primitive_axis];
     let domain_origin = match primitive_domain.bounds {

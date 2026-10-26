@@ -601,8 +601,10 @@ export class Compound extends Volumetric {
     const geometry = this.geom()[method](other.geom())
     return new Compound(this.componentId, geometry).trackTopology([this, other], op, op == 'cut' ? [this] : [this, other])
   }
-  fillet(edges, radius, followTangentEdges = true) {
-    const geometry = this.geom().filletWithOptions(edges.map(edge => edge.geom()), sx.FilletOptions.new(radius).withTangentPropagation(followTangentEdges))
+  fillet(edges, radius, followTangentEdges = true, { constantWidth = false, curvatureContinuous = false } = {}) {
+    const options = sx.FilletOptions.new(radius).withTangentPropagation(followTangentEdges)
+      .withConstantWidth(constantWidth).withCurvatureContinuity(curvatureContinuous)
+    const geometry = this.geom().filletWithOptions(edges.map(edge => edge.geom()), options)
     return new Compound(this.componentId, geometry).trackTopology([this], 'fillet')
   }
   chamfer(edges, distance, {

@@ -57,14 +57,34 @@ pub(crate) enum BlendStaging {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EdgeBlendKind {
     Fillet,
+    WidthFillet,
+    CurvatureFillet,
+    CurvatureWidthFillet,
     Chamfer,
 }
 
 impl EdgeBlendKind {
+    pub(crate) fn fillet(width: bool, curvature: bool) -> Self {
+        match (width, curvature) {
+            (false, false) => Self::Fillet,
+            (true, false) => Self::WidthFillet,
+            (false, true) => Self::CurvatureFillet,
+            (true, true) => Self::CurvatureWidthFillet,
+        }
+    }
+
+    fn constant_width(self) -> bool {
+        matches!(self, Self::WidthFillet | Self::CurvatureWidthFillet)
+    }
+
+    fn curvature_continuous(self) -> bool {
+        matches!(self, Self::CurvatureFillet | Self::CurvatureWidthFillet)
+    }
+
     fn role(self, role: BlendRole) -> DerivationRole {
         match self {
-            Self::Fillet => DerivationRole::Fillet(role),
             Self::Chamfer => DerivationRole::Chamfer(role),
+            _ => DerivationRole::Fillet(role),
         }
     }
 }
@@ -290,7 +310,7 @@ impl Transaction<'_> {
         kind: EdgeBlendKind,
         chamfer: Option<&ChamferSettings>,
     ) -> KernelResult<BlendOutcome> {
-        if kind != EdgeBlendKind::Fillet {
+        if kind == EdgeBlendKind::Chamfer {
             return self.blend_network_with_guide(
                 selected, radius, follow_tangent_edges, kind, chamfer, false,
             );
@@ -473,6 +493,11 @@ impl Transaction<'_> {
             let previous = selected.len();
             selected.extend(additions);
             if selected.len() == previous {
+                if (kind.curvature_continuous() || kind.constant_width()) && junction_kinds.values().any(|junction| {
+                    matches!(junction, BlendJunctionKind::Trihedral | BlendJunctionKind::RimCorner { .. })
+                }) {
+                    return Err(unsupported("constant-width and G2 fillets do not yet support three-edge corners or inner-rim corner patches"));
+                }
                 let mut junctions = BTreeMap::new();
                 for (vertex, junction_kind) in &junction_kinds {
                     if matches!(junction_kind, BlendJunctionKind::Miter { .. }) {
@@ -852,7 +877,7 @@ fn turn_blend_chart(
     for side in 0..2 {
         super::intersection::unwrap_periodic_points(&mut points[side], surfaces[side].domains());
     }
-    let rebuilt = SurfaceIntersectionCurve::new(
+    let rebuilt = SurfaceIntersectionCurve::new_with_width(
         surfaces[0].clone(),
         surfaces[1].clone(),
         super::intersection::periodic_nurbs_guide(&points[0], support_range)?.into(),
@@ -860,8 +885,17 @@ fn turn_blend_chart(
         support_range,
         tolerance,
         center.achieved_error,
+        curve.constant_width,
     )?;
-    let [first_pcurve, second_pcurve] = rebuilt.exact_pcurves();
+    // Surface intersections can be returned in reversed support order. Their
+    // 3D curve retains its internal order, while the outer p-curves are swapped.
+    // Preserve that correspondence when moving the chart cut.
+    let reversed = matches!(&center.first_pcurve, Curve2::SurfaceIntersection(pcurve)
+        if pcurve.surface() == curve.second_surface());
+    let [first_pcurve, second_pcurve] = if reversed {
+        let [first, second] = rebuilt.exact_pcurves();
+        [second, first]
+    } else { rebuilt.exact_pcurves() };
     Ok(SurfaceSurfaceCurve {
         curve: rebuilt.into(),
         first_pcurve,

@@ -1,16 +1,19 @@
-//! Rolling-ball and ruled edge-blend surfaces.
+//! Circular, curvature-continuous and ruled edge-blend surfaces.
 use super::*;
 
-/// Exact circular or ruled cross sections between two retained contact rails.
+/// Circular, quintic or ruled sections between two retained contact rails.
 ///
-/// The center curve is the intersection of the two inward offsets. Its two
-/// p-curves retain the corresponding parameters on the un-offset supports.
+/// The center guide solves either equal-radius offsets or a fixed contact-rail
+/// width. Its p-curves retain parameters on the un-offset supports.
 /// Consequently this is an analytical/implicit surface definition rather than
 /// a fitted patch: every evaluation is constructed from the exact center and
 /// contact points on the parent surfaces.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EdgeBlendSurface3 {
     pub(super) ruled: bool,
+    pub(super) curvature_continuous: bool,
+    /// A width-constrained center rolls a ball whose radius follows the supports.
+    pub(super) variable_radius: bool,
     pub(super) shared_intersection: bool,
     pub(super) center_curve: Box<Curve3>,
     pub(super) first_surface: Box<Surface3>,
@@ -22,6 +25,8 @@ pub struct EdgeBlendSurface3 {
     pub(super) radius: f64,
     pub(super) tolerance: ModelTolerance,
     pub(super) sections: ParameterEvaluationCache<BlendSection>,
+    curvature_tangents: ParameterEvaluationCache<[Vec3; 6]>,
+    curvature_accelerations: ParameterEvaluationCache<[Vec3; 6]>,
 }
 
 #[derive(Clone, Copy)]
@@ -29,6 +34,7 @@ pub(super) struct BlendSection {
     pub(super) first: (Point3, Vec3),
     pub(super) second: (Point3, Vec3),
     pub(super) circular: Option<CircularBlendSection>,
+    pub(super) curvature: Option<[Point3; 6]>,
 }
 
 /// Prepared differential data shared by every transverse sample of a section.
@@ -36,6 +42,8 @@ pub(super) struct BlendSection {
 /// not on the position across the fillet.
 #[derive(Clone, Copy)]
 pub(super) struct CircularBlendSection {
+    pub(super) radius: f64,
+    pub(super) radius_derivative: f64,
     pub(super) center_point: Point3,
     pub(super) center_tangent: Vec3,
     pub(super) first_unit: Vec3,
@@ -118,6 +126,8 @@ impl EdgeBlendSurface3 {
         );
         let surface = Self {
             ruled,
+            curvature_continuous: false,
+            variable_radius: matches!(&center_curve, Curve3::SurfaceIntersection(curve) if curve.constant_width.is_some()),
             center_period: center_curve.domain().period,
             shared_intersection,
             center_curve: Box::new(center_curve),
@@ -129,6 +139,8 @@ impl EdgeBlendSurface3 {
             radius,
             tolerance,
             sections: ParameterEvaluationCache::default(),
+            curvature_tangents: ParameterEvaluationCache::default(),
+            curvature_accelerations: ParameterEvaluationCache::default(),
         };
         for parameter in [
             center_range.start,
@@ -145,6 +157,25 @@ impl EdgeBlendSurface3 {
     /// Whether the section is a straight chamfer line rather than a circular arc.
     pub(crate) fn is_ruled(&self) -> bool {
         self.ruled
+    }
+
+    pub(crate) fn is_circular(&self) -> bool {
+        !self.ruled && !self.curvature_continuous && !self.variable_radius
+    }
+
+    pub(crate) fn is_curvature_continuous(&self) -> bool {
+        self.curvature_continuous
+    }
+
+    pub(crate) fn with_curvature_continuity(mut self, enabled: bool) -> KernelResult<Self> {
+        self.curvature_continuous = enabled;
+        self.sections = ParameterEvaluationCache::default();
+        self.curvature_tangents = ParameterEvaluationCache::default();
+        self.curvature_accelerations = ParameterEvaluationCache::default();
+        for parameter in [self.center_range.start, self.center_range.middle(), self.center_range.end] {
+            self.point(parameter, 0.5)?;
+        }
+        Ok(self)
     }
 
     /// Continue the blend along its spine by `padding` at both ends, without
@@ -179,7 +210,7 @@ impl EdgeBlendSurface3 {
             self.radius,
             self.tolerance,
             self.ruled,
-        )?;
+        )?.with_curvature_continuity(self.curvature_continuous)?;
         // Construction certifies only the ends and middle. A continued spine
         // can leave its supports' intersection in between.
         let (start, end) = (self.center_range.start.min(self.center_range.end),
@@ -286,12 +317,14 @@ impl EdgeBlendSurface3 {
         if !self.ruled && center.is_none() {
             center = Some(self.center_curve.first_order(parameter)?);
         }
+        let circular = center.map(|center| self.circular_section(first, second, center)).transpose()?;
         let section = BlendSection {
             first,
             second,
-            circular: center
-                .map(|center| self.circular_section(first, second, center))
-                .transpose()?,
+            curvature: if self.curvature_continuous {
+                Some(self.curvature_controls(parameter, first.0, second.0, circular.unwrap())?)
+            } else { None },
+            circular,
         };
         self.sections.insert(parameter, section);
         Ok(section)
@@ -313,8 +346,10 @@ impl EdgeBlendSurface3 {
             .max(self.radius)
             .max(1.0);
         let allowed = self.tolerance.linear_at_scale(scale) * 32.0;
-        if (first_radial.magnitude() - self.radius).abs() > allowed
-            || (second_radial.magnitude() - self.radius).abs() > allowed
+        let variable = self.variable_radius;
+        let radius = if variable { first_radial.magnitude() } else { self.radius };
+        if (first_radial.magnitude() - radius).abs() > allowed
+            || (second_radial.magnitude() - radius).abs() > allowed
         {
             return Err(KernelError::new(
                 DiagnosticKind::GeometryInvariant,
@@ -336,12 +371,15 @@ impl EdgeBlendSurface3 {
             return Err(geometry_error("rolling-ball contact normals do not define a regular circular span"));
         }
         let sine = angle.sin();
-        let first_derivative = (first.1 - center_tangent) / self.radius;
-        let second_derivative = (second.1 - center_tangent) / self.radius;
+        let radius_derivative = if variable { first_unit.dot(first.1 - center_tangent) } else { 0.0 };
+        let first_derivative = (first.1 - center_tangent - first_unit * radius_derivative) / radius;
+        let second_derivative = (second.1 - center_tangent - second_unit * radius_derivative) / radius;
         let cosine_derivative =
             first_derivative.dot(second_unit) + first_unit.dot(second_derivative);
         let angle_derivative = if angle <= self.tolerance.angular { 0.0 } else { -cosine_derivative / sine };
         Ok(CircularBlendSection {
+            radius,
+            radius_derivative,
             center_point,
             center_tangent,
             first_unit,
@@ -355,6 +393,140 @@ impl EdgeBlendSurface3 {
         })
     }
 
+    /// Quintic Hermite sections match positions, tangent planes and normal
+    /// curvatures at both rails. The rails already determine the longitudinal
+    /// and mixed curvature, so matching transverse curvature establishes G2.
+    fn curvature_controls(&self, parameter: f64, first: Point3, second: Point3,
+        section: CircularBlendSection) -> KernelResult<[Point3; 6]> {
+        let scale = if section.angle <= self.tolerance.angular { section.radius }
+            else { section.radius * section.angle / section.sine };
+        let tangents = [
+            (section.second_unit - section.first_unit * section.angle_cosine) * scale,
+            (section.second_unit * section.angle_cosine - section.first_unit) * scale,
+        ];
+        let mut accelerations = [Vec3::new(0.0, 0.0, 0.0); 2];
+        for (side, (surface, pcurve)) in [(&self.first_surface, &self.first_pcurve),
+            (&self.second_surface, &self.second_pcurve)].into_iter().enumerate() {
+            let uv = pcurve.evaluate(parameter)?.point;
+            let value = surface.evaluate(uv.x, uv.y)?;
+            let tangent = tangents[side];
+            let e = value.du.magnitude2();
+            let f = value.du.dot(value.dv);
+            let g = value.dv.magnitude2();
+            let determinant = e * g - f * f;
+            let a = (g * value.du.dot(tangent) - f * value.dv.dot(tangent)) / determinant;
+            let b = (e * value.dv.dot(tangent) - f * value.du.dot(tangent)) / determinant;
+            let normal = value.du.cross(value.dv).normalize();
+            let bending = value.duu * a.powi(2) + value.duv * (2.0 * a * b) + value.dvv * b.powi(2);
+            accelerations[side] = normal * normal.dot(bending);
+        }
+        Ok([first, first + tangents[0] / 5.0,
+            first + tangents[0] * 0.4 + accelerations[0] / 20.0,
+            second - tangents[1] * 0.4 + accelerations[1] / 20.0,
+            second - tangents[1] / 5.0, second])
+    }
+
+    fn bernstein<const N: usize>(mut values: [Vec3; N], parameter: f64) -> Vec3 {
+        for count in (1..N).rev() {
+            for index in 0..count {
+                values[index] = values[index] * (1.0 - parameter) + values[index + 1] * parameter;
+            }
+        }
+        values[0]
+    }
+
+    fn curvature_value(controls: [Point3; 6], parameter: f64) -> (Point3, Vec3, Vec3) {
+        // The final quadratic in de Casteljau's construction supplies both
+        // derivatives. Share its work instead of evaluating three polynomials.
+        let mut values = controls.map(|point| point.to_vec());
+        for count in (3..6).rev() {
+            for index in 0..count {
+                values[index] = values[index] * (1.0 - parameter) + values[index + 1] * parameter;
+            }
+        }
+        let first = values[0] * (1.0 - parameter) + values[1] * parameter;
+        let last = values[1] * (1.0 - parameter) + values[2] * parameter;
+        (Point3::from_vec(first * (1.0 - parameter) + last * parameter),
+            (last - first) * 5.0, (values[2] - values[1] * 2.0 + values[0]) * 20.0)
+    }
+
+    /// Longitudinal derivatives of the section controls. Keep the tangent
+    /// local so normals remain accurate at smooth support seams.
+    fn curvature_tangents(&self, parameter: f64) -> KernelResult<[Vec3; 6]> {
+        let parameter = self.center_parameter(parameter);
+        if let Some(value) = self.curvature_tangents.get(parameter) {
+            return Ok(value);
+        }
+        let section = self.section(parameter)?;
+        let step = self.center_range.span().abs() * 1.0e-5;
+        let minimum = self.center_range.start.min(self.center_range.end);
+        let maximum = self.center_range.start.max(self.center_range.end);
+        let controls = |at: f64| -> KernelResult<[Point3; 6]> { Ok(self.section(at)?.curvature.unwrap()) };
+        let mut tangents: [Vec3; 6] = if parameter - step >= minimum && parameter + step <= maximum {
+            let (first, last) = (controls(parameter - step)?, controls(parameter + step)?);
+            std::array::from_fn(|i| (last[i] - first[i]) / (2.0 * step))
+        } else {
+            // A spine end needs a second-order one-sided difference. A first
+            // order error tilts the normals that a neighboring patch shares
+            // at their seam, so equal offsets no longer meet there.
+            let direction = if parameter - step < minimum { 1.0 } else { -1.0 };
+            let center = section.curvature.unwrap();
+            let (near, far) = (controls(parameter + direction * step)?, controls(parameter + direction * 2.0 * step)?);
+            std::array::from_fn(|i| ((near[i] - center[i]) * 4.0 - (far[i] - center[i])) * (direction / (2.0 * step)))
+        };
+        tangents[0] = section.first.1;
+        tangents[5] = section.second.1;
+        self.curvature_tangents.insert(parameter, tangents);
+        Ok(tangents)
+    }
+
+    /// Longitudinal accelerations of the section controls, needed only by
+    /// second-order evaluations.
+    fn curvature_accelerations(&self, parameter: f64) -> KernelResult<[Vec3; 6]> {
+        let parameter = self.center_parameter(parameter);
+        if let Some(value) = self.curvature_accelerations.get(parameter) {
+            return Ok(value);
+        }
+        // Compute the acceleration directly from the section controls. Taking
+        // a second tiny difference of an already differenced tangent amplifies
+        // roundoff into noisy offset normals and prevents quadrature converging.
+        // A seven-point stencil permits a wider acceleration step.
+        let step = self.center_range.span().abs() * 0.005;
+        let minimum = self.center_range.start.min(self.center_range.end);
+        let maximum = self.center_range.start.max(self.center_range.end);
+        let start = (parameter - 3.0 * step).clamp(minimum, maximum - 6.0 * step);
+        let parameters: [f64; 7] = std::array::from_fn(|i| start + i as f64 * step);
+        let nodes = parameters.map(|value| (value - parameter) / step);
+        let section = self.section(parameter)?;
+        let controls = section.curvature.unwrap();
+        let mut accelerations = [Vec3::zero(); 6];
+        for i in 0..7 {
+            // Coefficients through t^2 of the Lagrange basis at the query.
+            let mut coefficients = [1.0, 0.0, 0.0];
+            let mut denominator = 1.0;
+            for j in 0..7 {
+                if i == j { continue; }
+                coefficients = [-nodes[j] * coefficients[0],
+                    coefficients[0] - nodes[j] * coefficients[1],
+                    coefficients[1] - nodes[j] * coefficients[2]];
+                denominator *= nodes[i] - nodes[j];
+            }
+            let first = coefficients[1] / (denominator * step);
+            let second = 2.0 * coefficients[2] / (denominator * step * step);
+            let sample = self.section(parameters[i])?;
+            let sample_controls = sample.curvature.unwrap();
+            for control in 1..5 {
+                accelerations[control] += (sample_controls[control] - controls[control]) * second;
+            }
+            // The contact rails supply exact first derivatives. Differentiate
+            // those once for their accelerations instead of differencing points.
+            accelerations[0] += (sample.first.1 - section.first.1) * first;
+            accelerations[5] += (sample.second.1 - section.second.1) * first;
+        }
+        self.curvature_accelerations.insert(parameter, accelerations);
+        Ok(accelerations)
+    }
+
     pub(super) fn center_parameter(&self, parameter: f64) -> f64 {
         self.center_period.map_or(parameter, |period| {
             self.center_range.start.min(self.center_range.end)
@@ -364,7 +536,7 @@ impl EdgeBlendSurface3 {
     }
 
     pub(super) fn blend_period(&self, parameter: f64) -> KernelResult<Option<f64>> {
-        if self.ruled {
+        if self.ruled || self.curvature_continuous {
             return Ok(None);
         }
         let section = self
@@ -383,6 +555,7 @@ impl EdgeBlendSurface3 {
             first,
             second,
             circular,
+            curvature,
         } = self.section(parameter)?;
         if self.ruled {
             return Ok((
@@ -391,7 +564,14 @@ impl EdgeBlendSurface3 {
                 second.0 - first.0,
             ));
         }
+        if let Some(controls) = curvature {
+            let (point, dv, _) = Self::curvature_value(controls, blend);
+            let du = Self::bernstein(self.curvature_tangents(parameter)?, blend);
+            return Ok((point, du, dv));
+        }
         let CircularBlendSection {
+            radius,
+            radius_derivative,
             center_point,
             center_tangent,
             first_unit,
@@ -436,9 +616,9 @@ impl EdgeBlendSurface3 {
             + second_derivative * second_weight.0;
         let radial_v = first_unit * first_weight.2 + second_unit * second_weight.2;
         Ok((
-            center_point + radial * self.radius,
-            center_tangent + radial_u * self.radius,
-            radial_v * self.radius,
+            center_point + radial * radius,
+            center_tangent + radial_u * radius + radial * radius_derivative,
+            radial_v * radius,
         ))
     }
 
@@ -500,6 +680,16 @@ impl EdgeBlendSurface3 {
     pub(super) fn evaluate(&self, parameter: f64, blend: f64) -> KernelResult<SurfaceEvaluation> {
         let parameter = self.center_parameter(parameter);
         let (point, du, dv) = self.first_order(parameter, blend)?;
+        if let Some(controls) = self.section(parameter)?.curvature {
+            let tangents = self.curvature_tangents(parameter)?;
+            let mixed: [Vec3; 5] = std::array::from_fn(|i| (tangents[i + 1] - tangents[i]) * 5.0);
+            return Ok(SurfaceEvaluation {
+                point, du, dv,
+                duu: Self::bernstein(self.curvature_accelerations(parameter)?, blend),
+                duv: Self::bernstein(mixed, blend),
+                dvv: Self::curvature_value(controls, blend).2,
+            });
+        }
         let parameter_step = (self.center_range.span().abs()
             * self.tolerance.parameter.sqrt().max(f64::EPSILON.sqrt()))
         .max(self.tolerance.parameter * 32.0);

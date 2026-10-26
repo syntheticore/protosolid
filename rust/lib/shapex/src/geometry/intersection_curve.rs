@@ -18,6 +18,18 @@ pub(super) fn sub4(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
     std::array::from_fn(|index| a[index] - b[index])
 }
 
+/// Differentiate `f` across a small step clamped to `range`.
+fn clamped_difference<T: std::ops::Sub<Output = T> + std::ops::Div<f64, Output = T>>(
+    range: ParameterRange,
+    parameter: f64,
+    f: impl Fn(f64) -> KernelResult<T>,
+) -> KernelResult<T> {
+    let step = range.span().abs() * 1.0e-5;
+    let low = (parameter - step).max(range.start.min(range.end));
+    let high = (parameter + step).min(range.start.max(range.end));
+    Ok((f(high)? - f(low)?) / (high - low))
+}
+
 /// A general regular intersection of two parametric surfaces.
 ///
 /// The dual parameter-space guides provide a stable global parameterization;
@@ -33,7 +45,16 @@ pub struct SurfaceIntersectionCurve {
     pub(super) range: ParameterRange,
     pub(super) tolerance: ModelTolerance,
     pub(super) achieved_error: f64,
+    pub(crate) constant_width: Option<ConstantWidthConstraint>,
     pub(super) evaluations: ParameterEvaluationCache<IntersectionEvaluation>,
+}
+
+/// A medial guide with a prescribed distance between its contact rails.
+/// The signs point from each support toward the rolling center.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ConstantWidthConstraint {
+    pub width: f64,
+    pub signs: [f64; 2],
 }
 
 /// Evaluations belong to immutable geometry and can be shared by its edge,
@@ -247,6 +268,14 @@ pub struct SurfaceIntersectionPcurve2 {
 }
 
 impl SurfaceIntersectionPcurve2 {
+    pub(crate) fn range(&self) -> ParameterRange {
+        self.curve.range
+    }
+
+    pub(crate) fn is_contact_rail(&self) -> bool {
+        self.curve.constant_width.is_some()
+    }
+
     pub(crate) fn surface(&self) -> &Surface3 {
         if self.first {
             self.curve.first_surface()
@@ -264,10 +293,19 @@ impl SurfaceIntersectionPcurve2 {
     }
 
     pub(crate) fn spatial_curve(&self) -> Curve3 {
+        if self.curve.constant_width.is_some() {
+            return SurfaceCurve3 {
+                surface: Box::new(self.surface().clone()),
+                pcurve: Curve2::SurfaceIntersection(self.clone()),
+                range: self.curve.range,
+                tolerance: self.curve.tolerance,
+            }.into();
+        }
         Curve3::SurfaceIntersection((*self.curve).clone())
     }
 
     pub(crate) fn lies_on(&self, surface: &Surface3) -> bool {
+        if self.curve.constant_width.is_some() { return self.surface() == surface; }
         self.curve.first_surface() == surface || self.curve.second_surface() == surface
     }
 
@@ -288,7 +326,13 @@ impl SurfaceIntersectionPcurve2 {
         Ok(Curve2Evaluation {
             point,
             first_derivative,
-            second_derivative: Vec2::new(0.0, 0.0),
+            second_derivative: if self.is_contact_rail() {
+                let side = if self.first { 0 } else { 2 };
+                clamped_difference(self.curve.range, parameter, |at| {
+                    let derivative = self.curve.parameter_derivative(at, self.curve.corrected_parameters(at)?)?;
+                    Ok(Vec2::new(derivative[side], derivative[side + 1]))
+                })?
+            } else { Vec2::new(0.0, 0.0) },
         })
     }
 }
@@ -648,6 +692,11 @@ impl SurfaceIntersectionCurve {
             || self.second_surface != other.second_surface) {
             return Ok(None);
         }
+        let other_width = other.constant_width.map(|mut constraint| {
+            if swapped { constraint.signs.reverse(); }
+            constraint
+        });
+        if self.constant_width != other_width { return Ok(None); }
         let end = self.evaluate(range.end)?;
         let start = other.evaluate(other_range.start)?;
         let a = end.first_derivative * range.span().signum();
@@ -717,10 +766,10 @@ impl SurfaceIntersectionCurve {
                 return Ok(None);
             }
         }
-        Ok(Some(Self::new(
+        Ok(Some(Self::new_with_width(
             (*self.first_surface).clone(), (*self.second_surface).clone(),
             joined.remove(0), joined.remove(0), ParameterRange::new(0.0, 1.0)?,
-            self.tolerance, self.achieved_error.max(other.achieved_error),
+            self.tolerance, self.achieved_error.max(other.achieved_error), self.constant_width,
         )?))
     }
 
@@ -733,7 +782,7 @@ impl SurfaceIntersectionCurve {
             Curve2::Nurbs(curve) => curve.extended_guide(range).map(Curve2::Nurbs),
             _ => guide.extended(range),
         };
-        Self::new(
+        Self::new_with_width(
             (*self.first_surface).clone(),
             (*self.second_surface).clone(),
             extend(&self.first_pcurve)?,
@@ -741,6 +790,7 @@ impl SurfaceIntersectionCurve {
             range,
             self.tolerance,
             self.achieved_error,
+            self.constant_width,
         )
     }
 
@@ -752,6 +802,20 @@ impl SurfaceIntersectionCurve {
         range: ParameterRange,
         tolerance: ModelTolerance,
         achieved_error: f64,
+    ) -> KernelResult<Self> {
+        Self::new_with_width(first_surface, second_surface, first_pcurve, second_pcurve,
+            range, tolerance, achieved_error, None)
+    }
+
+    pub(crate) fn new_with_width(
+        first_surface: Surface3,
+        second_surface: Surface3,
+        first_pcurve: Curve2,
+        second_pcurve: Curve2,
+        range: ParameterRange,
+        tolerance: ModelTolerance,
+        achieved_error: f64,
+        constant_width: Option<ConstantWidthConstraint>,
     ) -> KernelResult<Self> {
         tolerance.validate()?;
         if !achieved_error.is_finite() || achieved_error < 0.0 {
@@ -778,6 +842,7 @@ impl SurfaceIntersectionCurve {
             range,
             tolerance,
             achieved_error,
+            constant_width,
             evaluations: ParameterEvaluationCache::default(),
         };
         for parameter in [range.start, (range.start + range.end) * 0.5, range.end] {
@@ -814,6 +879,7 @@ impl SurfaceIntersectionCurve {
     /// tangency, a small surface residual does not establish a small distance
     /// between intersection branches or between an intersection and a trim.
     pub(crate) fn positional_uncertainty(&self, parameter: f64) -> KernelResult<f64> {
+        if self.constant_width.is_some() { return Ok(f64::INFINITY); }
         let parameters = self.corrected_parameters(parameter)?;
         let (point, first_u, first_v) = self.first_surface.first_order(parameters[0], parameters[1])?;
         let (other, second_u, second_v) = self.second_surface.first_order(parameters[2], parameters[3])?;
@@ -826,6 +892,7 @@ impl SurfaceIntersectionCurve {
     }
 
     pub fn pcurve_for_surface(&self, surface: &Surface3) -> Option<&Curve2> {
+        if self.constant_width.is_some() { return None; }
         if self.first_surface.as_ref() == surface {
             Some(&self.first_pcurve)
         } else if self.second_surface.as_ref() == surface {
@@ -865,12 +932,20 @@ impl SurfaceIntersectionCurve {
             second_guide.first_derivative.x,
             second_guide.first_derivative.y,
         ];
-        let second = [
+        let mut second = [
             first_guide.second_derivative.x,
             first_guide.second_derivative.y,
             second_guide.second_derivative.x,
             second_guide.second_derivative.y,
         ];
+        if self.constant_width.is_some() {
+            // Exact intersection p-curves retain first-order chart data. A
+            // width guide also needs the gauge's acceleration when its branch
+            // is parameterized by those p-curves.
+            let first = clamped_difference(self.range, parameter, |at| Ok(self.first_pcurve.first_order(at)?.1))?;
+            let last = clamped_difference(self.range, parameter, |at| Ok(self.second_pcurve.first_order(at)?.1))?;
+            second = [first.x, first.y, last.x, last.y];
+        }
         let speed = derivative
             .iter()
             .map(|value| value * value)
@@ -909,6 +984,15 @@ impl SurfaceIntersectionCurve {
             return Ok(derivative);
         }
         let gauge = self.gauge(parameter)?;
+        if self.constant_width.is_some() {
+            let (_, columns, _, _) = self.width_equations(parameters)?;
+            let rhs = dot4(gauge.tangent, gauge.derivative)
+                - dot4(gauge.tangent_derivative, sub4(parameters, gauge.guide));
+            let matrix = [columns.map(|v| v.x), columns.map(|v| v.y), columns.map(|v| v.z), gauge.tangent];
+            let derivative = solve_affine_least_squares_4(matrix, [0.0, 0.0, 0.0, rhs], gauge.derivative)?;
+            self.evaluations.insert(parameter, (parameters, Some(derivative), None));
+            return Ok(derivative);
+        }
         let (_, first_du, first_dv) = self
             .first_surface
             .first_order(parameters[0], parameters[1])?;
@@ -997,6 +1081,87 @@ impl SurfaceIntersectionCurve {
         residual + normal * (sign * distance - residual.dot(normal))
     }
 
+    /// The two contacts have one rolling center and a fixed chord. Eliminating
+    /// r = width / |n0 - n1| leaves three equations in their four UV coordinates.
+    /// Differentiating these equations includes changes of both support normals.
+    fn width_equations(&self, uv: [f64; 4]) -> KernelResult<(Vec3, [Vec3; 4], Point3, [Vec3; 4])> {
+        let constraint = self.constant_width.unwrap();
+        let values = [self.first_surface.evaluate(uv[0], uv[1])?,
+            self.second_surface.evaluate(uv[2], uv[3])?];
+        let mut normals = [Vec3::new(0.0, 0.0, 0.0); 2];
+        let mut derivatives = [[Vec3::new(0.0, 0.0, 0.0); 2]; 2];
+        for side in 0..2 {
+            let value = values[side];
+            let cross = value.du.cross(value.dv);
+            let length = cross.magnitude();
+            let normal = cross / length;
+            normals[side] = normal * constraint.signs[side];
+            for (axis, change) in [value.duu.cross(value.dv) + value.du.cross(value.duv),
+                value.duv.cross(value.dv) + value.du.cross(value.dvv)].into_iter().enumerate() {
+                derivatives[side][axis] = (change - normal * normal.dot(change))
+                    * (constraint.signs[side] / length);
+            }
+        }
+        let delta = normals[0] - normals[1];
+        let length = delta.magnitude();
+        if length <= self.tolerance.angular {
+            return Err(geometry_error("constant-width fillet contacts have coincident normals"));
+        }
+        let radius = constraint.width / length;
+        let residual = values[0].point - values[1].point + delta * radius;
+        let center = Point3::from_vec((values[0].point.to_vec() + values[1].point.to_vec()
+            + (normals[0] + normals[1]) * radius) * 0.5);
+        let mut centers = [Vec3::new(0.0, 0.0, 0.0); 4];
+        let columns = std::array::from_fn(|index| {
+            let side = index / 2;
+            let sign = if side == 0 { 1.0 } else { -1.0 };
+            let dn = derivatives[side][index % 2];
+            let point_derivative = if index % 2 == 0 { values[side].du } else { values[side].dv };
+            let dr = -radius * delta.dot(dn) * sign / length.powi(2);
+            centers[index] = (point_derivative + (normals[0] + normals[1]) * dr + dn * radius) * 0.5;
+            point_derivative * sign + delta * dr + dn * (radius * sign)
+        });
+        Ok((residual, columns, center, centers))
+    }
+
+    fn correct_width_parameters(&self, parameter: f64) -> KernelResult<[f64; 4]> {
+        let gauge = self.gauge(parameter)?;
+        let mut uv = gauge.guide;
+        for _ in 0..48 {
+            let (residual, columns, center, _) = self.width_equations(uv)?;
+            let along = dot4(sub4(uv, gauge.guide), gauge.tangent);
+            let target = f64::EPSILON * center.to_vec().magnitude().max(1.0) * 2048.0;
+            let parameter_target = f64::EPSILON * uv.iter().map(|v| v.abs()).fold(1.0_f64, f64::max) * 2048.0;
+            if residual.magnitude() <= target && along.abs() <= parameter_target {
+                self.evaluations.insert(parameter, (uv, None, None));
+                return Ok(uv);
+            }
+            let matrix = [columns.map(|v| v.x), columns.map(|v| v.y), columns.map(|v| v.z), gauge.tangent];
+            let Some(step) = solve_linear(matrix, [-residual.x, -residual.y, -residual.z, -along]) else { break; };
+            let merit = residual.magnitude2() + along * along;
+            let mut damping = 1.0;
+            let mut accepted = false;
+            for _ in 0..16 {
+                let candidate = std::array::from_fn(|index| uv[index] + step[index] * damping);
+                if parameters_in_surface_domains(&self.first_surface, [candidate[0], candidate[1]], self.tolerance)
+                    && parameters_in_surface_domains(&self.second_surface, [candidate[2], candidate[3]], self.tolerance) {
+                    if let Ok((residual, _, _, _)) = self.width_equations(candidate) {
+                        let along = dot4(sub4(candidate, gauge.guide), gauge.tangent);
+                        if residual.magnitude2() + along * along < merit {
+                            uv = candidate;
+                            accepted = true;
+                            break;
+                        }
+                    }
+                }
+                damping *= 0.5;
+            }
+            if !accepted { break; }
+        }
+        Err(KernelError::new(DiagnosticKind::NumericalFailure,
+            "constant-width contact-rail solver did not converge on the selected branch"))
+    }
+
     pub(super) fn corrected_parameters(&self, parameter: f64) -> KernelResult<[f64; 4]> {
         if !self.range.contains(parameter, self.tolerance) {
             return Err(invalid(
@@ -1010,6 +1175,7 @@ impl SurfaceIntersectionCurve {
         if let Some((parameters, _, _)) = self.evaluations.get(parameter) {
             return Ok(parameters);
         }
+        if self.constant_width.is_some() { return self.correct_width_parameters(parameter); }
         let first_guide = self.first_pcurve.evaluate(parameter)?;
         let second_guide = self.second_pcurve.evaluate(parameter)?;
         let guide = [
@@ -1180,6 +1346,11 @@ impl SurfaceIntersectionCurve {
     }
 
     pub(super) fn evaluate(&self, parameter: f64) -> KernelResult<CurveEvaluation> {
+        if self.constant_width.is_some() {
+            let (point, first_derivative) = self.first_order(parameter)?;
+            let second_derivative = clamped_difference(self.range, parameter, |at| Ok(self.first_order(at)?.1))?;
+            return Ok(CurveEvaluation { point, first_derivative, second_derivative });
+        }
         let parameters = self.corrected_parameters(parameter)?;
         let first = self.first_surface.evaluate(parameters[0], parameters[1])?;
         let second = self.second_surface.evaluate(parameters[2], parameters[3])?;
@@ -1225,6 +1396,11 @@ impl SurfaceIntersectionCurve {
         parameters: [f64; 4],
         derivative: [f64; 4],
     ) -> KernelResult<(Point3, Vec3)> {
+        if self.constant_width.is_some() {
+            let (_, _, point, columns) = self.width_equations(parameters)?;
+            return Ok((point, columns.iter().zip(derivative).fold(Vec3::new(0.0, 0.0, 0.0),
+                |sum, (column, speed)| sum + column * speed)));
+        }
         let (first_point, first_du, first_dv) = self
             .first_surface
             .first_order(parameters[0], parameters[1])?;

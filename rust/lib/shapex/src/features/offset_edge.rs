@@ -474,6 +474,7 @@ pub(super) fn offset_vertex(
     incident: &[EdgeId],
     edges: &BTreeMap<EdgeId, OffsetEdge>,
     supports: &BTreeMap<FaceId, Surface3>,
+    reparameterized: &BTreeSet<FaceId>,
     tolerance: crate::ModelTolerance,
 ) -> KernelResult<Point3> {
     let source_point = topology.vertex(vertex)?.point();
@@ -500,6 +501,44 @@ pub(super) fn offset_vertex(
             topology.face(face).unwrap().surface() == &supports[&face]
         }).unwrap_or(seams[0]);
         incident.retain(|edge| !seams.contains(edge) || *edge == anchor);
+    }
+    // Equal offsets of tangent faces carry their shared corner to the same
+    // point in every retained chart. Seed there, rather than projecting the
+    // old corner onto a distant branch of an extended blend.
+    if faces.iter().all(|face| !reparameterized.contains(face)) {
+        let mut points = Vec::new();
+        for edge in &incident {
+            for id in topology.edge(*edge)?.coedges() {
+                let coedge = topology.coedge(*id)?;
+                let face = topology.loop_(coedge.loop_id())?.face();
+                // An opening stays on its original support, but its corner
+                // slides along that support as the neighboring skin offsets.
+                if topology.face(face)?.surface() == &supports[&face] { continue; }
+                let vertices = topology.coedge_vertices(*id)?;
+                let parameter = if vertices[0] == vertex { coedge.range().start } else { coedge.range().end };
+                let uv = coedge.pcurve().evaluate(parameter)?.point;
+                points.push(supports[&face].first_order(uv.x, uv.y)?.0);
+            }
+        }
+        if let Some(point) = points.first().copied() {
+            if points.iter().all(|other| point.distance(*other)
+                <= tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) * 8.0) {
+                // Carried rails preserve their endpoint parameters. If every
+                // rebuilt edge also passes through this point, the corner is
+                // already certified; a global curve projection can otherwise
+                // choose another minimum on the extended blend.
+                let on_edges = incident.iter().all(|id| {
+                    let source = topology.edge(*id).unwrap();
+                    let parameter = if source.vertices()[0] == vertex { source.range().start } else { source.range().end };
+                    edges[id].curve.first_order(parameter).is_ok_and(|value| value.0.distance(point)
+                        <= tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) * 8.0)
+                });
+                if on_edges { return Ok(point); }
+                if let Ok(point) = refine_offset_corner(topology, vertex, point, &faces, &incident, edges, supports, tolerance) {
+                    return Ok(point);
+                }
+            }
+        }
     }
     // Analytic rails give an exact seed even when the old vertex is an
     // antipode of a moved sphere. Refine the same support system from it.
@@ -590,7 +629,7 @@ pub(super) fn refine_offset_corner(
         .iter()
         .map(|face| {
             let surface = &supports[face];
-            if !matches!(surface, Surface3::Offset(_) | Surface3::RollingBall(_) | Surface3::Ruled(_)) {
+            if !matches!(surface, Surface3::Offset(_) | Surface3::RollingBall(_) | Surface3::Blend(_) | Surface3::Ruled(_)) {
                 return Ok(CornerConstraint::Surface(surface, None));
             }
             // Extended guides can reach another projection minimum. Retain
@@ -953,7 +992,16 @@ pub(super) fn trim_offset_edge(
             Ok(bounds.reversed())
         };
     }
-    let project_endpoint = |point: Point3| -> KernelResult<crate::Projection1> {
+    let project_endpoint = |point: Point3, source_parameter: f64| -> KernelResult<crate::Projection1> {
+        // Tangent offsets carry their rails in the original parameter chart.
+        // Keep an endpoint that still lies exactly on that curve; searching its
+        // extended domain can select a different local projection minimum.
+        if let Ok((candidate, _)) = edge.curve.first_order(source_parameter) {
+            let distance = candidate.distance(point);
+            if distance <= tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) {
+                return Ok(crate::Projection1 { parameter: source_parameter, point: candidate, distance });
+            }
+        }
         let mut projection = edge.curve.project(point, tolerance)?;
         if let crate::DomainBounds::Bounded(range) = edge.curve.domain().bounds {
             for parameter in [range.start, range.end] {
@@ -970,8 +1018,8 @@ pub(super) fn trim_offset_edge(
         }
         Ok(projection)
     };
-    let mut first = project_endpoint(vertices[&first_vertex])?;
-    let mut second = project_endpoint(vertices[&second_vertex])?;
+    let mut first = project_endpoint(vertices[&first_vertex], source.range().start)?;
+    let mut second = project_endpoint(vertices[&second_vertex], source.range().end)?;
     // A bounded intersection curve can close at its chart seam without
     // declaring a periodic domain. Projection may choose either coincident
     // endpoint due to roundoff. Choose the endpoint that lets the trim follow

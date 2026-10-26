@@ -116,7 +116,7 @@ pub(crate) fn support_patches(
             );
             continue;
         }
-        match offset_vertex(topology, vertex, &incident_edges[&vertex], &edges, &supports, tolerance) {
+        match offset_vertex(topology, vertex, &incident_edges[&vertex], &edges, &supports, reparameterized, tolerance) {
             Ok(point) => {
                 vertices.insert(vertex, point);
             }
@@ -202,7 +202,7 @@ pub(crate) fn support_patches(
                                 } else if axis == 1
                                     && matches!(
                                         supports[&excluded],
-                                        Surface3::RollingBall(_) | Surface3::Ruled(_)
+                                        Surface3::RollingBall(_) | Surface3::Blend(_) | Surface3::Ruled(_)
                                     )
                                 {
                                     value

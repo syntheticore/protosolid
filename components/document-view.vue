@@ -55,7 +55,7 @@
             .flex.gap
 
               IconButton(
-                icon="camera"
+                icon="zoom-fit-all"
                 title="Fit All"
                 @mouseenter="previewOnHover && bus.emit('preview-zoom-all')"
                 @mouseleave="bus.emit('unpreview-camera')"
@@ -63,7 +63,7 @@
               )
 
               IconButton(
-                icon="crop-alt"
+                icon="zoom-fit-active"
                 title="Fit Active"
                 @mouseenter="previewOnHover && bus.emit('preview-zoom-active')"
                 @mouseleave="bus.emit('unpreview-camera')"
@@ -72,7 +72,7 @@
 
               IconButton(
                 v-if="document.selection.items.length"
-                icon="search-plus"
+                icon="zoom-fit-selection"
                 title="Fit Selection"
                 @mouseenter="previewOnHover && bus.emit('preview-zoom-selection')"
                 @mouseleave="bus.emit('unpreview-camera')"
@@ -380,7 +380,7 @@
           },
           pathTraced: {
             title: 'Path traced',
-            icon: 'display-path-traced',
+            icon: 'sun',
           },
         },
         colorModes: {

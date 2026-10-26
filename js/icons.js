@@ -234,10 +234,6 @@ const cubeEdges = (edges, w) => edges.map(([p, q]) => seg(...p, ...q, w)).join('
 
 const cubeDashes = (edges, w) => edges.map(([p, q]) => dashed(...p, ...q, 2, w)).join('')
 
-// Four pointed sparkle
-const sparkle = (cx, cy, r) =>
-  poly(...Array.from({ length: 8 }, (_, i) => polar(cx, cy, i % 2 ? r * 0.3 : r, i % 2 ? r * 0.3 : r, -90 + i * 45)))
-
 // Display mode cubes fill the whole grid, like FA's own cube. Solid
 // cubes are inset by half a gap, stroked ones by half a stroke.
 const solidCube = cube(0, 0, 336, 176)
@@ -245,6 +241,14 @@ const strokedCube = cube(28, 28, 280, 176)
 
 // Ghost of the sharp corner at (x, y) replaced by a fillet or chamfer
 const ghostCorner = (x, y, arm) => lines([[x, y + arm], [x, y], [x + arm, y]], THIN)
+
+// Corner brackets around the grid, framing the content of zoom icons
+const viewFrame = (arm = 112) => [
+  [[28, 28 + arm], [28, 28], [28 + arm, 28]],
+  [[484 - arm, 28], [484, 28], [484, 28 + arm]],
+  [[484, 484 - arm], [484, 484], [484 - arm, 484]],
+  [[28 + arm, 484], [28, 484], [28, 484 - arm]],
+].map(points => lines(points)).join('')
 
 // Diagonal hatching inside the square [min, max], for section views
 const hatch = (min, max, offsets, w) => offsets.map(c => {
@@ -641,10 +645,23 @@ const definitions = {
   'display-wireframe': [
     cubeEdges([...strokedCube.visible, ...strokedCube.hidden], 56),
   ],
-  'display-path-traced': [
-    cubeFaces(cube(176, 176, 208, 128), 16),
-    sparkle(100, 100, 100),
-    sparkle(240, 44, 44),
+
+  // Zoom
+  'zoom-fit-all': [
+    viewFrame(),
+    rect(104, 104, 128, 128),
+    rect(280, 104, 128, 128),
+    rect(104, 280, 128, 128),
+    rect(280, 280, 128, 128),
+  ],
+  'zoom-fit-active': [
+    viewFrame(),
+    circle(256, 256, 108),
+  ],
+  'zoom-fit-selection': [
+    viewFrame(),
+    // Centroid on the icon's center
+    arrow(124, 124, -135, 280, 240),
   ],
 
   // Feature options

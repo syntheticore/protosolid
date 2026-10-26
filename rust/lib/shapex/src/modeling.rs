@@ -12,7 +12,7 @@ use super::{
     BodyId, BooleanKind, ChangeKind, DerivationRole, EdgeId, EntityId, FaceId, Kernel, KernelError,
     KernelResult, MassProperties, ModelTolerance, OperationHistory, Origin, PersistentId, Plane3,
     Profile, Reflection3, RigidTransform3, Tessellate, TessellationOptions, Topology, TriangleMesh,
-    invalid,
+    VertexId, invalid,
 };
 use crate::{geometry_error, topology_error, unsupported};
 
@@ -314,6 +314,16 @@ impl EdgeHandle {
             .map(|face| {
                 build_face_handle(Arc::clone(&self.state), face, Arc::clone(&self.revisions))
             })
+            .collect()
+    }
+    /// Start and end vertices; a closed edge reports its single vertex twice.
+    pub fn vertices(&self) -> KernelResult<Vec<VertexHandle>> {
+        self.state
+            .topology()
+            .edge(self.edge)?
+            .vertices()
+            .into_iter()
+            .map(|vertex| build_vertex_handle(&self.state, vertex, &self.revisions))
             .collect()
     }
     pub fn tessellate(&self, options: TessellationOptions) -> KernelResult<super::Polyline> {
@@ -1599,14 +1609,7 @@ fn build_solid(
         .collect::<KernelResult<Vec<_>>>()?;
     let vertices = vertex_ids
         .into_iter()
-        .map(|vertex| {
-            let name = topology.vertex(vertex)?.name();
-            Ok(VertexHandle {
-                name,
-                revision: revisions[&name],
-                point: topology.vertex(vertex)?.point(),
-            })
-        })
+        .map(|vertex| build_vertex_handle(&state, vertex, &revisions))
         .collect::<KernelResult<Vec<_>>>()?;
     Ok(Solid {
         state,
@@ -1651,6 +1654,20 @@ fn build_edge_handle(
         edge,
         name,
         revision,
+    })
+}
+
+fn build_vertex_handle(
+    state: &Kernel,
+    vertex: VertexId,
+    revisions: &BTreeMap<PersistentId, uuid::Uuid>,
+) -> KernelResult<VertexHandle> {
+    let vertex = state.topology().vertex(vertex)?;
+    let name = vertex.name();
+    Ok(VertexHandle {
+        name,
+        revision: revisions[&name],
+        point: vertex.point(),
     })
 }
 

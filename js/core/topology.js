@@ -6,6 +6,7 @@ export function topologyItems(compound) {
   return compound.solids().flatMap(solid => [
     ...solid.faces().map(face => Object.assign(face, { topologyKind: 'face' })),
     ...solid.edges().map(edge => Object.assign(edge, { topologyKind: 'edge' })),
+    ...solid.vertices().map(vertex => Object.assign(vertex, { topologyKind: 'vertex' })),
     Object.assign(solid, { topologyKind: 'body' }),
   ])
 }
@@ -14,6 +15,7 @@ export function topologyNeighbors(item) {
   if(item.cachedTopologyNeighbors) return item.cachedTopologyNeighbors
   if(item.topologyKind == 'body') return item.faces()
   item.cachedTopologyNeighbors = item.topologyKind == 'edge' ? [...new Set(item.connectedFaces())] :
+    item.topologyKind == 'vertex' ? item.edges() :
     item.solid.edges().filter(edge => topologyNeighbors(edge).includes(item))
   return item.cachedTopologyNeighbors
 }
@@ -28,7 +30,8 @@ export function topologySides(item) {
   const faces = item.topologyKind == 'body' ? item.faces() : item.solid.faces()
   const supportFaces = (item.topologyKind == 'body' ? item.compound : item.solid.compound)
     .solids().flatMap(solid => solid.faces())
-  const points = item.topologyKind == 'edge' ? item.tesselate().map(point =>
+  const points = item.topologyKind == 'vertex' ? [item.point] :
+    item.topologyKind == 'edge' ? item.tesselate().map(point =>
     Array.isArray(point) ? new THREE.Vector3(...point) : point) :
     (item.topologyKind == 'body' ? item.faces() : [item]).flatMap(face => {
       const { positions } = face.tesselate()

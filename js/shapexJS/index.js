@@ -1023,6 +1023,11 @@ export function createShapex(bindings) {
       try { return Array.from({ length: raw.length }, (_, index) => new Face(raw.get(index))) }
       finally { free(raw) }
     }
+    vertices() {
+      const raw = nativeCall(() => this._raw().vertices())
+      try { return Array.from({ length: raw.length }, (_, index) => new Vertex(raw.get(index))) }
+      finally { free(raw) }
+    }
     tessellate(options) {
       const value = tessellation(options)
       const raw = nativeCall(() => this._raw().tessellate(value.chordTolerance, value.angularTolerance, value.maximumDepth))

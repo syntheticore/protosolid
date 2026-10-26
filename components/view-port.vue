@@ -313,7 +313,7 @@
         }
         return selection
       })
-      return { 'picker-selection': pickerSelection }
+      return { 'picker-selection': pickerSelection, 'picker-type': computed(() => this.pickerType) }
     },
 
     props: {
@@ -334,6 +334,7 @@
         paths: [],
         pickingPath: null,
         pickerReferences: [],
+        pickerType: null,
         guides: [],
         widgets: [],
         isOrbiting: false,
@@ -506,6 +507,7 @@
 
       // Events
       this.bus.on('pick', (type, pickerCoords, color, acceptsInput, references) => {
+        this.pickerType = type
         this.handlePick(pickerCoords, color, {
           profile: ProfilePickTool,
           curve: CurvePickTool,
@@ -1196,6 +1198,7 @@
         this.resetProxyInteraction()
         this.pickingPath = null
         this.pickerReferences = []
+        this.pickerType = null
         this.renderer.setGizmosHidden(false)
         this.snapper.reset()
         if(!Tool) return

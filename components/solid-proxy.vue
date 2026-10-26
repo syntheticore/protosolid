@@ -29,6 +29,15 @@
     :parent-transform="parentTransform"
   )
 
+  VertexProxy(
+    v-if="parentActive && pickerType == 'point'"
+    v-for="vertex in solid.cornerVertices()"
+    :key="vertex.tessId"
+    :vertex="vertex"
+    :component="component"
+    :parent-transform="parentTransform"
+  )
+
 </template>
 
 
@@ -38,6 +47,7 @@
   const emit = defineEmits([])
 
   const highlight = inject('highlight')
+  const pickerType = inject('picker-type')
 
   const highlighted = computed(() => props.parentHighlighted || props.solid.id == (highlight.value && highlight.value.id) )
   const selected = computed(() => props.parentSelected || props.document.selection.hasId(props.solid.id) )

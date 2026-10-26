@@ -814,6 +814,13 @@ impl NativeEdge {
             .map_err(js_error)
     }
 
+    pub fn vertices(&self) -> Result<NativeEdgeVertices, JsValue> {
+        self.inner
+            .vertices()
+            .map(|vertices| NativeEdgeVertices { vertices })
+            .map_err(js_error)
+    }
+
     pub fn tessellate(
         &self,
         linear: f64,
@@ -847,6 +854,25 @@ impl NativeConnectedFaces {
             .get(index)
             .cloned()
             .map(|inner| NativeFace { inner })
+    }
+}
+
+#[wasm_bindgen(js_name = NativeEdgeVertices)]
+pub struct NativeEdgeVertices {
+    vertices: Vec<VertexHandle>,
+}
+
+#[wasm_bindgen(js_class = NativeEdgeVertices)]
+impl NativeEdgeVertices {
+    #[wasm_bindgen(getter)]
+    pub fn length(&self) -> usize {
+        self.vertices.len()
+    }
+    pub fn get(&self, index: usize) -> Option<NativeVertex> {
+        self.vertices
+            .get(index)
+            .cloned()
+            .map(|inner| NativeVertex { inner })
     }
 }
 

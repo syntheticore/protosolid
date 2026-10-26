@@ -356,6 +356,7 @@ export interface Edge extends NativeValue {
   curve(): Line3 | Circle3 | TrimmedCurve3
   trimmedCurve(): TrimmedCurve3
   connectedFaces(): Face[]
+  vertices(): Vertex[]
   tessellate(options?: TessellationOptions): Polyline
 }
 

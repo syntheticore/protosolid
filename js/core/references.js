@@ -121,6 +121,14 @@ export class SolidReference extends TopoReference {
 Serialize.register(SolidReference, 'SolidReference')
 
 
+export class VertexReference extends TopoReference {
+  update(tree) {
+    return this.updateTopology(tree, 'Vertex')
+  }
+}
+Serialize.register(VertexReference, 'VertexReference')
+
+
 // Pattern inputs may point either at a body in the model or at a feature in
 // the timeline. Keeping this as a reference (instead of storing geometry)
 // makes saved patterns regenerate against the latest upstream result.

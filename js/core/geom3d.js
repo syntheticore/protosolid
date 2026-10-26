@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarReference, AxialReference, PointReference } from './references.js'
+import { ProfileReference, EdgeReference, FaceReference, SolidReference, PlanarReference, AxialReference, PointReference, VertexReference } from './references.js'
 import { makeID } from './id.js'
 import { markRaw } from 'vue'
 import { resolveCompoundSelection, restoreCompoundSelections, identifyTopology, topologyItems } from './topology.js'
@@ -89,6 +89,7 @@ export class Wire {
     return polyline
   }
 }
+
 export class Profile {
   constructor(sketch, rings) {
     this.sketch = sketch
@@ -292,6 +293,7 @@ class Volumetric {
     return threeVector(this.geom().centroid())
   }
 }
+
 export class Face {
   constructor(solid, geom, id, tessId) {
     this.solid = solid
@@ -363,6 +365,7 @@ export class Face {
     })
   }
 }
+
 export class Edge {
   constructor(solid, geom, id, tessId) {
     this.solid = solid
@@ -403,7 +406,7 @@ export class Edge {
     return this.tesselate().map(point => point.clone())
   }
   isSemantic() {
-    return this.solid.compound.geom().isSemanticEdge(this.geom())
+    return this.cachedSemantic ??= this.solid.compound.geom().isSemanticEdge(this.geom())
   }
   getAxis() {
     const curve = this.geom().curve()
@@ -426,6 +429,9 @@ export class Edge {
   vertices() {
     return this.geom().endpoints().map(threeVector)
   }
+  vertexIds() {
+    return this.cachedVertexIds ||= consumeEntityIds(this.geom().vertices())
+  }
   tesselate() {
     if (this.cachedTesselation) return this.cachedTesselation
     this.cachedTesselation = this.geom().tessellate(tessellationOptions).points.map(threeVector)
@@ -433,6 +439,39 @@ export class Edge {
 
   }
 }
+
+export class Vertex {
+  constructor(solid, geom, id, tessId) {
+    this.solid = solid
+    this.geom = () => geom
+    this.id = id
+    this.kernelId = geom.id()
+    this.tessId = tessId || makeID()
+    this.point = threeVector(geom.point())
+  }
+  typename() {
+    return 'Vertex'
+  }
+  center() {
+    return this.point.clone()
+  }
+  edges() {
+    return this.solid.vertexEdges(this)
+  }
+  connectedFaces() {
+    return this.cachedConnectedFaces ||= [...new Set(this.edges().flatMap(edge => edge.connectedFaces()))]
+  }
+  getPoint() {
+    return new THREE.Matrix4().setPosition(this.point)
+  }
+  vertexReference() {
+    return new VertexReference(this)
+  }
+  pointReference() {
+    return new PointReference(this.vertexReference())
+  }
+}
+
 export class Solid extends Volumetric {
   constructor(compound, geom) {
     super()
@@ -454,6 +493,27 @@ export class Solid extends Volumetric {
     this.cachedEdges = this.geom().edges().map(edge => new Edge(this, edge))
     this.cachedEdges.forEach(edge => edge.id = edge.kernelId)
     return this.cachedEdges
+  }
+  vertices() {
+    if (this.cachedVertices) return this.cachedVertices
+    this.cachedVertices = this.geom().vertices().map(vertex => new Vertex(this, vertex))
+    this.cachedVertices.forEach(vertex => vertex.id = vertex.kernelId)
+    return this.cachedVertices
+  }
+  // Kernel incidence, including non-semantic seam edges
+  vertexEdges(vertex) {
+    if (!this.cachedVertexEdges) {
+      this.cachedVertexEdges = new Map(this.vertices().map(vertex => [vertex.kernelId, []]))
+      for (const edge of this.edges()) {
+        for (const id of new Set(edge.vertexIds())) this.cachedVertexEdges.get(id).push(edge)
+      }
+    }
+    return this.cachedVertexEdges.get(vertex.kernelId)
+  }
+  // Corners where semantic edges meet
+  cornerVertices() {
+    return this.cachedCornerVertices ||= this.vertices().filter(vertex =>
+      vertex.edges().filter(edge => edge.isSemantic()).length > 1)
   }
   faceTessellation(face) {
     this.cachedFaceTessellations ??= new Map()
@@ -480,6 +540,11 @@ export class Solid extends Volumetric {
       edge.topology = this.edges()[i].topology
       edge.topologyKind = 'edge'
     })
+    clone.cachedVertices = this.vertices().map(vertex => new Vertex(clone, vertex.geom(), vertex.id, vertex.tessId))
+    clone.cachedVertices.forEach((vertex, i) => {
+      vertex.topology = this.vertices()[i].topology
+      vertex.topologyKind = 'vertex'
+    })
     return clone
   }
   toCompound() {
@@ -499,6 +564,7 @@ export class Solid extends Volumetric {
     return new SolidReference(this)
   }
 }
+
 // Wrap bodies read from an exchange file, owned by the importing feature.
 export function importedCompound(componentId, geometry, owner) {
   return seedImportTopology(new Compound(componentId, geometry), owner)

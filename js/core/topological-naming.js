@@ -100,9 +100,10 @@ export function propagateTopology(items, correspondence, operation, neighbors) {
       descendants.set(source, cells)
     }
   }
-  // Faces precede edges, and edges precede bodies. This is a dependency order,
-  // not an identity: reversing the items within a kind has no effect.
-  for(const kind of ['face', 'edge', 'body']) {
+  // Faces precede edges, edges precede vertices, and vertices precede bodies.
+  // This is a dependency order, not an identity: reversing the items within a
+  // kind has no effect.
+  for(const kind of ['face', 'edge', 'vertex', 'body']) {
     for(const item of items.filter(item => item.topologyKind == kind)) {
       const contract = typeof operation == 'function' ? operation(item) : operation
       const role = typeof contract == 'string' ? contract : contract.name

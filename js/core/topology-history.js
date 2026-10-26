@@ -27,6 +27,10 @@ export function seedProfileTopology(compound, profiles, owner, extraSources = []
       nameTopology(edge, 'edge', 'profile/boundary',
         edge.connectedFaces().flatMap(face => face.topology.anchors), owner)
     }
+    for(const vertex of solid.vertices()) {
+      nameTopology(vertex, 'vertex', 'profile/boundary',
+        vertex.edges().flatMap(edge => edge.topology.anchors), owner)
+    }
     nameTopology(solid, 'body', 'profile/body', sources, owner)
   }
   identifyTopology(compound)
@@ -43,6 +47,10 @@ export function seedImportTopology(compound, owner) {
     for(const edge of solid.edges()) {
       nameTopology(edge, 'edge', 'import/boundary',
         edge.connectedFaces().flatMap(face => face.topology.anchors), owner)
+    }
+    for(const vertex of solid.vertices()) {
+      nameTopology(vertex, 'vertex', 'import/boundary',
+        vertex.edges().flatMap(edge => edge.topology.anchors), owner)
     }
     nameTopology(solid, 'body', 'import/body', [`${body}`], owner)
   })

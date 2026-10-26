@@ -214,6 +214,9 @@ class Materials {
     this.constrainedUiPoint = this.uiPoint.clone()
     this.constrainedUiPoint.color.set('#d7e4ed')
 
+    this.vertexPoint = this.uiPoint.clone()
+    this.vertexPoint.color.set('white')
+
     // Surface Materials
     this.surface = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide,

@@ -41,6 +41,22 @@
     flex: 1 1 auto
     min-width: 0
     text-shadow: none
+    position: relative
+    isolation: isolate
+
+    // Highlight lives on its own layer, as the gradient background can't be transitioned
+    &::before
+      content: ''
+      position: absolute
+      inset: 0
+      z-index: -1
+      border-radius: inherit
+      background: $highlight
+      opacity: 0
+      transition: opacity 0.15s
+
+    &:hover::before
+      transition: none
 
     & + .button
       border-left: none
@@ -57,9 +73,11 @@
       border-bottom-right-radius: 4px
 
     &.pressed
-      background: $highlight
       border-color: lighten($highlight, 0%)
       color: white
+
+      &::before
+        opacity: 1
 
   .label
     display: block

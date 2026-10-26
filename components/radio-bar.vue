@@ -31,6 +31,7 @@
     pointer-events: auto
     display: flex
     position: relative
+    isolation: isolate
 
   .button
     display: flex
@@ -44,11 +45,12 @@
     position: relative
     isolation: isolate
 
-    // Highlight lives on its own layer, as the gradient background can't be transitioned
+    // Highlight lives on its own layer covering the border, as the gradient background can't be transitioned
+    // and only opacity keeps animating while the main thread is blocked by feature updates
     &::before
       content: ''
       position: absolute
-      inset: 0
+      inset: -1px
       z-index: -1
       border-radius: inherit
       background: $highlight
@@ -72,8 +74,9 @@
       border-top-right-radius: 4px
       border-bottom-right-radius: 4px
 
+    // Raise above the next button's box shadow, which would otherwise cover the right edge
     &.pressed
-      border-color: lighten($highlight, 0%)
+      z-index: 1
       color: white
 
       &::before
@@ -89,6 +92,7 @@
 
   .hot-key
     position: absolute
+    z-index: 2
     top: 2px
     left: 2px
     font-size: 9px

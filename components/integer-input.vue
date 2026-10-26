@@ -48,6 +48,7 @@
         }
         this.problem = false
         this.$emit('update:value', value)
+        this.$refs.input.syncValue()
         if(!noFocus) this.$refs.input.focusInput()
       },
 

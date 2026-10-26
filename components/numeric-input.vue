@@ -165,6 +165,12 @@
         this.$emit('commit', this.$refs.input.value, noFocus)
       },
 
+      // Show the normalized value, even if it equals the previous one
+      syncValue() {
+        const input = this.$refs.input
+        this.$nextTick(() => input.value = this.value)
+      },
+
       keydown(e) {
         const allowPropagation =
           e.keyCode == 27 ||

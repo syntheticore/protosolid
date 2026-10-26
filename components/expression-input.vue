@@ -79,6 +79,7 @@
           this.inner.set(value)
           this.$emit('expression', this.inner.expression)
           this.update(noFocus)
+          this.$refs.input.syncValue()
           this.$emit('enter')
         } catch(e) {
           this.problem = true

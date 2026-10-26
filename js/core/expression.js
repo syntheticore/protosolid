@@ -39,6 +39,8 @@ export default class Expression {
     } else {
       // Allways leave a unit for display purposes
       input = input.replace(/,/g, '.')
+      // Write .75 as 0.75
+      input = input.replace(/(?<![\w.])\.(?=\d)/g, '0.')
       const number = this.parsePlus(input)
       if(!number.unit && number.value == input) input += this.defaultUnit
       this.expression = input

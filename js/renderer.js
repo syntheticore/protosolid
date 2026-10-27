@@ -91,7 +91,7 @@ export default class Renderer {
     // this.scene.add(new THREE.AxesHelper(10.0))
 
     // Sketch Plane
-    this.sketchPlane = new SketchPlane(this.camera)
+    this.sketchPlane = new SketchPlane()
     this.traceables.add(this.sketchPlane)
     this.splineDashOrigin = new THREE.Vector3()
     this.splineDashX = new THREE.Vector3()
@@ -420,7 +420,7 @@ export default class Renderer {
     this.scene.traverse(object => {
       if(object instanceof DimensionControls) object.updateLayout()
     })
-    this.sketchPlane.update(this.activeCamera)
+    this.sketchPlane.update(this.activeCamera, this.viewControls.target)
     this.updateSplineDashScale()
     const pathTraced = this.displayMode == 'pathTraced' &&
       this.pathTracingViewport.render(this.scene, this.activeCamera)

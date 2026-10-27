@@ -143,7 +143,7 @@ function gridMaterial(size) {
 }
 
 export default class SketchPlane extends THREE.Object3D {
-  constructor(camera) {
+  constructor() {
     super()
 
     // Grid
@@ -152,7 +152,12 @@ export default class SketchPlane extends THREE.Object3D {
     this.maskHull = []
     this.maskSignature = null
     this.sketch = null
-    this.update(camera)
+    this.grid = new THREE.Mesh(
+      new THREE.PlaneGeometry(VIRTUAL_GRID_SIZE, VIRTUAL_GRID_SIZE),
+      gridMaterial(1),
+    )
+    this.add(this.grid)
+    this.lastSize = null
 
     // Axis Helper
     this.add(new THREE.AxesHelper(10.0))
@@ -220,7 +225,6 @@ export default class SketchPlane extends THREE.Object3D {
   }
 
   updateMask() {
-    if(!this.grid) return
     const elements = this.sketchElements()
     const signature = this.geometrySignature(elements)
     if(signature != this.maskSignature) {
@@ -233,20 +237,15 @@ export default class SketchPlane extends THREE.Object3D {
     this.maskHull.forEach((point, index) => uniforms.maskHull.value[index].copy(point))
   }
 
-  update(camera) {
+  update(camera, target) {
     const relPos = camera.position.clone().sub(this.position)
     const normal = this.cachedNormal.set(0, 0, 1).applyEuler(this.rotation)
     const dist = Math.abs(normal.dot(relPos))
-    const dot = Math.abs(normal.dot(relPos.normalize()))
-    const size = Math.pow(10, String(Math.round(10 * dist / 4)).length) / 10
-    if(!this.grid) {
-      this.grid = new THREE.Mesh(
-        new THREE.PlaneGeometry(VIRTUAL_GRID_SIZE, VIRTUAL_GRID_SIZE),
-        gridMaterial(size),
-      )
-      this.add(this.grid)
-      this.lastSize = size
-    } else if(size != this.lastSize && dot > 0.5) {
+    // Orbiting keeps the distance to the orbit target constant, so the grid
+    // resolution only changes when zooming.
+    const viewDistance = camera.position.distanceTo(target) / camera.zoom
+    const size = Math.pow(10, String(Math.round(10 * viewDistance / 4)).length) / 10
+    if(size != this.lastSize) {
       const uniforms = this.grid.material.uniforms
       uniforms.gridStep.value = size / 10
       uniforms.maskInnerRadius.value = size * 0.2

@@ -2140,6 +2140,7 @@ export class SlotTool extends SketchTool {
       this.secondCenter = vec.clone()
       this.secondCenterSnap = snap
       this.lockedLength = this.locks.length
+      this.updateCenterline(this.secondCenter)
     } else {
       if(!this.updateShape(vec)) return
       this.commit()
@@ -2148,6 +2149,7 @@ export class SlotTool extends SketchTool {
       this.firstCenterSnap = null
       this.secondCenterSnap = null
       this.lockedLength = undefined
+      this.centerline = null
       this.elements = []
     }
     this.resetInput()
@@ -2156,8 +2158,25 @@ export class SlotTool extends SketchTool {
 
   mouseMove(vec) {
     this.pointer = vec
-    if(!this.firstCenter || !this.secondCenter) return
+    if(!this.firstCenter) return
+    if(!this.secondCenter) {
+      if(this.updateCenterline(this.constrained(vec))) this.viewport.elementChanged()
+      return
+    }
     if(this.updateShape(this.constrained(vec))) this.viewport.elementChanged()
+  }
+
+  updateCenterline(end) {
+    if(end.distanceToSquared(this.firstCenter) < 1e-12) return false
+    if(this.centerline) {
+      this.centerline.setHandles([this.firstCenter.clone(), end.clone()])
+    } else {
+      this.centerline = new Line(this.firstCenter.clone(), end.clone())
+      this.centerline.isReference = true
+      this.sketch.add(this.centerline)
+      this.elements = [this.centerline]
+    }
+    return true
   }
 
   slotPoints(sizePoint) {
@@ -2185,17 +2204,18 @@ export class SlotTool extends SketchTool {
     const {
       topFirst, topSecond, bottomFirst, bottomSecond, outerFirst, outerSecond,
     } = points
-    if(!this.elements.length) {
+    if(this.elements.length == 1) {
       const firstArc = Arc.fromPoints([bottomFirst, outerFirst, topFirst])
       const secondArc = Arc.fromPoints([topSecond, outerSecond, bottomSecond])
       if(!firstArc || !secondArc) return false
-      this.elements = [
+      const outline = [
         new Line(topFirst, topSecond),
         secondArc,
         new Line(bottomSecond, bottomFirst),
         firstArc,
       ]
-      this.elements.forEach(element => this.sketch.add(element))
+      outline.forEach(element => this.sketch.add(element))
+      this.elements = [...outline, this.centerline]
     } else {
       const [top, secondArc, bottom, firstArc] = this.elements
       top.setHandles([topFirst, topSecond])
@@ -2207,12 +2227,14 @@ export class SlotTool extends SketchTool {
   }
 
   commit() {
-    const [top, secondArc, bottom, firstArc] = this.elements
+    const [top, secondArc, bottom, firstArc, centerline] = this.elements
     ;[
       [top, 0, firstArc, 2],
       [top, 1, secondArc, 1],
       [bottom, 0, secondArc, 2],
       [bottom, 1, firstArc, 1],
+      [centerline, 0, firstArc, 0],
+      [centerline, 1, secondArc, 0],
     ].forEach(([line, lineIndex, arc, arcIndex]) => {
       this.sketch.addConstraint(new CoincidentConstraint(
         new ElemRef(line, lineIndex), new ElemRef(arc, arcIndex)
@@ -2247,6 +2269,7 @@ export class SlotTool extends SketchTool {
   dispose() {
     this.elements.forEach(element => element.remove())
     this.elements = []
+    this.centerline = null
     this.firstCenter = null
     this.secondCenter = null
   }

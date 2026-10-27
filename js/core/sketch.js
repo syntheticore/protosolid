@@ -924,7 +924,23 @@ export class Sketch {
           const circlePrims = circles.map(item => idMap[item.curve().id].slice(-1)[0])
           return { id: `${id++}`, type: 'tangent_cc', c1_id: circlePrims[0].id, c2_id: circlePrims[1].id, temporary: c.temporary }
         }
-        const spline = c.items.find(item => item.curve() instanceof Spline)
+        const splines = c.items.filter(item => item.curve() instanceof Spline)
+        if(splines.length == 2) {
+          // Clamped splines meet tangentially where the end segments of
+          // their control polygons are parallel. Prefer joined ends.
+          const ends = item => item.index !== undefined ? [item.index] : [0, item.curve().points.length - 1]
+          const [first, second] = splines.map(item => item.curve())
+          const pairs = ends(splines[0]).flatMap(i => ends(splines[1]).map(j => ({
+            i, j, distance: first.points[i].distanceTo(second.points[j]),
+          })))
+          const pair = pairs.find(({ i, j }) => this.coincidentPointsConnected(first, i, second, j)) ||
+            pairs.minMaxBy(Math.min, candidate => candidate.distance)
+          const tangentPrim = (curve, index) => idMap[curve.id].find(primitive =>
+            primitive.type == 'line' && primitive.splineTangent == (index == 0 ? 0 : 1)
+          )
+          return { id: `${id++}`, type: 'parallel', l1_id: tangentPrim(first, pair.i).id, l2_id: tangentPrim(second, pair.j).id, temporary: c.temporary }
+        }
+        const spline = splines[0]
         const curve = spline || c.items.find(item => item.curve() instanceof Circle || item.curve() instanceof Arc)
         if(!curve) throw new Error('Unsupported Tangent constraint geometry')
         const linePrim = line && idMap[line.curve().id].slice(-1)[0]

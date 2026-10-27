@@ -2579,7 +2579,7 @@ export class TangentConstraintTool extends ConstraintTool {
     const round = item => item instanceof Circle || item instanceof Arc
     return (items.filter(item => item instanceof Line).length == 1 &&
       items.filter(item => round(item) || item instanceof Spline).length == 1) ||
-      items.every(round) ||
+      items.every(round) || items.every(item => item instanceof Spline) ||
       (items.some(item => item instanceof Spline) && items.some(round))
   }
 }

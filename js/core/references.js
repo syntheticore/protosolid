@@ -218,25 +218,29 @@ Serialize.register(PatternInputReference, 'PatternInputReference')
 
 
 export class CurveReference extends Reference {
-  constructor(item, componentId, sketchId, isProjection, itemId) {
+  constructor(item, componentId, sketchId, isProjection, itemId, outputIndex) {
     super(item)
     this.componentId = componentId || item.sketch.component.id
     this.sketchId = sketchId || item.sketch.id
     this.isProjection = isProjection !== undefined ? isProjection : !!item.projection
     this.itemId = itemId || (this.isProjection ? item.projection.id : item.id)
+    // Projections may yield several elements, like the points of an intersection
+    this.outputIndex = outputIndex ?? (this.isProjection ?
+      item.projection.geometries().findIndex(output => output.id == item.id) : 0)
   }
 
   clone() {
     // Deserialized references are intentionally unresolved until update().
     // Preserve their stable IDs instead of asking a null item for its sketch.
-    return new CurveReference(this.item, this.componentId, this.sketchId, this.isProjection, this.itemId)
+    return new CurveReference(this.item, this.componentId, this.sketchId, this.isProjection, this.itemId, this.outputIndex)
   }
 
   update(tree) {
     const comp = tree.findChild(this.componentId)
-    const sketch = comp.sketches.find(sketch => sketch.id == this.sketchId )
-    const item = (this.isProjection ? sketch.projections : sketch.elements).find(item => item.id == this.itemId )
-    this.item = this.isProjection ? item.geometry() : item
+    const sketch = comp?.sketches.find(sketch => sketch.id == this.sketchId )
+    const item = sketch && (this.isProjection ? sketch.projections : sketch.elements).find(item => item.id == this.itemId )
+    this.item = this.isProjection ? item?.geometries()[this.outputIndex] : item
+    if(!this.item) return { type: 'error', msg: 'Sketch element reference was lost' }
   }
 
   dump() {
@@ -245,11 +249,12 @@ export class CurveReference extends Reference {
       sketchId: this.sketchId,
       isProjection: this.isProjection,
       itemId: this.itemId,
+      outputIndex: this.outputIndex,
     }
   }
 
   static undump(dump, context) {
-    return new this(null, dump.componentId, dump.sketchId, dump.isProjection, dump.itemId)
+    return new this(null, dump.componentId, dump.sketchId, dump.isProjection, dump.itemId, dump.outputIndex || 0)
   }
 }
 Serialize.register(CurveReference, 'CurveReference')

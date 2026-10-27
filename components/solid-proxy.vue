@@ -30,7 +30,7 @@
   )
 
   VertexProxy(
-    v-if="parentActive && pickerType == 'point'"
+    v-if="projectPoints || (parentActive && pickerType == 'point')"
     v-for="vertex in solid.cornerVertices()"
     :key="vertex.tessId"
     :vertex="vertex"
@@ -43,7 +43,7 @@
 
 <script setup>
 
-  const props = defineProps(['document', 'component', 'solid', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform', 'projectInactive'])
+  const props = defineProps(['document', 'component', 'solid', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform', 'projectInactive', 'projectPoints'])
   const emit = defineEmits([])
 
   const highlight = inject('highlight')

@@ -41,7 +41,7 @@
     .drag-handle.handle(
       v-for="{ handle, pos } in projectedHandles"
       :key="handle.id"
-      :class="{ highlighted: highlight instanceof ElemRef && highlight.curve() == handle.elem && highlight.index == handle.index }"
+      :class="{ highlighted: highlight instanceof ElemRef && highlight.curve() == handle.elem && highlight.index == handle.index, projected: !!handle.elem.projection }"
       :style="{ top: pos.y + 'px', left: pos.x + 'px' }"
       @mouseup="emit('handleMouseUp', $event, handle)"
       @mousedown="emit('handleMouseDown', $event, handle)"
@@ -66,6 +66,28 @@
 
     &.highlighted::before
       background: $highlight
+
+    // Projected points are fixed references, unlike draggable handles,
+    // so their dot keeps its size on hover. Follows the hover rule above.
+    // Spanning the whole handle, the ring frames a coincident handle's ring.
+    &.projected
+      &::before
+        width: 8px
+        height: 8px
+        background: $projected
+
+      &::after
+        box-sizing: border-box
+        width: 100%
+        height: 100%
+        border-color: $projected
+
+      &.highlighted
+        &::before
+          background: $highlight
+
+        &::after
+          border-color: $highlight
 
 </style>
 
@@ -100,15 +122,14 @@
   const active = computed(() => props.sketch == props.document.activeSketch )
 
   const elements = computed(() =>
-    [...props.sketch.elements, ...props.sketch.projections.map(proj => proj.geometry() )]
-      .filter(elem => elem && !(elem instanceof ProjectedPoint))
+    [...props.sketch.elements, ...props.sketch.projectedElements()]
+      .filter(elem => !(elem instanceof ProjectedPoint))
   )
 
   const allHandles = computed(() => {
     if(!active.value) return []
 
-    const projectedElements = props.sketch.projections
-      .map(projection => projection.geometry())
+    const projectedElements = props.sketch.projectedElements()
       .filter(elem => elem instanceof Circle || elem instanceof ProjectedPoint)
     const origin = props.sketch.origin()
     const elements = [...props.sketch.elements, ...projectedElements, origin]
@@ -131,13 +152,17 @@
     })
 
     const set = {}
+    const projected = {}
     handles.forEach(handle => {
       const key = JSON.stringify(handle.pos)
+      // Projected points stay visible around coincident handles
+      if(handle.elem.projection) return projected[key] = handle
       // Prefer draggable geometry over the origin and other readonly handles.
       if(set[key] && !set[key].readonly && handle.readonly) return
       set[key] = handle
     })
-    return Object.values(set)
+    // Later handles are on top and receive the pointer
+    return [...Object.values(projected), ...Object.values(set)]
   })
 
   const projectedHandles = computed(() => {

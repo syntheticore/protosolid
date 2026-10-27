@@ -32,7 +32,7 @@ function extrusionRange(geometry, origin, direction) {
 }
 
 // A sketch element lifted from its workplane, or a model edge's curve
-function spatialCurve(item) {
+export function spatialCurve(item) {
   return item.sketch ?
     planeFromMatrix(item.sketch.workplane).liftCurve(item.geom(), modelTolerance) :
     item.geom().trimmedCurve()

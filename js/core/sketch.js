@@ -1,25 +1,25 @@
 import * as THREE from 'three'
-import { nextTick, toRaw } from 'vue'
+import { nextTick, toRaw, markRaw } from 'vue'
 
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
 import { Line, Circle, Arc, Spline, DerivedCurve, SketchElement, SketchPoint, supportsPointOnCurveConstraint } from './geom2d.js'
 import { buildOffsetCurves, nearestOffsetFrame } from './sketch-offset.js'
-import { Wire, Profile, Edge } from './geom3d.js'
+import { Wire, Profile, Edge, Face, Vertex, spatialCurve } from './geom3d.js'
 import { AxisHelper, PointHelper } from './helpers.js'
 import { EPSILON, cross2d } from './utils.js'
-import { CurveReference, EdgeReference, HelperReference, SketchOriginReference } from './references.js'
+import { CurveReference, EdgeReference, FaceReference, VertexReference, HelperReference, SketchOriginReference } from './references.js'
 import { relativeComponentTransform } from './assembly.js'
 import Expression from './expression.js'
 import { solveDrag, validGeometry } from './sketch-drag.js'
 import { solveSystem } from './sketch-solver.js'
-import { shapex as sx, transformFromMatrix, planeFromMatrix } from './shapex.js'
-import { isModelingFailure } from './errors.js'
+import { shapex as sx, transformFromMatrix, planeFromMatrix, point2, threeVector, modelTolerance, consumeEntityIds } from './shapex.js'
+import { isModelingFailure, ModelingError, fail } from './errors.js'
 
 function sameCurve(left, right) {
   if(left === right) return true
   if(!left || !right) return false
-  if(left.projection || right.projection) return left.projection?.id === right.projection?.id
+  if(left.projection || right.projection) return left.projection?.id === right.projection?.id && left.id === right.id
   return left.id === right.id
 }
 
@@ -32,7 +32,8 @@ function sameElemRef(left, right) {
       leftRef.componentId === rightRef.componentId &&
       leftRef.sketchId === rightRef.sketchId &&
       leftRef.isProjection === rightRef.isProjection &&
-      leftRef.itemId === rightRef.itemId)
+      leftRef.itemId === rightRef.itemId &&
+      leftRef.outputIndex === rightRef.outputIndex)
   )
 }
 
@@ -101,8 +102,8 @@ export class Sketch {
     if(direction < 0 ? !this.canUndo : !this.canRedo) return false
     this.history.index += direction
     const state = Serialize.parse(this.history.states[this.history.index])
-    const previousElements = [...this.elements, ...this.projections
-      .map(projection => projection.output).filter(elem => elem instanceof SketchElement)]
+    const previousElements = [...this.elements, ...this.projectedElements()
+      .filter(elem => elem instanceof SketchElement)]
     Object.assign(this, state)
     this.elements.forEach(elem => elem.sketch = this)
     this.constraints.forEach(constraint => constraint.sketch = this)
@@ -154,6 +155,10 @@ export class Sketch {
   addProjection(projection) {
     projection.sketch = this
     this.projections.push(projection)
+  }
+
+  projectedElements() {
+    return this.projections.flatMap(projection => projection.geometries())
   }
 
   origin() {
@@ -359,8 +364,7 @@ export class Sketch {
   }
 
   profileElements() {
-    const projections = this.projections
-      .map(projection => projection.geometry())
+    const projections = this.projectedElements()
       .filter(elem => elem instanceof SketchElement)
     return this.removeEmpties([...this.elements, ...projections])
   }
@@ -571,7 +575,8 @@ export class Sketch {
     const solverElements = this.elements.filter(elem => !(elem instanceof DerivedCurve))
 
     // Convert entire sketch to GCS format
-    const projections = this.projections.map(p => p.update(tree) ).filter(elem => elem && !(elem instanceof DerivedCurve))
+    this.projections.forEach(projection => projection.update(tree))
+    const projections = this.projectedElements().filter(elem => !(elem instanceof DerivedCurve))
     const primitives = solverElements.concat(projections).flatMap(elem => {
       let primitives
 
@@ -1162,80 +1167,132 @@ export class ProjectedPoint {
     this.id = id
   }
 
-  typename() { return 'Point Projection' }
+  typename() { return 'Point ' + this.projection.typename() }
   center() { return this.point }
   snapPoints() { return [this.point] }
   handles() { return [this.point] }
 }
 
 
+// Native sketch element for a curve in sketch coordinates. Images that
+// collapse onto a line, like circles seen edge-on, become that line.
+function sketchCurve(curve, id) {
+  const basis = curve.curve()
+  if(basis instanceof sx.Line2) return Line.fromGeometry(curve, id)
+  if(basis instanceof sx.Circle2) {
+    const Type = Math.abs(Math.abs(curve.range().span()) - Math.PI * 2) <= EPSILON ? Circle : Arc
+    return Type.fromGeometry(curve, id)
+  }
+  const extent = collinearExtent(curve.tessellate().points.map(point => new THREE.Vector2(point.x, point.y)))
+  if(extent) return Line.fromGeometry(sx.TrimmedCurve2.line(...extent.map(point2)), id)
+  return DerivedCurve.fromGeometry(curve, id)
+}
+
+// Outermost points of a polyline lying on one line
+function collinearExtent(points) {
+  const farthest = from => points.reduce((best, point) =>
+    point.distanceToSquared(from) > best.distanceToSquared(from) ? point : best)
+  const start = farthest(points[0])
+  const end = farthest(start)
+  const length = start.distanceTo(end)
+  if(length <= modelTolerance.linear) return
+  const direction = end.clone().sub(start).divideScalar(length)
+  const offLine = point => Math.abs(cross2d(direction, point.clone().sub(start)))
+  if(points.every(point => offLine(point) <= modelTolerance.linear)) return [start, end]
+}
+
+function projectedElement(result, id) {
+  return result.kind == 'point' ?
+    new ProjectedPoint(new THREE.Vector3(result.point.x, result.point.y, 0), id) :
+    sketchCurve(result.curve, id)
+}
+
+
+// Associative reference geometry derived from an item outside the sketch
 export class Projection {
   constructor(itemOrRef) {
     this.id = makeID()
     this.isReference = false
-    this.itemRef = itemOrRef instanceof Edge ?
-      new EdgeReference(itemOrRef) :
-      itemOrRef instanceof AxisHelper || itemOrRef instanceof PointHelper ?
-        new HelperReference(itemOrRef) :
-        itemOrRef
+    this.outputs = []
+    this.itemRef = itemOrRef instanceof Edge ? new EdgeReference(itemOrRef) :
+      itemOrRef instanceof Face ? new FaceReference(itemOrRef) :
+      itemOrRef instanceof Vertex ? new VertexReference(itemOrRef) :
+      itemOrRef instanceof AxisHelper || itemOrRef instanceof PointHelper ? new HelperReference(itemOrRef) :
+      itemOrRef instanceof SketchPoint ? new ElemRef(itemOrRef, 0) :
+      itemOrRef instanceof SketchElement ? new CurveReference(itemOrRef) :
+      itemOrRef
   }
+
+  typename() { return 'Projection' }
+
+  failureMessage() { return 'This geometry cannot be projected onto the sketch plane' }
 
   update(tree) {
     this.error = null
     const error = this.itemRef.update(tree)
     if(error) return this.invalidate(error.msg)
     try {
-      return this.projectGeometry(tree)
+      const item = this.itemRef instanceof ElemRef ? this.itemRef.curve() : this.itemRef.getItem()
+      if(item instanceof SketchElement && !(item instanceof SketchPoint) && !item.geom) {
+        fail('The source element has no geometry')
+      }
+      const outputs = this.computeOutputs(item, this.relativeTransform(tree))
+      if(!outputs.length) return this.invalidate(this.failureMessage())
+      return this.updateOutputs(outputs)
     } catch(error) {
       if(!isModelingFailure(error)) throw error
-      return this.invalidate('This geometry cannot be projected onto the sketch plane')
+      return this.invalidate(error instanceof ModelingError ? error.message : this.failureMessage())
     }
   }
 
   invalidate(message) {
-    if(this.output instanceof SketchElement) this.output.clear()
-    this.output = undefined
+    this.outputs.forEach(output => output instanceof SketchElement && output.clear())
+    this.outputs = []
     this.error = message
   }
 
-  projectGeometry(tree) {
-    const isElementPoint = this.itemRef instanceof ElemRef
-    const item = isElementPoint ? this.itemRef.curve() : this.itemRef.getItem()
-    const relative = this.relativeTransform(tree)
-
-    if(isElementPoint || item instanceof PointHelper) {
-      const point = isElementPoint ? item.handles()[this.itemRef.index].clone().applyMatrix4(item.sketch.workplane)
-        : new THREE.Vector3().setFromMatrixPosition(item.getPoint())
-      point.applyMatrix4(relative).applyMatrix4(this.sketch.workplane.clone().invert())
-      point.z = 0
-      return this.updateOutput(new ProjectedPoint(point, this.id + (isElementPoint ? '/' + this.itemRef.index : '') + '/projected'))
-    }
-
-    const geometry = item instanceof Edge ? item.geom().trimmedCurve() : item.geom()
-    const transformed = geometry.transformed(transformFromMatrix(relative))
-    const result = transformed.projectedOnto(planeFromMatrix(this.sketch.workplane))
-    const id = this.id + '/projected'
-    if(result.kind == 'point') return this.updateOutput(new ProjectedPoint(new THREE.Vector3(result.point.x, result.point.y, 0), id))
-    const curve = result.curve, basis = curve.curve()
-    const Type = basis instanceof sx.Line2 ? Line : basis instanceof sx.Circle2 ?
-      Math.abs(Math.abs(curve.range().span()) - Math.PI * 2) <= EPSILON ? Circle : Arc :
-      DerivedCurve
-    return this.updateOutput(Type.fromGeometry(curve, id))
+  outputId(index) {
+    return this.id + (index ? '/' + index : '') + '/projected'
   }
 
-  updateOutput(elem) {
-    const existing = this.output
-    if(existing instanceof SketchElement) existing.clear()
-    if(existing && existing.constructor == elem.constructor) {
-      Object.assign(existing, elem)
-      elem = existing
-    }
+  // Spatial position of a point item in its component
+  itemPoint(item) {
+    return this.itemRef instanceof ElemRef ?
+      item.handles()[this.itemRef.index].clone().applyMatrix4(item.sketch.workplane) :
+      new THREE.Vector3().setFromMatrixPosition(item.getPoint())
+  }
 
-    elem.sketch = this.sketch
-    elem.projection = this
-    if(elem instanceof SketchElement) elem.isReference = this.isReference
-    this.output = elem
-    return elem
+  // Express a point of the source component in sketch coordinates
+  sketchPoint(point, relative) {
+    point.applyMatrix4(relative).applyMatrix4(this.sketch.workplane.clone().invert())
+    point.z = 0
+    return point
+  }
+
+  computeOutputs(item, relative) {
+    if(this.itemRef instanceof ElemRef || item instanceof PointHelper || item instanceof Vertex) {
+      const id = this.itemRef instanceof ElemRef ? this.id + '/' + this.itemRef.index + '/projected' : this.outputId(0)
+      return [new ProjectedPoint(this.sketchPoint(this.itemPoint(item), relative), id)]
+    }
+    const geometry = item instanceof Edge || item instanceof SketchElement ? spatialCurve(item) : item.geom()
+    const result = geometry.transformed(transformFromMatrix(relative))
+      .projectedOnto(planeFromMatrix(this.sketch.workplane))
+    return [projectedElement(result, this.outputId(0))]
+  }
+
+  // Keep existing outputs, so constraints and views stay attached to them
+  updateOutputs(elems) {
+    const previous = this.outputs
+    previous.forEach(output => output instanceof SketchElement && output.clear())
+    this.outputs = elems.map((elem, index) => {
+      const existing = previous[index]
+      if(existing && existing.constructor == elem.constructor) elem = Object.assign(existing, elem)
+      elem.sketch = this.sketch
+      elem.projection = this
+      if(elem instanceof SketchElement) elem.isReference = this.isReference
+      return elem
+    })
+    return this.outputs
   }
 
   relativeTransform(tree) {
@@ -1249,7 +1306,7 @@ export class Projection {
     return relativeComponentTransform(source, target)
   }
 
-  geometry() { return this.output }
+  geometries() { return this.outputs }
 
   dump() {
     return {
@@ -1260,13 +1317,137 @@ export class Projection {
   }
 
   static undump(dump) {
-    const projection = new Projection(dump.itemRef)
+    const projection = new this(dump.itemRef)
     projection.id = dump.id || projection.id
     projection.isReference = dump.isReference || false
     return projection
   }
 }
 Serialize.register(Projection, 'Projection')
+
+
+// Parameter of a sign change of f between a and b
+function bisect(f, a, b) {
+  let fa = f(a)
+  for(let i = 0; i < 60; i++) {
+    const middle = (a + b) / 2, fm = f(middle)
+    if(fa * fm <= 0) b = middle
+    else [a, fa] = [middle, fm]
+  }
+  return (a + b) / 2
+}
+
+
+// Where a model face or edge, or another sketch's element, crosses the sketch plane
+export class Intersection extends Projection {
+  typename() { return 'Intersection' }
+
+  failureMessage() { return 'This geometry does not intersect the sketch plane' }
+
+  computeOutputs(item, relative) {
+    const results = item instanceof Face ? this.faceSection(item, relative) :
+      item instanceof Edge ? this.edgeCrossings(item, relative) :
+      this.curveCrossings(item, relative)
+    return results.map((result, index) => projectedElement(result, this.outputId(index)))
+  }
+
+  // Section curves of a face, as projections onto the sketch plane. Splitting
+  // the body is costly, so sections are reused while the sketch solves.
+  faceSection(face, relative) {
+    const key = JSON.stringify([relative.elements, this.sketch.workplane.elements])
+    if(this.section?.face == face.geom() && this.section.key == key) return this.section.results
+    const local = relative.clone().invert().multiply(this.sketch.workplane)
+    const localPlane = planeFromMatrix(local)
+    const normal = threeVector(localPlane.normal())
+    const origin = threeVector(localPlane.origin())
+    const onPlane = point => Math.abs(normal.dot(threeVector(point).sub(origin))) <= modelTolerance.linear * 10
+    const split = face.solid.compound.geom().split(localPlane, 'left')
+    try {
+      const pieces = split.resolve(face.geom()).entities
+      const boundary = new Set(pieces.flatMap(piece => consumeEntityIds(piece.boundaryEdges())))
+      const plane = planeFromMatrix(this.sketch.workplane)
+      const transform = transformFromMatrix(relative)
+      const results = split.edges()
+        .filter(edge => boundary.has(edge.id()) && edge.tessellate().points.every(onPlane))
+        .map(edge => edge.trimmedCurve().transformed(transform).projectedOnto(plane))
+      this.section = markRaw({ face: face.geom(), key, results })
+      return results
+    } finally { split.free() }
+  }
+
+  // Points where a model edge crosses the sketch plane, or the edge itself
+  // when it lies in the plane. Model edges need not be planar, so crossings
+  // are bracketed by sampling the distance to the plane along the edge and
+  // refined on the exact curve. Extrema of the distance catch tangent contacts.
+  edgeCrossings(edge, relative) {
+    const curve = edge.geom().trimmedCurve()
+    // This sketch's plane, expressed in the edge's component
+    const local = relative.clone().invert().multiply(this.sketch.workplane)
+    const normal = new THREE.Vector3().setFromMatrixColumn(local, 2).normalize()
+    const origin = new THREE.Vector3().setFromMatrixPosition(local)
+    const distance = t => normal.dot(threeVector(curve.evaluate(t).point).sub(origin))
+    const slope = t => normal.dot(threeVector(curve.evaluate(t).firstDerivative))
+    const onPlane = value => Math.abs(value) <= modelTolerance.linear
+
+    const { start, end } = curve.range()
+    const count = Math.max(64, edge.tesselate().length * 4)
+    const samples = Array.from({ length: count + 1 }, (_, i) => start + (end - start) * i / count)
+    const values = samples.map(distance)
+    if(values.every(onPlane)) {
+      return [curve.transformed(transformFromMatrix(relative)).projectedOnto(planeFromMatrix(this.sketch.workplane))]
+    }
+
+    const roots = samples.filter((_, i) => onPlane(values[i]))
+    for(let i = 0; i < count; i++) {
+      const [a, b] = [samples[i], samples[i + 1]]
+      if(values[i] * values[i + 1] < 0) roots.push(bisect(distance, a, b))
+      else if(slope(a) * slope(b) < 0) {
+        const extremum = bisect(slope, a, b)
+        if(onPlane(distance(extremum))) roots.push(extremum)
+      }
+    }
+    const points = roots.map(t => this.sketchPoint(threeVector(curve.evaluate(t).point), relative))
+    return points
+      .filter((point, i) => !points.slice(0, i).some(other => other.distanceTo(point) <= modelTolerance.linear))
+      .map(point => ({ kind: 'point', point }))
+  }
+
+  // Points where a sketch element crosses this sketch's plane, or the parts
+  // of it lying in the plane
+  curveCrossings(elem, relative) {
+    const source = relative.clone().multiply(elem.sketch.workplane)
+    // This sketch's plane, expressed in the source sketch
+    const local = source.clone().invert().multiply(this.sketch.workplane)
+    const normal = new THREE.Vector3().setFromMatrixColumn(local, 2).normalize()
+    const origin = new THREE.Vector3().setFromMatrixPosition(local)
+    const across = new THREE.Vector2(normal.x, normal.y)
+    if(across.length() <= modelTolerance.angular) {
+      fail(Math.abs(normal.dot(origin)) <= modelTolerance.linear ?
+        'This element lies in the sketch plane' :
+        'This element is parallel to the sketch plane')
+    }
+    // Both planes meet in this line of the source sketch
+    const base = across.clone().multiplyScalar(normal.dot(origin) / across.lengthSq())
+    const direction = new THREE.Vector2(-across.y, across.x).normalize()
+    const reach = Math.max(...elem.tesselate().map(([x, y]) => base.distanceTo(new THREE.Vector2(x, y)))) + 1
+    const trace = sx.TrimmedCurve2.line(
+      point2(base.clone().addScaledVector(direction, -reach)),
+      point2(base.clone().addScaledVector(direction, reach)),
+    )
+    const sourcePlane = planeFromMatrix(elem.sketch.workplane)
+    const plane = planeFromMatrix(this.sketch.workplane)
+    const transform = transformFromMatrix(relative)
+    return elem.geom().intersections(trace, modelTolerance).map(hit => {
+      if(hit.kind == 'overlap') {
+        return sourcePlane.liftCurve(elem.geom().trimmed(hit.first), modelTolerance)
+          .transformed(transform).projectedOnto(plane)
+      }
+      const point = new THREE.Vector3(hit.point.x, hit.point.y, 0).applyMatrix4(elem.sketch.workplane)
+      return { kind: 'point', point: this.sketchPoint(point, relative) }
+    })
+  }
+}
+Serialize.register(Intersection, 'Intersection')
 
 
 export class ElemRef {
@@ -1281,7 +1462,7 @@ export class ElemRef {
   }
 
   update(tree) {
-    this.curveRef.update(tree)
+    return this.curveRef.update(tree)
   }
 
   curve() {

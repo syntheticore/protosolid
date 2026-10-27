@@ -17,6 +17,7 @@
       :parent-selected="selected"
       :parent-transform="transform"
       :project-inactive="projecting"
+      :project-points="projectingPoints"
     )
 
   //- Sketches
@@ -51,7 +52,7 @@
   template(v-for="helper in component.helpers")
 
     HelperProxy(
-      v-if="!component.isItemHidden(helper.id) && !(document.activeMerge && helper.isStandard()) && (component.id === document.activeComponent?.id || document.activeFeature instanceof JointFeature || (projecting && helper instanceof PointHelper))"
+      v-if="!component.isItemHidden(helper.id) && !(document.activeMerge && helper.isStandard()) && (component.id === document.activeComponent?.id || document.activeFeature instanceof JointFeature || (projectingPoints && helper instanceof PointHelper))"
       :key="helper.id"
       :document="document"
       :component="component"
@@ -126,7 +127,7 @@
   import * as THREE from 'three'
   import { JointFeature } from '../js/core/features.js'
   import { PointHelper } from '../js/core/helpers.js'
-  import { ProjectTool } from '../js/tools.js'
+  import { ProjectionTool, ProjectTool } from '../js/tools.js'
   import { sectionBounds, sectionPlaneRelation } from '../js/core/section-bounds.js'
 
   const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform', 'sectionPlane', 'sectionSide'])
@@ -138,7 +139,8 @@
   const active = computed(() => props.parentActive || props.component.id == props.document.activeComponent?.id || props.document.activeFeature instanceof JointFeature )
   const highlighted = computed(() => props.parentHighlighted || props.component == highlight.value )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.component) )
-  const projecting = computed(() => props.activeTool instanceof ProjectTool )
+  const projecting = computed(() => props.activeTool instanceof ProjectionTool )
+  const projectingPoints = computed(() => props.activeTool instanceof ProjectTool )
 
   const transform = computed(() => {
     return (props.parentTransform || new THREE.Matrix4())

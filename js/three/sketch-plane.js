@@ -184,10 +184,7 @@ export default class SketchPlane extends THREE.Object3D {
 
   sketchElements() {
     if(!this.sketch) return []
-    const projections = this.sketch.projections
-      .map(projection => projection.geometry())
-      .filter(Boolean)
-    return [...this.sketch.elements, ...projections]
+    return [...this.sketch.elements, ...this.sketch.projectedElements()]
   }
 
   geometrySignature(elements) {

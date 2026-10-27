@@ -170,9 +170,9 @@ test('degenerate projection input invalidates the projection', () => {
   const projection = new Projection({ update() {}, getItem: () => ({ geom: () => spatial }) })
   projection.sketch = { creator: {}, workplane: new THREE.Matrix4().makeScale(0, 1, 1) }
   const previous = new Line(vector(0, 0), vector(1, 0))
-  projection.output = previous
+  projection.outputs = [previous]
   projection.update({ findChild() {} })
-  assert.equal(projection.output, undefined)
+  assert.deepEqual(projection.outputs, [])
   assert.equal(previous.geom, null)
   assert.match(projection.error, /cannot be projected/)
 })

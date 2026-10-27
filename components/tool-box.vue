@@ -333,6 +333,7 @@
     OffsetTool,
     SketchMirrorTool,
     ProjectTool,
+    IntersectTool,
     DiagnosticShadingTool,
     InterferenceTool,
   } from './../js/tools.js'
@@ -443,7 +444,7 @@
               { title: 'Offset', tool: OffsetTool },
               { title: 'Mirror', tool: SketchMirrorTool },
               { title: 'Project', tool: ProjectTool, hotKey: 'P', keyCode: 80 },
-              { title: 'Intersect', icon: 'sketch-intersect' },
+              { title: 'Intersect', tool: IntersectTool, hotKey: 'I', keyCode: 73 },
             ]
           },
           {

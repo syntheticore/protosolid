@@ -15,7 +15,7 @@ export class SketchElement {
     this.fullyConstrained = false
   }
 
-  typename(base) { return base + (this.projection ? ' Projection' : '') }
+  typename(base) { return base + (this.projection ? ' ' + this.projection.typename() : '') }
 
   clear() { this.geom = null }
 

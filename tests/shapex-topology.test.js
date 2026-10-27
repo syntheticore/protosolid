@@ -238,13 +238,13 @@ test(`projected sketch curves retain the projection identity when the source dis
   const target = compound => ({ findChild: () => ({ compound, localTransform: () => new THREE.Matrix4() }) })
   projection.update(target(original))
   assert.equal(projection.error, null)
-  const curveId = projection.geometry().id
+  const curveId = projection.geometries()[0].id
   const rebuilt = extrude(owner, 12)
   projection.itemRef.update(target(rebuilt))
   projection.itemRef.getItem().id = 'different-viewport-object-id'
   projection.update(target(rebuilt))
   assert.equal(projection.error, null)
-  assert.equal(projection.geometry().id, curveId)
+  assert.equal(projection.geometries()[0].id, curveId)
 })
 
 test(`loft, sweep, revolution and circular extrusion seed selectable construction roles`, () => {

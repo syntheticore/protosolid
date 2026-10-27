@@ -223,7 +223,7 @@ export default class Snapper {
     const snapExclusions = new Set(tool.snapExclusions())
     let sketchElements = [
       ...sketch.elements,
-      ...sketch.projections.map(projection => projection.geometry()).filter(Boolean),
+      ...sketch.projectedElements(),
     ].filter(elem => !snapExclusions.has(elem) && tool.acceptsSnapElement(elem))
     if(this.viewport.activeHandle) {
       sketchElements = sketchElements.filter(elem => !connectedElements.has(elem))

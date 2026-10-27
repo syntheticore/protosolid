@@ -21,6 +21,7 @@ import {
 import {
   Edge,
   Face,
+  Vertex,
   Profile,
   Solid,
 } from './core/geom3d.js'
@@ -44,6 +45,7 @@ import {
   OffsetConstraint,
   ProfileOffsetConstraint,
   Projection,
+  Intersection,
   ProjectedPoint,
   SketchOrigin,
   ElemRef,
@@ -148,7 +150,7 @@ function pointTargetsAtPosition(sketch, position, excludedElem) {
   if(!position) return []
   const candidates = [
     ...sketch.elements,
-    ...sketch.projections.map(projection => projection.geometry()).filter(Boolean),
+    ...sketch.projectedElements(),
   ]
   return candidates.flatMap(candidate =>
     toRaw(candidate) == toRaw(excludedElem) || !candidate.handles ? [] : candidate.handles().map((point, index) => ({
@@ -227,7 +229,7 @@ function addCapturedGuideConstraints(sketch, snap, elem, index) {
     } else {
       const candidates = [
         ...sketch.elements,
-        ...sketch.projections.map(projection => projection.geometry()).filter(Boolean),
+        ...sketch.projectedElements(),
       ]
       for(const candidate of candidates) {
         const targetIndex = candidate.handles().findIndex(handle => handle.almost(guidePoint))
@@ -884,17 +886,19 @@ export class ManipulationTool extends HighlightTool {
 }
 
 
-export class ProjectTool extends HighlightTool {
-  static icon = 'sketch-project'
-
-  constructor(component, viewport, sketch) {
-    super(component, viewport, ['point', 'edge'])
+// Adds reference geometry derived from items outside the active sketch
+export class ProjectionTool extends HighlightTool {
+  constructor(component, viewport, sketch, selectors) {
+    super(component, viewport, selectors)
     this.sketch = sketch
     this.localSpace = true
     this.includeInactive = true
-    this.acceptsInput = item =>
-      item instanceof Edge || item instanceof PointHelper || item instanceof ElemRef
     this.cursor = 'copy'
+  }
+
+  fromOtherSketch(item) {
+    const sketch = item instanceof ElemRef ? item.curve().sketch : item.sketch
+    return toRaw(sketch) != toRaw(this.sketch)
   }
 
   async mouseMove(vec, coords) {
@@ -903,9 +907,9 @@ export class ProjectTool extends HighlightTool {
   }
 
   async click(vec, coords) {
-    const edge = await this.getObject(coords)
-    if(!edge) return
-    const projection = new Projection(edge)
+    const item = await this.getObject(coords)
+    if(!item) return
+    const projection = this.createProjection(item)
     projection.sketch = this.sketch
     if(!projection.update(this.viewport.document.top())) {
       this.viewport.bus.emit('toast', projection.error)
@@ -914,6 +918,38 @@ export class ProjectTool extends HighlightTool {
     this.sketch.addProjection(projection)
     this.viewport.updateRegions(true)
   }
+}
+
+
+export class ProjectTool extends ProjectionTool {
+  static icon = 'sketch-project'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch, ['point', 'edge', 'curve'])
+  }
+
+  acceptsInput(item) {
+    return item instanceof Edge || item instanceof Vertex || item instanceof PointHelper ||
+      ((item instanceof SketchElement || item instanceof ElemRef) && this.fromOtherSketch(item))
+  }
+
+  createProjection(item) { return new Projection(item) }
+}
+
+
+export class IntersectTool extends ProjectionTool {
+  static icon = 'sketch-intersect'
+
+  constructor(component, viewport, sketch) {
+    super(component, viewport, sketch, ['face', 'edge', 'curve'])
+  }
+
+  acceptsInput(item) {
+    return item instanceof Face || item instanceof Edge ||
+      (item instanceof SketchElement && !(item instanceof SketchPoint) && this.fromOtherSketch(item))
+  }
+
+  createProjection(item) { return new Intersection(item) }
 }
 
 
@@ -1259,7 +1295,7 @@ export class ExtendTool extends CurveEditTool {
     const point = endpoints[end]
     const targets = [
       ...this.sketch.elements,
-      ...this.sketch.projections.map(projection => projection.geometry()).filter(Boolean),
+      ...this.sketch.projectedElements(),
     ].filter(elem => elem != curve && elem.geom)
     const extension = curve instanceof Line ? lineExtension(curve, end, targets) : arcExtension(curve, end)
     const start = extension.range().start
@@ -2695,7 +2731,7 @@ export class OffsetTool extends HighlightTool {
       this.source = await this.getObject(coords)
       if(!this.source) return
       try {
-        const elements = [...this.sketch.elements, ...this.sketch.projections.map(projection => projection.geometry()).filter(Boolean)]
+        const elements = [...this.sketch.elements, ...this.sketch.projectedElements()]
         this.groups = this.source instanceof Profile ? profileOffsetGroups(this.source, elements) :
           [connectedOffsetChain(this.source, elements)]
         this.items = this.groups.flat().map(entry => entry.curve)

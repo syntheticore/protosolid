@@ -58,7 +58,8 @@ export default class Renderer {
     var atmosphere = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
     this.scene.add(atmosphere)
 
-    const basePath = window.ipc
+    // The generated Electron app is loaded from disk, the dev server serves the public folder
+    const basePath = window.location.protocol == 'file:'
       ? `file://${window.appPath}/app/cubemap/`
       : '/cubemap/'
 
@@ -223,6 +224,7 @@ export default class Renderer {
   }
 
   add(obj, selectable) {
+    this.shadowsNeedUpdate = true
     this.dualCamera.prepareMaterials(obj)
     if(selectable) {
       this.world.add(obj)
@@ -266,6 +268,7 @@ export default class Renderer {
 
   remove(obj) {
     if(!obj) return
+    this.shadowsNeedUpdate = true
     this.world.remove(obj)
     this.scene.remove(obj)
     this.dropResources(obj, true)
@@ -414,6 +417,11 @@ export default class Renderer {
 
   render() {
     this.emitter.emit('before-render')
+    // Shadow receivers fail to draw until the shadow map has been rendered once
+    if(this.shadowsNeedUpdate) {
+      this.shadowsNeedUpdate = false
+      this.updateShadows()
+    }
     // Camera-dependent dimension geometry must be ready before Three.js
     // culls objects and uploads their buffers for this frame.
     this.activeCamera.updateMatrixWorld()

@@ -825,6 +825,7 @@ export default class Document extends Emitter {
         data = JSON.stringify(this.snapshot(), null, 2)
       }
       this.filePath = await saveFile(data, 'cad', as ? null : this.filePath)
+      if(window.ipc) window.ipc.send('add-recent-file', this.filePath)
       this.repository = repository ? markRaw(repository) : null
       this.repositoryVersion++
       this.hasChanges = false
@@ -959,10 +960,13 @@ export default class Document extends Emitter {
       if(error != 'canceled') {
         console.error(error)
         alert('The document could not be opened.')
+        // Recent files may have been moved or deleted since
+        if(path) window.ipc.send('remove-recent-file', path)
       }
       throw error
     }
     this.filePath = file.path
+    if(window.ipc) window.ipc.send('add-recent-file', file.path)
     this.repository = repository && markRaw(repository)
     this.repositoryVersion++
     this.hasRepositoryChanges = false

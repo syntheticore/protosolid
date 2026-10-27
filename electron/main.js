@@ -109,6 +109,15 @@ const isMac = process.platform === 'darwin'
 //   }
 // ]
 
+const maxRecentFiles = 10
+const recentFilesPath = path.join(app.getPath('userData'), 'recent-files.json')
+let recentFiles = []
+
+const recentMenu = {
+  label: "Open Recent",
+  submenu: [],
+}
+
 const template = [
   ...(isMac ? [{
     label: app.name,
@@ -147,6 +156,7 @@ const template = [
           mainWindow.webContents.send('openFile')
         },
       },
+      recentMenu,
       {
         label: "Connect...",
         click: async () => {
@@ -249,13 +259,55 @@ const template = [
   }
 ]
 
-const menu = Menu.buildFromTemplate(template)
-Menu.setApplicationMenu(menu)
+let menu
+
+// Menus can't be changed after building, so recent files rebuild the whole menu
+function buildMenu() {
+  recentMenu.submenu = recentFiles.length ? [
+    ...recentFiles.map(filePath => ({
+      label: filePath,
+      click: () => mainWindow.webContents.send('openFile', filePath),
+    })),
+    { type: 'separator' },
+    {
+      label: "Clear Recent",
+      click: () => setRecentFiles([]),
+    },
+  ] : [{ label: "No Recent Files", enabled: false }]
+  const saveEnabled = menu ? menu.getMenuItemById('save').enabled : true
+  menu = Menu.buildFromTemplate(template)
+  menu.getMenuItemById('save').enabled = saveEnabled
+  Menu.setApplicationMenu(menu)
+}
+
+function setRecentFiles(files) {
+  recentFiles = files.slice(0, maxRecentFiles)
+  buildMenu()
+  return fs.writeFile(recentFilesPath, JSON.stringify(recentFiles))
+}
+
+buildMenu()
+
+// The list doesn't exist before the first document is opened or saved
+fs.readFile(recentFilesPath, 'utf-8').then(data => {
+  recentFiles = JSON.parse(data)
+  buildMenu()
+}).catch(() => {})
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
 let mainWindow
 let preferencesWindow
+
+// Set by scripts/dev-electron.mjs to load the Nuxt dev server instead of the generated app
+const devServerUrl = process.env.DEV_SERVER_URL
+
+function loadApp(window, query) {
+  if(!devServerUrl) return window.loadFile('app/index.html', { query })
+  const url = new URL(devServerUrl)
+  for(const key in query) url.searchParams.set(key, query[key])
+  return window.loadURL(url.href)
+}
 
 function openPreferencesWindow(section) {
   if(preferencesWindow && !preferencesWindow.isDestroyed()) {
@@ -285,9 +337,7 @@ function openPreferencesWindow(section) {
 
   preferencesWindow.setMenu(null)
 
-  preferencesWindow.loadFile('app/index.html', {
-    query: { window: 'preferences', ...(section && { section }) },
-  })
+  loadApp(preferencesWindow, { window: 'preferences', ...(section && { section }) })
 
   preferencesWindow.once('ready-to-show', () => preferencesWindow.show())
   preferencesWindow.webContents.on('did-finish-load', () => {
@@ -326,7 +376,7 @@ function createWindow() {
   })
 
   // and load the index.html of the app.
-  mainWindow.loadFile('app/index.html')
+  loadApp(mainWindow)
   // mainWindow.webContents.openDevTools()
 
   mainWindow.on('closed', function() {
@@ -434,7 +484,17 @@ ipcMain.on('set-save-enabled', function(event, enabled) {
   menu.getMenuItemById('save').enabled = enabled
 })
 
-ipcMain.on('open-preferences', (event, section) => openPreferencesWindow(section))
+ipcMain.handle('get-recent-files', () => recentFiles)
+
+ipcMain.on('add-recent-file', (event, filePath) => {
+  setRecentFiles([filePath, ...recentFiles.filter(file => file != filePath)])
+})
+
+ipcMain.on('remove-recent-file', (event, filePath) => {
+  setRecentFiles(recentFiles.filter(file => file != filePath))
+})
+
+ipcMain.on('open-preferences',(event, section) => openPreferencesWindow(section))
 
 ipcMain.on('close-preferences', function(event) {
   if(preferencesWindow && !preferencesWindow.isDestroyed()

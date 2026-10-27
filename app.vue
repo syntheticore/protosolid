@@ -154,7 +154,7 @@
       })
 
       window.ipc.on('createFile', createDocument)
-      window.ipc.on('openFile', loadDocument)
+      window.ipc.on('openFile', (e, path) => loadDocument(path) )
       window.ipc.on('saveFile', saveDocument)
       window.ipc.on('saveFileAs', saveDocumentAs)
       window.ipc.on('importFile', importFile)
@@ -275,10 +275,13 @@
     await activateDocument(doc)
   }
 
-  function loadDocument() {
+  // Without a path, the user chooses a file
+  function loadDocument(path) {
     if(documentBusy.value) return
+    const openDocument = path && documents.value.find(doc => doc.filePath == path)
+    if(openDocument) return activateDocument(openDocument)
     const doc = new Document(bus)
-    doc.load().then(async () => {
+    doc.load(path).then(async () => {
       // Close untouched documents on load
       const previousDocument = activeDocument.value
       documents.value.push(doc)

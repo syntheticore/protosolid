@@ -50,6 +50,16 @@
         //-     Icon(icon="network-wired" fixed-width)
         //-     span Open Network Project...
 
+      template(v-if="recentFiles.length")
+
+        h2.recent-header Recent
+
+        ul.actions.recent-files(@click="bus.emit('close-widgets')")
+
+          li(v-for="file in recentFiles" :key="file")
+            button(:title="file" @click="$emit('open-document', file)")
+              span {{ fileName(file) }}
+
 </template>
 
 
@@ -130,6 +140,25 @@
         margin-left: 8px
         white-space: nowrap
 
+  .recent-header
+    font-size: 11px
+    font-weight: 600
+    color: $bright2
+    padding: 14px 8px 6px
+    border-top: 1px solid $dark1
+    margin-top: 4px
+
+  .recent-files
+    li:first-child button
+      border-top: none
+    button
+      padding: 7px 8px
+      font-weight: normal
+      span
+        margin-left: 0
+        overflow: hidden
+        text-overflow: ellipsis
+
 </style>
 
 
@@ -145,7 +174,22 @@
       canSave: Boolean,
     },
 
+    data() {
+      return {
+        recentFiles: [],
+      }
+    },
+
+    // The menu is mounted whenever it opens, so the list is always current
+    created() {
+      if(window.ipc) window.ipc.invoke('get-recent-files').then(files => this.recentFiles = files)
+    },
+
     methods: {
+      fileName: function(path) {
+        return path.split(/[\\/]/).pop()
+      },
+
       openSettings: function() {
         this.bus.emit('close-widgets')
         openPreferences()

@@ -22,6 +22,8 @@ export default class ShadowCatcher extends THREE.Object3D {
       depthWrite: false,
     }))
     this.ground.receiveShadow = true
+    // Hidden until the shadow map exists, which it needs to draw
+    this.ground.visible = false
     this.add(this.ground)
   }
 
@@ -44,5 +46,6 @@ export default class ShadowCatcher extends THREE.Object3D {
       1, 2000
     )
     this.renderer.shadowMap.needsUpdate = true
+    this.ground.visible = true
   }
 }

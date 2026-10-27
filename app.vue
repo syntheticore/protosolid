@@ -229,6 +229,12 @@
       } else if(e.key === 'Enter') {
         bus.emit('enter-pressed')
 
+      } else if(e.key === 'Tab') {
+        // Keep focus navigation in text fields, toggle the stacked toolbar elsewhere
+        if(editingText) return
+        e.preventDefault()
+        if(!e.repeat) bus.emit('keydown', e.key)
+
       } else if(!isModifierKey) {
         bus.emit('keydown', e.key)
       }

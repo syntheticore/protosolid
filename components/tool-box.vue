@@ -1,66 +1,80 @@
 <template lang="pug">
 
-  .tool-box.bordered
+  .tool-box.bordered(:class="{ stacked }")
 
 
-    ul.tabs
+    ul.tabs(v-if="!stacked" data-flip="tabs" title="Press Tab to show all tools")
 
       template(v-for="(tab, index) in tabs")
 
         li(
-          v-if="!!document.activeSketch == !!tab.sketchOnly"
+          v-if="isTabAvailable(tab)"
           :class="{ active: index == activeTab }"
           @click="activateTab(index)"
         )
           | {{ tab.title }}
 
-    .main
+    //- Only the active tab's tools, or all of them stacked, toggled with Tab
+    template(v-for="(tab, index) in tabs" :key="index")
 
-      label.reference(v-if="document.activeSketch" title="Reference geometry")
+      .main(v-if="index == activeTab || (stacked && isTabAvailable(tab))")
 
-        Icon(icon="asterisk")
-        .hot-key X
+        .row-title(
+          v-if="stacked"
+          :class="{ active: index == activeTab }"
+          :data-flip="'title-' + index"
+        )
+          | {{ tab.title }}
 
-        input(
-          type="checkbox"
-          :checked="refChecked"
-          :indeterminate.prop="refIndeterminate"
-          :key="Math.random()"
-          @click.prevent="toggleReference"
+        label.reference(
+          v-if="document.activeSketch && index == activeTab && !stacked"
+          data-flip="reference"
+          title="Reference geometry"
         )
 
-      ul.tools(@scroll="onScroll")
+          Icon(icon="asterisk")
+          .hot-key X
 
-        li(v-for="(tool, index) in tabs[activeTab].tools")
-
-          button.button(
-            :class="{active: isActive(tool)}"
-            :title="tool.title"
-            :disabled="tool.disabled || tool.isDisabled?.() || (!tool.tool && !tool.feature && !tool.action)"
-            @click="activateTool(tool)"
+          input(
+            type="checkbox"
+            :checked="refChecked"
+            :indeterminate.prop="refIndeterminate"
+            :key="Math.random()"
+            @click.prevent="toggleReference"
           )
-            Icon(:icon="toolIcon(tool)" fixed-width)
-            .title(v-html="tool.title")
-            .hot-key(v-if="tool.hotKey") {{ tool.hotKey }}
 
-          transition(name="fade")
-            FeatureBox.tipped(
-              v-if="feature && isActive(tool)"
-              ref="featureBox"
-              :style="scrollStyle"
-              :document="document"
-              :active-tool="activeTool"
-              :active-feature="feature"
-              @close="closeFeature"
-            )
+        ul.tools(:data-flip="'tools-' + index" @scroll="index == activeTab && onScroll($event)")
 
-          transition(name="fade")
-            ToolOptionsBox.tipped(
-              v-if="!feature && isActiveToolWithOptions(tool)"
-              :style="scrollStyle"
-              :active-tool="activeTool"
-              @close="closeActiveTool"
+          li(v-for="tool in tab.tools")
+
+            button.button(
+              :class="{active: isActive(tool)}"
+              :title="tool.title"
+              :disabled="tool.disabled || tool.isDisabled?.() || (!tool.tool && !tool.feature && !tool.action)"
+              @click="activateTool(tool)"
             )
+              Icon(:icon="toolIcon(tool)" fixed-width)
+              .title(v-html="tool.title")
+              .hot-key(v-if="tool.hotKey") {{ tool.hotKey }}
+
+            transition(name="fade")
+              FeatureBox.tipped(
+                v-if="feature && isActive(tool)"
+                ref="featureBox"
+                :style="scrollStyle"
+                :document="document"
+                :active-tool="activeTool"
+                :active-feature="feature"
+                @close="closeFeature"
+              )
+
+            transition(name="fade")
+              ToolOptionsBox.tipped(
+                v-if="!feature && isActiveToolWithOptions(tool)"
+                :style="scrollStyle"
+                :active-tool="activeTool"
+                @close="closeActiveTool"
+              )
 
 </template>
 
@@ -80,6 +94,31 @@
 
   .main
     display: flex
+
+    & + .main
+      border-top: 1px solid $dark1 * 1.15
+
+  .row-title
+    flex: 0 0 auto
+    display: flex
+    align-items: center
+    width: 90px
+    padding-inline: 10px
+    border-right: 1px solid $dark1 * 1.15
+    color: $bright2
+    font-size: 12px
+    white-space: nowrap
+
+    &.active
+      color: $bright1
+      font-weight: bold
+
+  // Feature boxes would cover the stacked tool bars
+  .stacked
+    .feature-box
+    .tool-options-box
+      opacity: 0
+      pointer-events: none
 
   .reference
     position: relative
@@ -303,6 +342,8 @@
   import { StaticSimulation } from './../js/core/static.js'
   import { FluidSimulation } from './../js/core/fluid.js'
 
+  const layoutDuration = 200
+
   export default {
     name: 'ToolBox',
 
@@ -318,25 +359,17 @@
         if(!this.feature) this.activeTab = this.document.activeSketch ? 1 : 4
       },
 
-      // Animate between the old and new tab's natural widths,
-      // as CSS can't transition max-content to max-content
-      activeTab: async function() {
-        const from = this.$el.offsetWidth
-        await this.$nextTick()
-        this.widthAnimation?.cancel()
-        const to = this.$el.offsetWidth
-        const animation = this.$el.animate({ width: [from + 'px', to + 'px'] }, { duration: 200, easing: 'ease-out' })
-        this.widthAnimation = animation
-        // Keep picker lines attached to the moving feature box
-        const followPaths = () => {
-          this.$refs.featureBox?.[0]?.updatePaths()
-          if(animation.playState == 'running') requestAnimationFrame(followPaths)
-        }
-        requestAnimationFrame(followPaths)
+      // Tab and stacking changes may happen together when picking a tool from the stack
+      layout: function([_, stacked], [__, wasStacked]) {
+        this.animateLayout(stacked || wasStacked)
       },
     },
 
     computed: {
+      layout: function() {
+        return [this.activeTab, this.stacked]
+      },
+
       scrollStyle: function() {
         return {
           marginLeft: String(-this.scrolled) + 'px',
@@ -361,6 +394,7 @@
     data() {
       return {
         activeTab: 0,
+        stacked: false,
         feature: null,
         scrolled: 0,
         tabs: [
@@ -499,7 +533,22 @@
     },
 
     mounted: function() {
-      this.bus.on('keydown', (key) => {
+      this.bus.on('keydown', this.onKeydown)
+      this.bus.on('close-feature', this.closeFeature)
+    },
+
+    unmounted: function() {
+      this.bus.off('keydown', this.onKeydown)
+      this.bus.off('close-feature', this.closeFeature)
+    },
+
+    methods: {
+      onKeydown: function(key) {
+        if(key == 'Tab') {
+          this.stacked = !this.stacked
+          return
+        }
+
         if(this.document.activeSketch && key.toLowerCase() == 'x') {
           this.toggleReference()
           return
@@ -515,11 +564,115 @@
             tool => tool.hotKey && tool.hotKey.toLowerCase() == key
           )
         if(tool) this.activateTool(tool)
-      })
-      this.bus.on('close-feature', this.closeFeature)
-    },
+      },
 
-    methods: {
+      isTabAvailable: function(tab) {
+        return !!this.document.activeSketch == !!tab.sketchOnly
+      },
+
+      // Positions of the parts taking part in a morph, relative to the box
+      measureParts: function(boxRect) {
+        return Object.fromEntries([...this.$el.querySelectorAll('[data-flip]')].map(elem => {
+          const rect = elem.getBoundingClientRect()
+          return [elem.dataset.flip, {
+            elem,
+            left: rect.left - boxRect.left,
+            top: rect.top - boxRect.top,
+            width: rect.width,
+            height: rect.height,
+            opacity: getComputedStyle(elem).opacity,
+          }]
+        }))
+      },
+
+      // Animate between the old and new layout's natural sizes,
+      // as CSS can't transition max-content to max-content.
+      // When (un)stacking, tool bars additionally emerge from
+      // or collapse into the tool bar of the active tab.
+      animateLayout: async function(morph) {
+        const box = this.$el
+        const from = box.getBoundingClientRect()
+        const before = morph ? this.measureParts(from) : {}
+        this.endMorph()
+        await this.$nextTick()
+        const to = box.getBoundingClientRect()
+        const after = morph ? this.measureParts(to) : {}
+        this.scrolled = box.querySelector(`[data-flip="tools-${this.activeTab}"]`).scrollLeft
+
+        const options = { duration: layoutDuration, easing: 'ease-out' }
+        const sizeAnimation = box.animate({
+          width: [from.width + 'px', to.width + 'px'],
+          height: [from.height + 'px', to.height + 'px'],
+        }, options)
+        this.animations = [sizeAnimation]
+
+        if(morph) {
+          if(this.stacked) this.bus.emit('clear-pickers')
+          box.style.overflow = 'clip'
+          const anchorAfter = after['tools-' + this.activeTab]
+          // A newly shown active tool bar anchors in place
+          const anchorBefore = before['tools-' + this.activeTab] || anchorAfter
+          // Offset from a part's old to its new position, following the tool bar it belongs to
+          const offset = (key) => {
+            const group = key.split('-')[1]
+            const groupBefore = before['tools-' + group]
+            const groupAfter = after['tools-' + group]
+            if(groupBefore && groupAfter) {
+              return { x: groupBefore.left - groupAfter.left, y: groupBefore.top - groupAfter.top }
+            }
+            const x = anchorBefore.left - anchorAfter.left
+            if(groupBefore) return { x, y: groupBefore.top - anchorAfter.top }
+            if(groupAfter) return { x, y: anchorBefore.top - groupAfter.top }
+            return { x, y: anchorBefore.top - anchorAfter.top }
+          }
+          const translate = ({ x, y }, sign = 1) => `translate(${sign * x}px, ${sign * y}px)`
+
+          for(const key in after) {
+            const keyframes = { transform: [translate(offset(key)), 'none'] }
+            if(!before[key]) keyframes.opacity = [0, 1]
+            this.animations.push(after[key].elem.animate(keyframes, options))
+          }
+
+          // Departed parts fade out as static copies
+          this.clones = Object.entries(before).filter(([key]) => !after[key]).map(([key, part]) => {
+            const clone = part.elem.cloneNode(true)
+            clone.removeAttribute('data-flip')
+            clone.querySelectorAll('.tipped').forEach(elem => elem.remove())
+            Object.assign(clone.style, {
+              position: 'absolute',
+              left: part.left - box.clientLeft + 'px',
+              top: part.top - box.clientTop + 'px',
+              width: part.width + 'px',
+              height: part.height + 'px',
+              margin: 0,
+              pointerEvents: 'none',
+            })
+            box.appendChild(clone)
+            this.animations.push(clone.animate({
+              transform: ['none', translate(offset(key), -1)],
+              opacity: [part.opacity, 0],
+            }, options))
+            return clone
+          })
+        }
+
+        sizeAnimation.onfinish = this.endMorph
+
+        // Keep picker lines attached to the moving feature box
+        const followPaths = () => {
+          if(this.stacked) return
+          this.$refs.featureBox?.[0]?.updatePaths()
+          if(sizeAnimation.playState == 'running') requestAnimationFrame(followPaths)
+        }
+        requestAnimationFrame(followPaths)
+      },
+
+      endMorph: function() {
+        this.animations?.forEach(animation => animation.cancel())
+        this.clones?.forEach(clone => clone.remove())
+        this.$el.style.overflow = ''
+      },
+
       toolIcon: function(tool) {
         return (tool.feature && tool.feature.icon) || (tool.tool && tool.tool.icon) || tool.icon
       },
@@ -539,6 +692,9 @@
 
       activateTool: function(tool) {
         if(tool.disabled || tool.isDisabled?.()) return
+        // Let the stack collapse first, as the morph clips the opening feature box
+        const delay = this.stacked ? layoutDuration : 0
+        this.stacked = false
         // Don't activate features twice
         if(this.feature && this.feature.constructor === tool.feature) return
         this.activateTab(this.tabs.findIndex(tab => tab.tools.some(t => t === tool)))
@@ -554,7 +710,7 @@
           } else if(tool.tool) {
             this.bus.emit('activate-tool', tool.tool)
           }
-        })
+        }, delay)
       },
 
       isActive: function(tool) {

@@ -14,7 +14,7 @@ import PathTracingViewport from './three/path-tracing-viewport.js'
 import HoverGlow from './three/hover-glow.js'
 import SketchPlane from './three/sketch-plane.js'
 import DimensionControls from './three/dimension-controls.js'
-import ShadowCatcher from './three/shadow-catcher.js'
+import GroundShadow from './three/ground-shadow.js'
 // import ArrowControls from './arrow-controls.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
 
@@ -41,12 +41,9 @@ export default class Renderer {
 
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.shadowMap.autoUpdate = false
-    this.renderer.shadowMap.enabled = preferences.shadowMaps
 
     this.pathTracingViewport = new PathTracingViewport(this.renderer)
 
-    // this.renderer.shadowMap.type = THREE.VSMShadowMap
     // this.renderer.toneMapping = THREE.ReinhardToneMapping
     // this.renderer.toneMapping = THREE.LinearToneMapping
     // this.renderer.toneMappingExposure = 1.2
@@ -98,10 +95,10 @@ export default class Renderer {
     this.splineDashX = new THREE.Vector3()
     this.splineDashY = new THREE.Vector3()
 
-    // Shadow Catcher
+    // Ground Shadow
     if(preferences.shadowMaps) {
-      this.shadowCatcher = new ShadowCatcher(this.renderer, this.world)
-      this.scene.add(this.shadowCatcher)
+      this.groundShadow = new GroundShadow(this.renderer, this.world)
+      this.scene.add(this.groundShadow.ground)
     }
 
     // Gizmos
@@ -224,7 +221,7 @@ export default class Renderer {
   }
 
   add(obj, selectable) {
-    this.shadowsNeedUpdate = true
+    this.invalidateShadows()
     this.dualCamera.prepareMaterials(obj)
     if(selectable) {
       this.world.add(obj)
@@ -268,7 +265,7 @@ export default class Renderer {
 
   remove(obj) {
     if(!obj) return
-    this.shadowsNeedUpdate = true
+    this.invalidateShadows()
     this.world.remove(obj)
     this.scene.remove(obj)
     this.dropResources(obj, true)
@@ -417,10 +414,9 @@ export default class Renderer {
 
   render() {
     this.emitter.emit('before-render')
-    // Shadow receivers fail to draw until the shadow map has been rendered once
     if(this.shadowsNeedUpdate) {
       this.shadowsNeedUpdate = false
-      this.updateShadows()
+      this.groundShadow?.update()
     }
     // Camera-dependent dimension geometry must be ready before Three.js
     // culls objects and uploads their buffers for this frame.
@@ -524,8 +520,9 @@ export default class Renderer {
     direction.applyQuaternion(new THREE.Quaternion().slerp(rotation, 0.15)).normalize()
   }
 
-  updateShadows() {
-    if(this.shadowCatcher) this.shadowCatcher.update()
+  // The ground shadow is redrawn before the next frame
+  invalidateShadows() {
+    this.shadowsNeedUpdate = true
   }
 
   addGizmo(gizmo) {
@@ -539,7 +536,7 @@ export default class Renderer {
     })
 
     gizmo.addEventListener('objectChange', () => {
-      this.updateShadows()
+      this.invalidateShadows()
       this.render()
     })
 

@@ -49,8 +49,8 @@
 
   watch(() => props.parentActive, () => {
     faceMesh.alcProjectable = props.parentActive
+    // Only active components cast the ground shadow
     faceMesh.castShadow = props.parentActive
-    faceMesh.receiveShadow = props.parentActive
     window.alcRenderer.remove(faceMesh)
     window.alcRenderer.add(faceMesh, props.parentActive)
   }, { immediate: true })
@@ -58,6 +58,7 @@
   watch(() => props.parentTransform, () => {
     faceMesh.matrix.copy(props.parentTransform)
     faceMesh.matrix.decompose(faceMesh.position, faceMesh.quaternion, faceMesh.scale)
+    window.alcRenderer.invalidateShadows()
     renderNeeded.value = true
   }, { immediate: true })
 

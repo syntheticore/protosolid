@@ -82,7 +82,7 @@
           label
             span.setting-label
               strong Display shadows
-              small Show real-time shadows in the viewport
+              small Show a soft shadow below the model
             ToggleSwitch(v-model="preferences.shadowMaps" @update:model-value="restartRequired = true")
 
           label

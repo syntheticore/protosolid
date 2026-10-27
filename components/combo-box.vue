@@ -223,6 +223,9 @@
     color: $bright1
     font-size: 11px
     font-weight: 600
+    // Teleported outside #app, so restore its defaults
+    user-select: none
+    cursor: default
 
   .combo-option
     display: flex

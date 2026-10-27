@@ -102,17 +102,25 @@ exactly and returns `{ profile, estimatedError }` for an explicit conversion of
 other curves. It supports consumers such as rational section lofting. Exact
 derived curves can be extruded, revolved, and swept directly.
 
-`Path2` represents connected open or closed sequences. `path.offset(distance,
-{ join: 'round' | 'miter' | 'bevel', miterLimit: 4 })` returns a path plus an input
-segment index for each retained segment; generated joins have a `null` source.
-`join` can also be an array with one style per corner in traversal order;
-`miterLimit: Infinity` explicitly retains uncapped miters. Offsets reject collapsed
-or reversed trims. A path can still cross itself: `validateSimple()` explicitly
-requires no self-intersections, overlaps, or contacts beyond adjacent endpoints.
-Closed paths also answer `signedArea()` (positive counter-clockwise) and
-`classifyPoint(point)` from the exact curves without requiring simplicity, so a
-boundary walk that retraces a bridge between loops still has an orientation.
-`Wire2` remains a validated simple closed boundary. `Profile.offset(distance)`
+`Wire2` represents connected open or closed sequences; it is closed when the last
+segment ends where the first starts. `wire.offset(distance,
+{ join: 'round' | 'miter' | 'bevel', miterLimit: 4 })` returns `{ wire, sources }`
+with an input segment index for each retained segment; generated joins have a
+`null` source. `join` can also be an array with one style per corner in traversal
+order; `miterLimit: Infinity` explicitly retains uncapped miters. Offsets reject
+collapsed or reversed trims. A wire can still cross itself: `validateSimple()`
+explicitly requires no self-intersections, overlaps, or contacts beyond adjacent
+endpoints. `signedArea()` is positive counter-clockwise (open wires close with
+their chord) and closed wires `classifyPoint(point)` from the exact curves without
+requiring simplicity, so a boundary walk that retraces a bridge between loops
+still has an orientation. `Profile` validates its boundaries as simple, closed and
+enclosing area. `wire.lifted(plane)` gives a `Wire3`, the spatial counterpart;
+`Wire3.connect(segments)` chains segments given in any order and direction, and
+`extended(candidates)` grows it through tangent continuations. Wires evaluate by
+one parameter running over the concatenated segment spans. `profile.sweep(plane,
+rail)` follows a tangent-continuous `Wire3`; `profile.loft(plane, sections,
+align, guides)` bends its sides onto `Wire3` guides crossing every section.
+`Profile.offset(distance)`
 operates on filled regions: positive distances expand, negative distances erode;
 results can contain several profiles or be empty. `classifyPoint` on wires and
 profiles returns `inside`, `outside`, or `boundary`, with holes respected.

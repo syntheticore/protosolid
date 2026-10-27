@@ -2446,10 +2446,18 @@ export class LoftFeature extends SolidFeature {
         type: 'bool',
         icons: ['caret-up', 'caret-down']
       },
+      guides: {
+        title: '(Guides)',
+        type: 'path',
+        multi: true,
+        optional: true,
+        consumesSketch: true,
+      },
     })
 
     this.profiles = null
     this.untwist = true
+    this.guides = null
   }
 
   isComplete() {
@@ -2464,6 +2472,7 @@ export class LoftFeature extends SolidFeature {
         this.componentId,
         references.profiles.slice(1),
         this.untwist,
+        references.guides || [],
         this.id,
       )
       comp.compound = comp.compound.boolean(tool, this.operation)

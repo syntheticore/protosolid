@@ -1,8 +1,8 @@
-//! Sketch offsetting for application tooling: open and closed paths with
+//! Sketch offsetting for application tooling: open and closed wires with
 //! join styles, and region offsets of profiles. Nothing in the kernel depends
 //! on it; it is exported for the WASM transport.
 use super::planar::*;
-use super::{invalid, Curve2, KernelResult, ModelTolerance, ParameterRange, Profile, TrimmedCurve2};
+use super::{invalid, Curve2, KernelResult, ModelTolerance, ParameterRange, Profile, TrimmedCurve2, Wire2};
 use crate::{Point2, Vec2};
 use cgmath::prelude::*;
 
@@ -17,7 +17,7 @@ pub enum JoinStyle {
 pub struct OffsetOptions {
     pub join: JoinStyle,
     /// Optional per-corner styles in traversal order (including the closing
-    /// corner of a closed path). An empty vector uses `join` everywhere.
+    /// corner of a closed wire). An empty vector uses `join` everywhere.
     pub corner_joins: Vec<JoinStyle>,
     /// Maximum miter length divided by offset distance; infinity is uncapped.
     pub miter_limit: f64,
@@ -32,142 +32,68 @@ impl Default for OffsetOptions {
     }
 }
 
-/// Connected oriented curves, open or closed. Unlike Wire2 this makes no claim
-/// about enclosed area or simplicity and can represent intermediate offsets.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Path2 {
-    segments: Vec<TrimmedCurve2>,
-    closed: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PathOffset2 {
-    pub path: Path2,
+pub struct WireOffset2 {
+    pub wire: Wire2,
     /// Source segment for each output segment. Joins have no source segment.
     pub sources: Vec<Option<usize>>,
 }
 
-impl Path2 {
-    pub fn new(
-        segments: impl IntoIterator<Item = TrimmedCurve2>,
-        closed: bool,
-        tolerance: ModelTolerance,
-    ) -> KernelResult<Self> {
-        tolerance.validate()?;
-        let segments: Vec<_> = segments.into_iter().collect();
-        if segments.is_empty() {
-            return Err(invalid("a path needs at least one segment"));
-        }
-        for i in 0..segments.len() {
-            if (i + 1 < segments.len() || closed)
-                && segments[i]
-                    .end()?
-                    .distance(segments[(i + 1) % segments.len()].start()?)
-                    > tolerance.linear
-                {
-                    return Err(invalid("path segments must connect end-to-start"));
-                }
-        }
-        Ok(Self { segments, closed })
-    }
-    pub fn segments(&self) -> &[TrimmedCurve2] {
-        &self.segments
-    }
-    pub fn is_closed(&self) -> bool {
-        self.closed
-    }
-    /// Oriented area enclosed by a closed path, positive when it runs
-    /// counter-clockwise. Unlike a wire, the path need not be simple. A
-    /// segment traversed in both directions, such as a bridge between two
-    /// loops, contributes nothing, so the sign remains the orientation of a
-    /// boundary walk that only retraces edges. For a path that crosses itself
-    /// the result is the winding-weighted area.
-    pub fn signed_area(&self, tolerance: ModelTolerance) -> KernelResult<f64> {
-        tolerance.validate()?;
-        if !self.closed {
-            return Err(invalid("only a closed path encloses an area"));
-        }
-        self.segments
-            .iter()
-            .map(|segment| segment.signed_area(tolerance))
-            .sum()
-    }
-    /// Classify a point by the winding number of a closed path, without
-    /// requiring the path to be simple. Retraced segments cancel.
-    pub fn classify_point(
-        &self,
-        point: Point2,
-        tolerance: ModelTolerance,
-    ) -> KernelResult<PointClassification> {
-        tolerance.validate()?;
-        if !self.closed {
-            return Err(invalid("only a closed path classifies points"));
-        }
-        classify_loop_point(&self.segments, point, tolerance)
-    }
-    /// Require a simple path: no self-intersections, overlaps, or contacts
+impl Wire2 {
+    /// Require a simple wire: no self-intersections, overlaps, or contacts
     /// except the shared endpoint of consecutive segments.
     pub fn validate_simple(&self, tolerance: ModelTolerance) -> KernelResult<()> {
         tolerance.validate()?;
-        for (i, curve) in self.segments.iter().enumerate() {
+        let segments = self.segments();
+        for (i, curve) in segments.iter().enumerate() {
             if !curve.self_intersections(tolerance)?.is_empty() {
-                return Err(invalid("path intersects itself"));
+                return Err(invalid("wire intersects itself"));
             }
-            for (j, other) in self.segments[..i].iter().enumerate() {
+            for (j, other) in segments[..i].iter().enumerate() {
                 for hit in curve.intersections(other, tolerance)? {
                     let allowed = match hit {
                         CurveIntersection2::Point { point, .. } => {
                             (j + 1 == i && point.distance(curve.start()?) <= tolerance.linear)
-                                || (self.closed
+                                || (self.is_closed()
                                     && j == 0
-                                    && i + 1 == self.segments.len()
+                                    && i + 1 == segments.len()
                                     && point.distance(curve.end()?) <= tolerance.linear)
                         }
                         CurveIntersection2::Overlap { .. } => false,
                     };
                     if !allowed {
-                        return Err(invalid("path boundaries intersect or overlap"));
+                        return Err(invalid("wire boundaries intersect or overlap"));
                     }
                 }
             }
         }
         Ok(())
     }
-    pub fn reversed(&self) -> Self {
-        Self {
-            segments: self
-                .segments
-                .iter()
-                .rev()
-                .map(TrimmedCurve2::reversed)
-                .collect(),
-            closed: self.closed,
-        }
-    }
     pub fn offset(
         &self,
         distance: f64,
         options: OffsetOptions,
         tolerance: ModelTolerance,
-    ) -> KernelResult<PathOffset2> {
+    ) -> KernelResult<WireOffset2> {
         if !distance.is_finite() || options.miter_limit.is_nan() || options.miter_limit < 1.0 {
             return Err(invalid(
                 "offset requires finite distance and a miter limit of at least one (or infinity)",
             ));
         }
-        let corner_count = self.segments.len() - usize::from(!self.closed);
+        let closed = self.is_closed();
+        let corner_count = self.segments().len() - usize::from(!closed);
         if !options.corner_joins.is_empty() && options.corner_joins.len() != corner_count {
             return Err(invalid("offset needs one join style per corner"));
         }
         let mut curves = self
-            .segments
+            .segments()
             .iter()
             .map(|curve| curve.offset(distance))
             .collect::<KernelResult<Vec<_>>>()?;
         let mut joins = vec![None; curves.len()];
         let original_ranges: Vec<_> = curves.iter().map(TrimmedCurve2::range).collect();
         for i in 0..curves.len() {
-            if i + 1 == curves.len() && !self.closed {
+            if i + 1 == curves.len() && !closed {
                 break;
             }
             let next = (i + 1) % curves.len();
@@ -176,7 +102,7 @@ impl Path2 {
             if a.distance(b) <= tolerance.linear {
                 continue;
             }
-            let vertex = self.segments[i].end()?;
+            let vertex = self.segments()[i].end()?;
             let tangent = |curve: &TrimmedCurve2, end: bool| -> KernelResult<Vec2> {
                 let range = curve.range();
                 Ok(curve
@@ -186,8 +112,8 @@ impl Path2 {
                     .normalize()
                     * range.span().signum())
             };
-            let u = tangent(&self.segments[i], true)?;
-            let v = tangent(&self.segments[next], false)?;
+            let u = tangent(&self.segments()[i], true)?;
+            let v = tangent(&self.segments()[next], false)?;
             let turn = u.x * v.y - u.y * v.x;
             let outside = turn * distance < 0.0;
             let join = options.corner_joins.get(i).copied().unwrap_or(options.join);
@@ -279,8 +205,8 @@ impl Path2 {
                 sources.push(None);
             }
         }
-        Ok(PathOffset2 {
-            path: Self::new(segments, self.closed, tolerance)?,
+        Ok(WireOffset2 {
+            wire: Self::new(segments, tolerance)?,
             sources,
         })
     }

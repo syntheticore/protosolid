@@ -529,28 +529,23 @@ fn planar_normal(
 }
 
 impl Profile {
-    /// Sweep along one complete rail, planar or spatial. The profile retains
-    /// its initial placement and turns with the rail's rotation-minimizing
-    /// frame. The sweep starts at whichever rail end lies closer to the
-    /// profile plane.
-    pub fn sweep(&self, plane: Plane3, rail: &Curve3, range: ParameterRange) -> KernelResult<Compound> {
-        self.sweep_along(
-            plane,
-            &SweepRail::new([RailSegment::new(rail.clone(), range)], self.tolerance())?,
-        )
-    }
-
-    /// Sweep along a chain of tangent-continuous rail segments. The section
-    /// leaves each segment in the frame it reached and continues from there.
-    pub fn sweep_along(&self, plane: Plane3, rail: &SweepRail) -> KernelResult<Compound> {
+    /// Sweep along a rail wire, planar or spatial, whose segments join
+    /// tangentially. The profile retains its initial placement and turns with
+    /// the rail's rotation-minimizing frame, leaving each segment in the frame
+    /// it reached. An open rail starts at whichever end lies closer to the
+    /// profile plane; a closed one where it passes the profile.
+    pub fn sweep(&self, plane: Plane3, rail: &Wire3) -> KernelResult<Compound> {
         let tolerance = self.tolerance();
         if !self.holes().is_empty() {
             return Err(invalid("sweeps with holes are not supported"));
         }
+        if !rail.is_tangent_continuous()? {
+            return Err(invalid("sweep rail segments must join tangentially"));
+        }
         let offset = |point: Point3| plane.normal().dot(point - plane.origin()).abs();
-        let rail = if rail.segments().len() > 1 && rail.is_closed()? {
-            // A closed chain starts where it passes through the profile
-            rail.opened_near(super::sweep_limits::profile_center(self, plane)?)?
+        let rail = if rail.segments().len() > 1 && rail.is_closed() {
+            let center = super::sweep_limits::profile_center(self, plane)?;
+            rail.opened_at(rail.closest_point(center)?.0)?
         } else if offset(rail.end()?.0) < offset(rail.start()?.0) {
             rail.reversed()
         } else {
@@ -559,14 +554,14 @@ impl Profile {
         let (start, tangent) = rail.start()?;
         let end = rail.end()?.0;
         if let [segment] = rail.segments() {
-            if let Curve3::Line(_) = segment.curve {
+            if let Curve3::Line(_) = segment.curve() {
                 return self.extrude(plane, end - start);
             }
-            if let Curve3::Circle(circle) = &segment.curve {
+            if let Curve3::Circle(circle) = segment.curve() {
                 return self.revolve(
                     plane,
                     Axis3::new(circle.center(), circle.normal())?,
-                    segment.range.span(),
+                    segment.range().span(),
                 );
             }
         }
@@ -576,11 +571,11 @@ impl Profile {
             let frame = SweptSurface3::new(
                 section_plane,
                 self.outer().segments()[0].clone(),
-                segment.curve.clone(),
-                segment.range,
+                segment.curve().clone(),
+                segment.range(),
                 tolerance,
             )?;
-            section_plane = frame.section_plane(segment.range.end)?;
+            section_plane = frame.section_plane(segment.range().end)?;
             frames.push(frame);
         }
         let alignment = tangent.dot(plane.normal());
@@ -590,7 +585,7 @@ impl Profile {
             ));
         }
         let forward = alignment > 0.0;
-        let closed = rail.is_closed()?;
+        let closed = rail.is_closed();
         let single = frames.len() == 1;
         // A single closed rail closes its own frame; a chain must return the
         // section to where it started.
@@ -610,8 +605,8 @@ impl Profile {
             roles.extend([super::CreationRole::ProfileStart, super::CreationRole::ProfileEnd]);
         }
         for (segment, frame) in rail.segments().iter().zip(&frames) {
-            let range = segment.range;
-            let mut parameters = segment.curve.integration_breakpoints(range);
+            let range = segment.range();
+            let mut parameters = segment.curve().integration_breakpoints(range);
             parameters.extend([range.start, range.end]);
             if closed && single {
                 parameters.push((range.start + range.end) * 0.5);

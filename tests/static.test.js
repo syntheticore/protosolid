@@ -63,6 +63,8 @@ test('static load resolves a thin fixed plate instead of locking its entire thic
   const simulation = new StaticSimulation('test')
   assert.equal(simulation.forceY, -100)
   assert.equal(simulation.forceZ, 0)
+  // The layer bounds below assume quality 3 rather than the default.
+  simulation.quality = 3
   simulation.fixedFaces = [reference('fixed')]
   simulation.loadFaces = [reference('loaded')]
   assert.equal(simulation.resolve(tree, false), undefined)
@@ -111,6 +113,7 @@ test('static load resolves a thin fixed plate instead of locking its entire thic
   assert.ok(meanStress(8, 30) > meanStress(175, 205), 'the arm should carry more bending strain near the plate')
 
   const alternate = new StaticSimulation('alternate')
+  alternate.quality = 3
   alternate.fixedFaces = [reference('plate-left')]
   alternate.loadFaces = [reference('arm-front')]
   alternate.solve(tree)

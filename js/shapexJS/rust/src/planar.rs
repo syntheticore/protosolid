@@ -2,7 +2,7 @@
 use super::*;
 use js_sys::{Array, Object, Reflect};
 use shapex::{
-    CurveContact, CurveIntersection2, JoinStyle, OffsetOptions, Path2, PlaneCurveProjection,
+    CurveContact, CurveIntersection2, JoinStyle, OffsetOptions, PlaneCurveProjection,
     PointClassification,
 };
 use std::{
@@ -310,36 +310,16 @@ pub fn classify_profile(value: JsValue, x: f64, y: f64) -> Result<String, JsValu
         .map_err(js_error)
 }
 
-/// Build a path from its transport form, with the tolerance it was created with.
-fn path(value: JsValue, closed: bool) -> Result<(Path2, shapex::ModelTolerance), JsValue> {
+#[wasm_bindgen(js_name=offsetWire2)]
+pub fn offset_wire(value: JsValue, distance: f64, join: JsValue, miter: f64) -> Result<JsValue, JsValue> {
     let dto = from_js::<WireDto>(value)?;
     let tol = dto.tolerance.into();
-    let path = Path2::new(
-        dto.segments
-            .into_iter()
-            .map(TrimmedCurveDto::build)
-            .collect::<Result<Vec<_>, _>>()?,
-        closed,
-        tol,
-    )
-    .map_err(js_error)?;
-    Ok((path, tol))
-}
-
-#[wasm_bindgen(js_name=offsetPath2)]
-pub fn offset_path(
-    value: JsValue,
-    closed: bool,
-    distance: f64,
-    join: JsValue,
-    miter: f64,
-) -> Result<JsValue, JsValue> {
-    let (path, tol) = path(value, closed)?;
-    let result = path
+    let result = dto
+        .build()?
         .offset(distance, options(join, miter)?, tol)
         .map_err(js_error)?;
     let curves = Array::new();
-    for curve in result.path.segments() {
+    for curve in result.wire.segments() {
         curves.push(&NativeCurve2::wrap(curve.clone()).into());
     }
     let object = Object::new();
@@ -352,30 +332,13 @@ pub fn offset_path(
     Ok(object.into())
 }
 
-#[wasm_bindgen(js_name=validatePath2)]
-pub fn validate_path(value: JsValue, closed: bool) -> Result<(), JsValue> {
-    path(value, closed).map(|_| ())
+#[wasm_bindgen(js_name=validateSimpleWire2)]
+pub fn validate_simple_wire(value: JsValue) -> Result<(), JsValue> {
+    let dto = from_js::<WireDto>(value)?;
+    let tol = dto.tolerance.into();
+    dto.build()?.validate_simple(tol).map_err(js_error)
 }
 
-#[wasm_bindgen(js_name=validateSimplePath2)]
-pub fn validate_simple_path(value: JsValue, closed: bool) -> Result<(), JsValue> {
-    let (path, tol) = path(value, closed)?;
-    path.validate_simple(tol).map_err(js_error)
-}
-
-#[wasm_bindgen(js_name=pathSignedArea2)]
-pub fn path_signed_area(value: JsValue) -> Result<f64, JsValue> {
-    let (path, tol) = path(value, true)?;
-    path.signed_area(tol).map_err(js_error)
-}
-
-#[wasm_bindgen(js_name=classifyPath2)]
-pub fn classify_path(value: JsValue, x: f64, y: f64) -> Result<String, JsValue> {
-    let (path, tol) = path(value, true)?;
-    path.classify_point(Point2::new(x, y), tol)
-        .map(classify)
-        .map_err(js_error)
-}
 #[wasm_bindgen(js_name=offsetProfile2)]
 pub fn offset_profile(value: JsValue, distance: f64) -> Result<Array, JsValue> {
     let result = Array::new();
@@ -416,6 +379,14 @@ enum Curve3Dto {
 pub struct NativeCurve3 {
     pub(super) inner: Curve3,
     pub(super) range: ParameterRange,
+}
+impl NativeCurve3 {
+    pub(super) fn segment(&self) -> Result<TrimmedCurve3, JsValue> {
+        TrimmedCurve3::new(self.inner.clone(), self.range).map_err(js_error)
+    }
+    fn wrap(segment: &TrimmedCurve3) -> Self {
+        Self { inner: segment.curve().clone(), range: segment.range() }
+    }
 }
 #[wasm_bindgen]
 impl NativeCurve3 {
@@ -547,5 +518,111 @@ impl NativeCurve3 {
             p.point.z,
             p.distance,
         ]))
+    }
+}
+
+#[wasm_bindgen]
+pub struct NativeCurve3List {
+    values: Vec<TrimmedCurve3>,
+}
+#[wasm_bindgen]
+impl NativeCurve3List {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { values: Vec::new() }
+    }
+    pub fn add(&mut self, value: &NativeCurve3) -> Result<(), JsValue> {
+        self.values.push(value.segment()?);
+        Ok(())
+    }
+}
+
+/// A spatial wire: connected trimmed curves evaluated by one parameter.
+#[wasm_bindgen]
+pub struct NativeWire3 {
+    pub(super) inner: Wire3,
+}
+#[wasm_bindgen]
+impl NativeWire3 {
+    /// Segments given in chain order.
+    #[wasm_bindgen(constructor)]
+    pub fn new(segments: &NativeCurve3List, tol: &[f64]) -> Result<NativeWire3, JsValue> {
+        Wire3::new(segments.values.clone(), tolerance(tol)?)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+    /// Segments in any order and direction that form one chain.
+    pub fn connect(segments: &NativeCurve3List, tol: &[f64]) -> Result<NativeWire3, JsValue> {
+        Wire3::connect(segments.values.clone(), tolerance(tol)?)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+    /// The wire grown at both ends through connected candidates.
+    pub fn extended(&self, candidates: &NativeCurve3List, tangent_only: bool) -> Result<NativeWire3, JsValue> {
+        self.inner
+            .clone()
+            .extended(&candidates.values, tangent_only)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+    pub fn segments(&self) -> Array {
+        self.inner
+            .segments()
+            .iter()
+            .map(|segment| JsValue::from(NativeCurve3::wrap(segment)))
+            .collect()
+    }
+    #[wasm_bindgen(js_name=isClosed)]
+    pub fn is_closed(&self) -> bool {
+        self.inner.is_closed()
+    }
+    #[wasm_bindgen(js_name=isTangentContinuous)]
+    pub fn is_tangent_continuous(&self) -> Result<bool, JsValue> {
+        self.inner.is_tangent_continuous().map_err(js_error)
+    }
+    pub fn reversed(&self) -> NativeWire3 {
+        Self { inner: self.inner.reversed() }
+    }
+    #[wasm_bindgen(js_name=openedAt)]
+    pub fn opened_at(&self, parameter: f64) -> Result<NativeWire3, JsValue> {
+        self.inner
+            .opened_at(parameter)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+    #[wasm_bindgen(js_name=parameterEnd)]
+    pub fn parameter_end(&self) -> f64 {
+        self.inner.parameter_range().end
+    }
+    pub fn length(&self) -> Result<f64, JsValue> {
+        self.inner.length().map_err(js_error)
+    }
+    /// Point and first derivative at a wire parameter.
+    pub fn evaluate(&self, parameter: f64) -> Result<Float64Array, JsValue> {
+        let (p, d) = self.inner.first_order(parameter).map_err(js_error)?;
+        Ok(f64_array(&[p.x, p.y, p.z, d.x, d.y, d.z]))
+    }
+    #[wasm_bindgen(js_name=closestPoint)]
+    pub fn closest_point(&self, x: f64, y: f64, z: f64) -> Result<Float64Array, JsValue> {
+        let (parameter, p, distance) = self
+            .inner
+            .closest_point(Point3::new(x, y, z))
+            .map_err(js_error)?;
+        Ok(f64_array(&[parameter, p.x, p.y, p.z, distance]))
+    }
+}
+
+#[wasm_bindgen]
+pub struct NativeWire3List {
+    pub(super) values: Vec<Wire3>,
+}
+#[wasm_bindgen]
+impl NativeWire3List {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { values: Vec::new() }
+    }
+    pub fn add(&mut self, value: &NativeWire3) {
+        self.values.push(value.inner.clone())
     }
 }

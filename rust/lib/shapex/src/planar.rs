@@ -960,11 +960,16 @@ impl TrimmedCurve2 {
 }
 
 impl Wire2 {
+    /// Classify a point by the winding number of a closed wire, without
+    /// requiring the wire to be simple. Retraced segments cancel.
     pub fn classify_point(
         &self,
         point: Point2,
         tolerance: ModelTolerance,
     ) -> KernelResult<PointClassification> {
+        if !self.is_closed() {
+            return Err(invalid("only a closed wire classifies points"));
+        }
         classify_loop_point(self.segments(), point, tolerance)
     }
 }

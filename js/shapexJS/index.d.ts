@@ -271,18 +271,30 @@ export interface TrimmedCurve3Constructor {
   new(curve: Line3 | Circle3, range: ParameterRange): TrimmedCurve3
   new: (curve: Line3 | Circle3, range: ParameterRange) => TrimmedCurve3
 }
-export interface Path2 {
-  segments(): readonly TrimmedCurve2[]
+/**
+ * Connected spatial curves evaluated by one parameter: the concatenated
+ * parameter spans of its segments, with joints as breakpoints.
+ */
+export interface Wire3 {
+  segments(): readonly TrimmedCurve3[]
   isClosed(): boolean
-  reversed(): Path2
-  validateSimple(): void
-  signedArea(): number
-  classifyPoint(point: Point2): PointClassification
-  offset(distance: number, options?: OffsetOptions): { readonly path: Path2; readonly sources: readonly (number | null)[] }
+  isTangentContinuous(): boolean
+  reversed(): Wire3
+  /** A closed wire reopened at a wire parameter. */
+  openedAt(parameter: number): Wire3
+  parameterRange(): ParameterRange
+  length(): number
+  evaluate(parameter: number): { readonly point: Point3; readonly derivative: Vec3 }
+  closestPoint(point: Point3): { readonly parameter: number; readonly point: Point3; readonly distance: number }
+  /** Grown at its open ends through connected candidates, tangent ones only unless `tangentOnly` is false. */
+  extended(candidates: Iterable<TrimmedCurve3>, tangentOnly?: boolean): Wire3
 }
-export interface Path2Constructor {
-  new(segments: Iterable<TrimmedCurve2>, closed?: boolean, tolerance?: ModelTolerance): Path2
-  new: (segments: Iterable<TrimmedCurve2>, closed?: boolean, tolerance?: ModelTolerance) => Path2
+export interface Wire3Constructor {
+  /** Segments in chain order. */
+  new(segments: Iterable<TrimmedCurve3>, tolerance?: ModelTolerance): Wire3
+  new: (segments: Iterable<TrimmedCurve3>, tolerance?: ModelTolerance) => Wire3
+  /** Segments in any order and direction that form one chain. */
+  connect(segments: Iterable<TrimmedCurve3>, tolerance?: ModelTolerance): Wire3
 }
 
 export class Wire2 {
@@ -293,8 +305,14 @@ export class Wire2 {
   signedArea(): number
   area(): number
   isCounterClockwise(): boolean
+  /** Whether the last segment ends where the first starts. */
+  isClosed(): boolean
   reversed(): Wire2
+  /** Only closed wires classify points. */
   classifyPoint(point: Point2): PointClassification
+  validateSimple(): void
+  offset(distance: number, options?: OffsetOptions): { readonly wire: Wire2; readonly sources: readonly (number | null)[] }
+  lifted(plane: Plane3): Wire3
 }
 
 export class TessellationOptions {
@@ -448,15 +466,14 @@ export interface Profile {
   extrudeUpToFace(plane: Plane3, target: Compound, limit: Face, offset?: number, endOffset?: number): Compound
   revolveUpToFace(plane: Plane3, axis: Axis3, target: Compound, limit: Face, forward?: boolean): Compound
   revolveBetweenFaces(plane: Plane3, axis: Axis3, fromBody: Compound, from: Face, untilBody: Compound, until: Face, forward?: boolean): Compound
-  sweep(plane: Plane3, railPlane: Plane3, rail: TrimmedCurve2): Compound
-  /** Sweep along a model edge, planar or spatial. */
-  sweepAlongEdge(plane: Plane3, rail: Edge): Compound
+  /** Sweep along a tangent-continuous rail wire. */
+  sweep(plane: Plane3, rail: Wire3): Compound
   /**
-   * Sweep along connected, tangent-continuous segments given in any order and
-   * direction, extended at open ends through tangent-continuous candidates.
+   * Loft through the sections. Each guide crosses every section on its
+   * boundary, in loft order, and all guides cross the sections in the same
+   * order; the sides between neighbouring guides blend between them.
    */
-  sweepAlongRail(plane: Plane3, rails: Iterable<TrimmedCurve3>, candidates?: Iterable<TrimmedCurve3>): Compound
-  loft(plane: Plane3, sections: Iterable<{ profile: Profile, plane: Plane3 }>, alignSections?: boolean): Compound
+  loft(plane: Plane3, sections: Iterable<{ profile: Profile, plane: Plane3 }>, alignSections?: boolean, guides?: Iterable<Wire3>): Compound
   loftWithAlignment(plane: Plane3, sections: Iterable<{ profile: Profile, plane: Plane3 }>, alignSections: boolean): Compound
 }
 
@@ -490,8 +507,8 @@ export interface Shapex {
   Circle3: typeof Circle3
   TrimmedCurve2: typeof TrimmedCurve2
   TrimmedCurve3: TrimmedCurve3Constructor
-  Path2: Path2Constructor
   Wire2: typeof Wire2
+  Wire3: Wire3Constructor
   Profile: ProfileConstructor
   TessellationOptions: typeof TessellationOptions
   FilletOptions: typeof FilletOptions

@@ -49,7 +49,6 @@ mod sew;
 mod step;
 mod sweep;
 mod sweep_limits;
-mod sweep_rail;
 mod revolve_loft;
 mod tessellation;
 mod tolerance;
@@ -71,7 +70,6 @@ pub(crate) use domain::{box_center, nearest_uv, whole_periods};
 pub use error::{Diagnostic, DiagnosticKind, KernelError, KernelResult};
 pub(crate) use error::{geometry_error, invalid, topology_error, unsupported};
 pub use sweep::SweptSurface3;
-pub use sweep_rail::{RailSegment, SweepRail};
 pub use geometry::{
     Axis3, Circle2, Circle3, Cone3, Curve2, Curve2Evaluation, Curve3, CurveEvaluation, Cylinder3,
     EdgeBlendSurface3, Frame3, Line2, Line3, NurbsCurve2, NurbsCurve3, NurbsSurface3,
@@ -105,9 +103,9 @@ pub use topology::{
 pub use step::{StepAssembly, StepLengthUnit, StepOccurrence, StepProduct};
 pub use transform::{Reflection3, RigidTransform3};
 pub use validation::ValidationReport;
-pub use wire::{TrimmedCurve2, Wire2};
+pub use wire::{TrimmedCurve2, TrimmedCurve3, Wire, Wire2, Wire3, WireSegment};
 pub use planar::{CurveProjection2, CurveIntersection2, CurveContact, PointClassification, Polyline2, OffsetCurve2};
-pub use sketch_offset::{Path2, PathOffset2, OffsetOptions, JoinStyle};
+pub use sketch_offset::{WireOffset2, OffsetOptions, JoinStyle};
 pub use planar::{ProjectedCurve2, PlaneCurveProjection};
 pub use planar::CurveApproximation2;
 pub use planar::RigidTransform2;

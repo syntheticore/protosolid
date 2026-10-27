@@ -1439,3 +1439,48 @@ fn feature_draft() {
     assert!((result.volume() - 610.0 / 3.0 * std::f64::consts::PI).abs() < 1.0e-5);
     mesh(&result);
 }
+/// A guide drawn in the XZ plane, lifted into space
+fn xz_guide(curves: impl IntoIterator<Item = TrimmedCurve2>) -> Wire3 {
+    let t = ModelTolerance::default();
+    let plane = Plane3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_x(), Vec3::unit_z(), t).unwrap();
+    Wire2::new(curves, t).unwrap().lifted(plane).unwrap()
+}
+#[test]
+fn loft_along_straight_guides_matches_prism() {
+    let a = rectangle(-2.0, -2.0, 4.0, 4.0);
+    let guide = |x: f64, y: f64| {
+        let line = Line3::new(Point3::new(x, y, 0.0), Vec3::unit_z() * 10.0).unwrap();
+        Wire3::new([TrimmedCurve3::new(line, range(0.0, 1.0).unwrap()).unwrap()], ModelTolerance::default())
+            .unwrap()
+    };
+    let body = a.loft_with_guides(Plane3::xy(), [(upper(10.0), &a)], true, &[guide(2.0, 2.0)]).unwrap();
+    assert!((body.volume() - 160.0).abs() < 1.0e-6, "{}", body.volume());
+    let body = a
+        .loft_with_guides(Plane3::xy(), [(upper(10.0), &a)], true, &[guide(2.0, -2.0), guide(-2.0, 2.0)])
+        .unwrap();
+    assert!((body.volume() - 160.0).abs() < 1.0e-6, "{}", body.volume());
+    mesh(&body);
+}
+#[test]
+fn loft_follows_curved_guide() {
+    let a = circle(2.0);
+    let arc = TrimmedCurve2::arc_through(Point2::new(2.0, 0.0), Point2::new(4.0, 5.0), Point2::new(2.0, 10.0)).unwrap();
+    let body = a.loft_with_guides(Plane3::xy(), [(upper(10.0), &a)], true, &[xz_guide([arc])]).unwrap();
+    // A single guide carries every section along unchanged and level, so
+    // Cavalieri keeps the cylinder volume.
+    assert!((body.volume() - 40.0 * std::f64::consts::PI).abs() < 1.0e-4, "{}", body.volume());
+    let triangles = body.tessellate(TessellationOptions::new(0.01, 0.15, 24).unwrap()).unwrap();
+    let reach = triangles.positions.iter().map(|p| p.x).fold(f64::MIN, f64::max);
+    assert!((reach - 4.0).abs() < 1.0e-3, "{reach}");
+}
+#[test]
+fn loft_guide_between_section_vertices_splits_sections() {
+    let a = rectangle(-2.0, -2.0, 4.0, 4.0);
+    let b = circle(2.0);
+    let arc = TrimmedCurve2::arc_through(Point2::new(2.0, 0.0), Point2::new(3.0, 5.0), Point2::new(2.0, 10.0)).unwrap();
+    let body = a.loft_with_guides(Plane3::xy(), [(upper(10.0), &b)], true, &[xz_guide([arc])]).unwrap();
+    assert!(body.volume() > 0.0);
+    mesh(&body);
+    let miss = TrimmedCurve2::line(Point2::new(5.0, 0.0), Point2::new(5.0, 10.0)).unwrap();
+    assert!(a.loft_with_guides(Plane3::xy(), [(upper(10.0), &b)], true, &[xz_guide([miss])]).is_err());
+}

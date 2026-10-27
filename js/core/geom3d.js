@@ -31,6 +31,29 @@ function extrusionRange(geometry, origin, direction) {
   return [minimum - padding, maximum + padding]
 }
 
+// A sketch element lifted from its workplane, or a model edge's curve
+function spatialCurve(item) {
+  return item.sketch ?
+    planeFromMatrix(item.sketch.workplane).liftCurve(item.geom(), modelTolerance) :
+    item.geom().trimmedCurve()
+}
+
+// Curves grouped by shared endpoints into chains, one wire each
+function connectedWires(curves) {
+  const ends = curve => [curve.range().start, curve.range().end].map(t => curve.evaluate(t).point)
+  const touch = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) <= modelTolerance.linear
+  let groups = []
+  for(const curve of curves) {
+    const points = ends(curve)
+    const touching = groups.filter(group => group.points.some(a => points.some(b => touch(a, b))))
+    groups = [...groups.filter(group => !touching.includes(group)), {
+      curves: [curve, ...touching.flatMap(group => group.curves)],
+      points: [...points, ...touching.flatMap(group => group.points)],
+    }]
+  }
+  return groups.map(group => sx.Wire3.connect(group.curves, modelTolerance))
+}
+
 export class Wire {
   constructor(region, startPoint) {
     region = region.map(seg => seg.clone())
@@ -57,20 +80,17 @@ export class Wire {
     if (!firstPoint.almost(lastPoint)) fail("Wires must be closed")
     this.segments = region
   }
-  // Validated boundary for profiles. Building it rejects loops that are not simple.
-  geom() { return this.cachedWire ||= sx.Wire2.new(this.segments.map(segment => segment.geom()), modelTolerance) }
   // Sketch loops are face walks of the split sketch graph. A walk can retrace a
   // bridge between two loops, so orientation and containment use the exact
-  // curves as a path, which need not be simple.
-  path() { return this.cachedPath ||= sx.Path2.new(this.segments.map(segment => segment.geom()), true, modelTolerance) }
-  isClockwise() { return this.path().signedArea() < 0 }
+  // curves without requiring simplicity; profiles validate their boundaries.
+  geom() { return this.cachedWire ||= sx.Wire2.new(this.segments.map(segment => segment.geom()), modelTolerance) }
+  isClockwise() { return this.geom().signedArea() < 0 }
   reverse() {
     this.segments.reverse()
     this.segments.forEach(curve => curve.flip())
     this.cachedWire = null
-    this.cachedPath = null
   }
-  containsPoint(point) { return this.path().classifyPoint(point2(point)) == 'inside' }
+  containsPoint(point) { return this.geom().classifyPoint(point2(point)) == 'inside' }
   encloses(other) {
     // Adjacent sketch regions share split edges, but neither is a hole in the
     // other. Testing their shared endpoints makes them look enclosed because
@@ -201,7 +221,7 @@ export class Profile {
       return new Compound(componentId, geometry).seedProfileTopology([this], featureId)
     } finally { fromBody.free(); untilBody.free() }
   }
-  loft(componentId, others, untwist, featureId) {
+  loft(componentId, others, untwist, guides, featureId) {
     const profiles = [this, ...others]
     if(profiles.some(profile => profile.rings.length != 1)) {
       fail('Loft profiles with holes are not supported')
@@ -212,22 +232,21 @@ export class Profile {
       planeFromMatrix(this.sketch.workplane),
       others.map(profile => ({ profile: section(profile), plane: planeFromMatrix(profile.sketch.workplane) })),
       untwist,
+      connectedWires(guides.map(spatialCurve)),
     )
     return new Compound(componentId, geometry).seedProfileTopology(profiles, featureId)
   }
   sweep(componentId, rails, followTangents, featureId) {
     if(this.rings.length != 1) fail('Sweeps with holes are not supported')
     const railSources = [...new Set(rails.map(rail => rail instanceof Edge ? 'rail' : rail.id.split('/')[0]))]
-    const curve = rail => rail.sketch ?
-      planeFromMatrix(rail.sketch.workplane).liftCurve(rail.geom(), modelTolerance) :
-      rail.geom().trimmedCurve()
     // Tangent continuations come from the same body or sketch as the selection
     const selected = new Set(rails.map(rail => rail.id))
     const candidates = !followTangents ? [] : [...new Set(rails.flatMap(rail => rail.sketch ?
       rail.sketch.elements.filter(elem => elem.geom && !!elem.isReference == !!rail.isReference) :
       rail.solid.edges()))].filter(item => !selected.has(item.id))
-    const geometry = this.geom().sweepAlongRail(planeFromMatrix(this.sketch.workplane),
-      rails.map(curve), candidates.map(curve))
+    const rail = sx.Wire3.connect(rails.map(spatialCurve), modelTolerance)
+      .extended(candidates.map(spatialCurve), true)
+    const geometry = this.geom().sweep(planeFromMatrix(this.sketch.workplane), rail)
     return new Compound(componentId, geometry).seedProfileTopology([this], featureId, railSources)
   }
   update() {

@@ -31,10 +31,25 @@ impl Profile {
         sections: impl IntoIterator<Item = (Plane3, &'a Profile)>,
         align_sections: bool,
     ) -> KernelResult<Compound> {
+        self.loft_with_guides(plane, sections, align_sections, &[])
+    }
+
+    /// Loft whose sides follow guide wires. Every guide crosses each section
+    /// on its boundary, the sections in loft order and all guides in the same
+    /// order around the sections; the sides between neighbouring guides blend
+    /// between them. Guides fix the section correspondence, so alignment
+    /// applies only without them.
+    pub fn loft_with_guides<'a>(
+        &'a self,
+        plane: Plane3,
+        sections: impl IntoIterator<Item = (Plane3, &'a Profile)>,
+        align_sections: bool,
+        guides: &[crate::Wire3],
+    ) -> KernelResult<Compound> {
         let sections = std::iter::once((plane, self))
             .chain(sections)
             .collect::<Vec<_>>();
-        crate::revolve_loft::loft(&sections, align_sections)
+        crate::revolve_loft::loft(&sections, align_sections, guides)
     }
 }
 

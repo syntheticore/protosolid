@@ -5,6 +5,7 @@ use super::sew::{cap, publish_with_roles, BrepPatch, BrepPatchLoop, BrepPatchSeg
 use super::*;
 use crate::{Point2, Point3, Vec2, Vec3};
 use cgmath::prelude::*;
+use cgmath::Vector4;
 
 fn range(a: f64, b: f64) -> KernelResult<ParameterRange> {
     ParameterRange::new(a, b)
@@ -418,12 +419,7 @@ fn compatible_sections(sections: &mut [Vec<SectionCurve>]) -> KernelResult<()> {
         let subdivisions = count / section.len();
         let mut result = Vec::new();
         for curve in section.iter() {
-            let mut controls = curve
-                .points
-                .iter()
-                .zip(&curve.weights)
-                .map(|(p, w)| Vec3::new(p.x * w, p.y * w, *w))
-                .collect::<Vec<_>>();
+            let mut controls = homogeneous(curve);
             while controls.len() <= degree {
                 let n = controls.len();
                 let mut elevated = vec![controls[0]];
@@ -553,16 +549,370 @@ fn section_cap(
     }
     Ok(patch)
 }
-pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult<Compound> {
-    if sections.len() < 2 {
-        return Err(invalid("a loft needs at least two profiles"));
-    }
-    let tolerance = sections[0].1.tolerance();
-    let mut curves = sections
+fn homogeneous(curve: &SectionCurve) -> Vec<Vec3> {
+    curve
+        .points
         .iter()
-        .map(|(_, profile)| section_curves(profile))
-        .collect::<KernelResult<Vec<_>>>()?;
-    compatible_sections(&mut curves)?;
+        .zip(&curve.weights)
+        .map(|(p, w)| Vec3::new(p.x * w, p.y * w, *w))
+        .collect()
+}
+
+/// A loft guide with its wire parameter at every section.
+struct LoftGuide<'a> {
+    wire: &'a Wire3,
+    parameters: Vec<f64>,
+}
+
+/// Where `guide` crosses a section boundary: the guide's wire parameter and
+/// the boundary piece with its local parameter.
+fn guide_crossing(
+    guide: &Wire3,
+    plane: Plane3,
+    pieces: &[SectionCurve],
+    tolerance: ModelTolerance,
+) -> KernelResult<(f64, usize, f64)> {
+    let boundary = Wire2::new(
+        pieces
+            .iter()
+            .map(|c| TrimmedCurve2::new(c.curve2()?, range(0.0, 1.0)?))
+            .collect::<KernelResult<Vec<_>>>()?,
+        tolerance,
+    )?;
+    let height = |t: f64| {
+        guide
+            .point(t)
+            .map(|p| (p - plane.origin()).dot(plane.normal()))
+    };
+    let end = guide.parameter_range().end;
+    let samples = 64 * guide.segments().len();
+    let mut best: Option<(f64, f64, f64)> = None;
+    let mut previous = (0.0, height(0.0)?);
+    for i in 1..=samples {
+        let t = end * i as f64 / samples as f64;
+        let current = (t, height(t)?);
+        if previous.1 * current.1 <= 0.0 {
+            let (mut low, mut high) = (previous, current);
+            for _ in 0..64 {
+                let t = (low.0 + high.0) * 0.5;
+                let middle = (t, height(t)?);
+                if (middle.1 <= 0.0) == (low.1 <= 0.0) {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+            let root = (low.0 + high.0) * 0.5;
+            let (position, _, distance) =
+                boundary.closest_point(plane.coordinates(guide.point(root)?)?)?;
+            if best.is_none_or(|(_, _, d)| distance < d) {
+                best = Some((root, position, distance));
+            }
+        }
+        previous = current;
+    }
+    match best {
+        Some((root, position, distance)) if distance <= tolerance.linear => {
+            let (index, local) = boundary.locate(position);
+            Ok((root, index, local))
+        }
+        _ => Err(invalid("a loft guide must cross every section on its boundary")),
+    }
+}
+
+/// Split section pieces at `cuts` (piece index, local parameter) and return
+/// the index of the piece starting at each cut.
+fn split_section(
+    pieces: &[SectionCurve],
+    cuts: &[(usize, f64)],
+    tolerance: ModelTolerance,
+) -> (Vec<SectionCurve>, Vec<usize>) {
+    let cuts = cuts
+        .iter()
+        .map(|&(index, t)| {
+            if t >= 1.0 - tolerance.parameter {
+                ((index + 1) % pieces.len(), 0.0)
+            } else if t <= tolerance.parameter {
+                (index, 0.0)
+            } else {
+                (index, t)
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut result = Vec::new();
+    let mut splits = Vec::new();
+    for (index, piece) in pieces.iter().enumerate() {
+        let mut ts = cuts
+            .iter()
+            .filter(|(i, t)| *i == index && *t > 0.0)
+            .map(|(_, t)| *t)
+            .collect::<Vec<_>>();
+        ts.sort_by(f64::total_cmp);
+        ts.dedup_by(|a, b| *a - *b <= tolerance.parameter);
+        let mut controls = homogeneous(piece);
+        let mut previous = 0.0;
+        splits.push((result.len(), ts.clone()));
+        for t in ts {
+            let (first, rest) = de_casteljau_split(&controls, (t - previous) / (1.0 - previous));
+            result.push(section_from_controls(first, piece.source));
+            controls = rest;
+            previous = t;
+        }
+        result.push(section_from_controls(controls, piece.source));
+    }
+    let starts = cuts
+        .iter()
+        .map(|&(index, t)| {
+            let (base, ts) = &splits[index];
+            if t == 0.0 {
+                *base
+            } else {
+                base + 1 + ts.iter().position(|s| (s - t).abs() <= tolerance.parameter).unwrap()
+            }
+        })
+        .collect();
+    (result, starts)
+}
+
+/// Make sections correspond through their guide crossings. Every section is
+/// split where the guides cross it and starts at the first guide; the pieces
+/// between consecutive guides are made compatible region by region. Returns
+/// the guides in boundary order and the piece count of every region.
+fn guided_sections<'a>(
+    curves: &mut [Vec<SectionCurve>],
+    sections: &[(Plane3, &Profile)],
+    guides: &'a [Wire3],
+    tolerance: ModelTolerance,
+) -> KernelResult<(Vec<LoftGuide<'a>>, Vec<usize>)> {
+    let mut reversed = false;
+    let mut order = Vec::new();
+    let mut parameters = vec![Vec::new(); guides.len()];
+    let mut bounds = Vec::new();
+    for (i, (plane, _)) in sections.iter().enumerate() {
+        // Outer wires run counter-clockwise about their own plane normal.
+        if i > 0 && plane.normal().dot(sections[i - 1].0.normal()) < 0.0 {
+            reversed = !reversed;
+        }
+        if reversed {
+            curves[i] = curves[i].iter().rev().map(SectionCurve::reversed).collect();
+        }
+        let crossings = guides
+            .iter()
+            .map(|guide| guide_crossing(guide, *plane, &curves[i], tolerance))
+            .collect::<KernelResult<Vec<_>>>()?;
+        let cuts = crossings.iter().map(|c| (c.1, c.2)).collect::<Vec<_>>();
+        let (pieces, starts) = split_section(&curves[i], &cuts, tolerance);
+        let mut along = (0..guides.len()).collect::<Vec<_>>();
+        along.sort_by_key(|g| starts[*g]);
+        if along.windows(2).any(|w| starts[w[0]] == starts[w[1]]) {
+            return Err(invalid("loft guides must cross each section at distinct points"));
+        }
+        if i == 0 {
+            order = along;
+        } else {
+            let first = along.iter().position(|g| *g == order[0]).unwrap();
+            along.rotate_left(first);
+            if along != order {
+                return Err(invalid("loft guides must cross all sections in the same order"));
+            }
+        }
+        let count = pieces.len();
+        let first = starts[order[0]];
+        curves[i] = pieces[first..].iter().chain(&pieces[..first]).cloned().collect();
+        bounds.push(
+            order
+                .iter()
+                .map(|g| (starts[*g] + count - first) % count)
+                .chain([count])
+                .collect::<Vec<_>>(),
+        );
+        for (guide, crossing) in crossings.iter().enumerate() {
+            parameters[guide].push(crossing.0);
+        }
+    }
+    if parameters.iter().any(|p| {
+        let rising = p[1] > p[0];
+        p.windows(2).any(|w| (w[1] > w[0]) != rising || w[1] == w[0])
+    }) {
+        return Err(invalid("a loft guide must pass the sections in order"));
+    }
+    let mut regions = Vec::new();
+    let mut joined = vec![Vec::new(); curves.len()];
+    for region in 0..order.len() {
+        let mut pieces = curves
+            .iter()
+            .zip(&bounds)
+            .map(|(section, bounds)| section[bounds[region]..bounds[region + 1]].to_vec())
+            .collect::<Vec<_>>();
+        compatible_sections(&mut pieces)?;
+        regions.push(pieces[0].len());
+        for (section, pieces) in joined.iter_mut().zip(pieces) {
+            section.extend(pieces);
+        }
+    }
+    for (section, joined) in curves.iter_mut().zip(joined) {
+        *section = joined;
+    }
+    let guides = order
+        .iter()
+        .map(|g| LoftGuide {
+            wire: &guides[*g],
+            parameters: std::mem::take(&mut parameters[*g]),
+        })
+        .collect();
+    Ok((guides, regions))
+}
+
+/// Monotone cubic Hermite (Fritsch–Butland) through strictly monotone data.
+fn monotone_cubic(xs: &[f64], ys: &[f64], x: f64) -> f64 {
+    let n = xs.len();
+    let secant = |k: usize| (ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k]);
+    let slope = |k: usize| {
+        if k == 0 {
+            secant(0)
+        } else if k == n - 1 {
+            secant(n - 2)
+        } else {
+            let (a, b) = (secant(k - 1), secant(k));
+            2.0 * a * b / (a + b)
+        }
+    };
+    let k = xs[1..n - 1].iter().take_while(|xk| x > **xk).count();
+    let h = xs[k + 1] - xs[k];
+    let s = (x - xs[k]) / h;
+    let (s2, s3) = (s * s, s * s * s);
+    ys[k] * (2.0 * s3 - 3.0 * s2 + 1.0)
+        + slope(k) * h * (s3 - 2.0 * s2 + s)
+        + ys[k + 1] * (3.0 * s2 - 2.0 * s3)
+        + slope(k + 1) * h * (s3 - s2)
+}
+
+fn evaluate_column(degree: usize, knots: &[f64], column: &[Vector4<f64>], v: f64) -> Vector4<f64> {
+    let (first, values) = super::geometry::basis_values(degree, knots, column.len(), v);
+    values
+        .iter()
+        .enumerate()
+        .fold(Vector4::zero(), |sum, (i, b)| sum + column[first + i] * *b)
+}
+
+/// Bend the side patches onto the guides. Each control column moves by the
+/// guide deviations of its region, blended linearly between the region's
+/// bounding guides, and is refit on a denser common basis in v that still
+/// passes through every section exactly.
+fn fit_guides(
+    columns: &mut [Vec<Vec<Vector4<f64>>>],
+    basis: &mut (usize, Vec<f64>),
+    guides: &[LoftGuide],
+    regions: &[usize],
+    tolerance: ModelTolerance,
+) -> KernelResult<()> {
+    let spans = guides[0].parameters.len() - 1;
+    let section_parameters = (0..=spans).map(|i| i as f64 / spans as f64).collect::<Vec<_>>();
+    let (degree, knots) = basis.clone();
+    let cartesian = |h: Vector4<f64>| h.truncate() / h.w;
+    let starts = regions
+        .iter()
+        .scan(0, |start, size| {
+            let current = *start;
+            *start += size;
+            Some(current)
+        })
+        .collect::<Vec<_>>();
+    let deviation = |guide: usize, v: f64| -> KernelResult<Vec3> {
+        let target = guides[guide].wire.point(monotone_cubic(
+            &section_parameters,
+            &guides[guide].parameters,
+            v,
+        ))?;
+        Ok(target.to_vec() - cartesian(evaluate_column(degree, &knots, &columns[starts[guide]][0], v)))
+    };
+    let mut per_span = 8;
+    let (parameters, deviations) = loop {
+        let parameters = (0..=spans * per_span)
+            .map(|k| k as f64 / (spans * per_span) as f64)
+            .collect::<Vec<_>>();
+        let deviations = (0..guides.len())
+            .map(|guide| {
+                parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(k, v)| {
+                        if k % per_span == 0 {
+                            Ok(Vec3::zero())
+                        } else {
+                            deviation(guide, *v)
+                        }
+                    })
+                    .collect::<KernelResult<Vec<_>>>()
+            })
+            .collect::<KernelResult<Vec<_>>>()?;
+        if per_span >= 128 {
+            break (parameters, deviations);
+        }
+        let interpolation = super::linalg::Interpolation::new(&parameters)?;
+        let mut error: f64 = 0.0;
+        for (guide, deviations) in deviations.iter().enumerate() {
+            let column = &columns[starts[guide]][0];
+            let samples = parameters
+                .iter()
+                .zip(deviations)
+                .map(|(v, d)| {
+                    let h = evaluate_column(degree, &knots, column, *v);
+                    ((cartesian(h) + d) * h.w).extend(h.w)
+                })
+                .collect::<Vec<_>>();
+            let fitted = interpolation.solve(&samples);
+            for pair in parameters.windows(2) {
+                let v = (pair[0] + pair[1]) * 0.5;
+                let fit = cartesian(evaluate_column(
+                    interpolation.degree,
+                    &interpolation.knots,
+                    &fitted,
+                    v,
+                ));
+                let original = cartesian(evaluate_column(degree, &knots, column, v));
+                error = error.max((fit - original - deviation(guide, v)?).magnitude());
+            }
+        }
+        if error <= tolerance.linear {
+            break (parameters, deviations);
+        }
+        per_span *= 2;
+    };
+    let interpolation = super::linalg::Interpolation::new(&parameters)?;
+    let mut patch = 0;
+    for (region, size) in regions.iter().enumerate() {
+        let (left, right) = (&deviations[region], &deviations[(region + 1) % guides.len()]);
+        for offset in 0..*size {
+            let order = columns[patch].len() - 1;
+            for (j, column) in columns[patch].iter_mut().enumerate() {
+                let s = (offset as f64 + j as f64 / order as f64) / *size as f64;
+                let samples = parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(k, v)| {
+                        let h = evaluate_column(degree, &knots, column, *v);
+                        let moved = cartesian(h) + left[k] * (1.0 - s) + right[k] * s;
+                        (moved * h.w).extend(h.w)
+                    })
+                    .collect::<Vec<_>>();
+                *column = interpolation.solve(&samples);
+            }
+            patch += 1;
+        }
+    }
+    *basis = (interpolation.degree, interpolation.knots);
+    Ok(())
+}
+
+/// Unguided correspondence: compatible pieces, aligned by vertex position
+/// unless `align` is off.
+fn unguided_sections(
+    curves: &mut [Vec<SectionCurve>],
+    sections: &[(Plane3, &Profile)],
+    align: bool,
+) -> KernelResult<()> {
+    compatible_sections(curves)?;
     let count = curves[0].len();
     for i in 1..curves.len() {
         if align {
@@ -619,7 +969,7 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
         .iter()
         .all(|(_, profile)| profile.outer().segments().len() == 1)
     {
-        for section in &mut curves {
+        for section in curves.iter_mut() {
             let degree = section[0].degree;
             let count = section.len();
             let mut joined = SectionCurve {
@@ -640,6 +990,28 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             *section = vec![joined];
         }
     }
+    Ok(())
+}
+
+pub(super) fn loft(
+    sections: &[(Plane3, &Profile)],
+    align: bool,
+    guides: &[Wire3],
+) -> KernelResult<Compound> {
+    if sections.len() < 2 {
+        return Err(invalid("a loft needs at least two profiles"));
+    }
+    let tolerance = sections[0].1.tolerance();
+    let mut curves = sections
+        .iter()
+        .map(|(_, profile)| section_curves(profile))
+        .collect::<KernelResult<Vec<_>>>()?;
+    let guided = if guides.is_empty() {
+        unguided_sections(&mut curves, sections, align)?;
+        None
+    } else {
+        Some(guided_sections(&mut curves, sections, guides, tolerance)?)
+    };
     // One common cubic basis through every section, so the surface passes
     // through each section exactly.
     let interpolation = super::linalg::Interpolation::new(
@@ -647,7 +1019,41 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             .map(|i| i as f64 / (sections.len() - 1) as f64)
             .collect::<Vec<_>>(),
     )?;
-    let (v_degree, v_knots) = (interpolation.degree, &interpolation.knots);
+    let mut columns = Vec::new();
+    for index in 0..curves[0].len() {
+        let first = &curves[0][index];
+        if curves.iter().any(|section| {
+            section[index].degree != first.degree
+                || section[index].knots != first.knots
+                || section[index].points.len() != first.points.len()
+        }) {
+            return Err(unsupported(
+                "loft section curves require compatible spline degrees and knots",
+            ));
+        }
+        columns.push(
+            (0..first.points.len())
+                .map(|u| {
+                    interpolation.solve(
+                        &curves
+                            .iter()
+                            .zip(sections)
+                            .map(|(section, (plane, _))| {
+                                let c = &section[index];
+                                (plane.point_at(c.points[u]).to_vec() * c.weights[u])
+                                    .extend(c.weights[u])
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+    let mut basis = (interpolation.degree, interpolation.knots.clone());
+    if let Some((guides, regions)) = &guided {
+        fit_guides(&mut columns, &mut basis, guides, regions, tolerance)?;
+    }
+    let (v_degree, v_knots) = (basis.0, &basis.1);
     let forward =
         (sections[1].0.origin() - sections[0].0.origin()).dot(sections[0].0.normal()) > 0.0;
     let mut patches = vec![section_cap(&curves[0], sections[0].0, forward, tolerance)?];
@@ -663,34 +1069,17 @@ pub(super) fn loft(sections: &[(Plane3, &Profile)], align: bool) -> KernelResult
             .collect::<KernelResult<Vec<_>>>()?,
         tolerance,
     )?
-    .is_counter_clockwise();
+    .is_counter_clockwise()?;
     if !signed_area {
         end_cap.orientation = end_cap.orientation.reversed();
     }
     patches.push(end_cap);
-    for index in 0..curves[0].len() {
+    for (index, column) in columns.iter().enumerate() {
         let first = &curves[0][index];
-        if curves.iter().any(|section| {
-            section[index].degree != first.degree
-                || section[index].knots != first.knots
-                || section[index].points.len() != first.points.len()
-        }) {
-            return Err(unsupported(
-                "loft section curves require compatible spline degrees and knots",
-            ));
-        }
-        let mut points = vec![Vec::new(); sections.len()];
-        let mut weights = vec![Vec::new(); sections.len()];
-        for u in 0..first.points.len() {
-            let column = curves
-                .iter()
-                .zip(sections)
-                .map(|(section, (plane, _))| {
-                    let c = &section[index];
-                    (plane.point_at(c.points[u]).to_vec() * c.weights[u]).extend(c.weights[u])
-                })
-                .collect::<Vec<_>>();
-            for (row, control) in interpolation.solve(&column).into_iter().enumerate() {
+        let mut points = vec![Vec::new(); column[0].len()];
+        let mut weights = vec![Vec::new(); column[0].len()];
+        for controls in column {
+            for (row, control) in controls.iter().enumerate() {
                 if control.w <= 0.0 {
                     return Err(invalid(
                         "loft interpolation produced nonpositive rational weights",

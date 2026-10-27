@@ -92,13 +92,12 @@ export function buildOffsetCurves(groups, distance) {
   if(!Number.isFinite(distance) || Math.abs(distance) <= EPSILON) fail('Offset must be nonzero')
   const paths = groups.map(entries => {
     const curves = entries.map(geometry)
-    const closed = entries.closed ?? entries[0].curve.sample(entries[0].start).almost(entries.at(-1).curve.sample(entries.at(-1).end))
-    const path = sx.Path2.new(curves, closed, modelTolerance)
-    const joins = curves.slice(0, closed ? curves.length : -1).map((curve, index) =>
+    const wire = sx.Wire2.new(curves, modelTolerance)
+    const joins = curves.slice(0, wire.isClosed() ? curves.length : -1).map((curve, index) =>
       curve.curve() instanceof sx.Line2 && curves[(index + 1) % curves.length].curve() instanceof sx.Line2 ? 'miter' : 'round')
-    const result = path.offset(distance, { join: joins, miterLimit: Infinity })
-    result.path.validateSimple()
-    return result.path
+    const result = wire.offset(distance, { join: joins, miterLimit: Infinity })
+    result.wire.validateSimple()
+    return result.wire
   })
   for(let i = 0; i < paths.length; i++) for(const other of paths.slice(0, i)) {
     for(const curve of paths[i].segments()) for(const boundary of other.segments()) {

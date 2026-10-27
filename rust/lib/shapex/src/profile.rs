@@ -28,20 +28,28 @@ impl Profile {
     ) -> KernelResult<Self> {
         tolerance.validate()?;
         let holes = holes.into_iter().collect::<Vec<_>>();
-        let generators = std::iter::once(&outer).chain(&holes).enumerate().map(|(ring, wire)| {
+        // Profile boundaries must be simple closed loops enclosing an area
+        let areas = std::iter::once(&outer)
+            .chain(&holes)
+            .map(Wire2::validate_boundary)
+            .collect::<KernelResult<Vec<_>>>()?;
+        let generators = areas.iter().enumerate().map(|(ring, area)| {
+            let wire = if ring == 0 { &outer } else { &holes[ring - 1] };
             let mut sources = (0..wire.segments().len()).collect::<Vec<_>>();
-            if wire.is_counter_clockwise() != (ring == 0) { sources.reverse(); }
+            if (*area > 0.0) != (ring == 0) { sources.reverse(); }
             sources
         }).collect();
-        let outer = if outer.is_counter_clockwise() {
+        let outer_area = areas[0].abs();
+        let outer = if areas[0] > 0.0 {
             outer
         } else {
             outer.reversed()
         };
         let holes = holes
             .into_iter()
-            .map(|hole| {
-                if hole.is_counter_clockwise() {
+            .zip(&areas[1..])
+            .map(|(hole, area)| {
+                if *area > 0.0 {
                     hole.reversed()
                 } else {
                     hole
@@ -79,7 +87,7 @@ impl Profile {
                 }
             }
         }
-        let area = outer.area() - holes.iter().map(Wire2::area).sum::<f64>();
+        let area = outer_area - areas[1..].iter().map(|area| area.abs()).sum::<f64>();
         if area <= tolerance.linear.powi(2) {
             return Err(invalid("profile area does not exceed model tolerance"));
         }
@@ -373,26 +381,25 @@ pub(crate) fn profiles_from_fragments(
             end = next.end()?;
             loop_segments.push(next);
         }
-        wires.push(Wire2::new(
-            merge_adjacent_fragments(loop_segments, tolerance)?,
-            tolerance,
-        )?);
+        let wire = Wire2::new(merge_adjacent_fragments(loop_segments, tolerance)?, tolerance)?;
+        let area = wire.validate_boundary()?;
+        wires.push((wire, area));
     }
     let mut outers = wires
         .iter()
-        .filter(|wire| wire.is_counter_clockwise())
+        .filter(|(_, area)| *area > 0.0)
         .cloned()
         .map(|wire| (wire, Vec::new()))
-        .collect::<Vec<(Wire2, Vec<Wire2>)>>();
-    for hole in wires
+        .collect::<Vec<((Wire2, f64), Vec<Wire2>)>>();
+    for (hole, _) in wires
         .into_iter()
-        .filter(|wire| !wire.is_counter_clockwise())
+        .filter(|(_, area)| *area <= 0.0)
     {
         let point = hole.segments()[0].start()?;
         let mut owner: Option<usize> = None;
-        for (index, (outer, _)) in outers.iter().enumerate() {
+        for (index, ((outer, area), _)) in outers.iter().enumerate() {
             if wire_contains_point(outer, point, tolerance)?
-                && owner.is_none_or(|current| outer.area() < outers[current].0.area())
+                && owner.is_none_or(|current| *area < outers[current].0 .1)
             {
                 owner = Some(index);
             }
@@ -404,7 +411,7 @@ pub(crate) fn profiles_from_fragments(
     }
     outers
         .into_iter()
-        .map(|(outer, holes)| Profile::new(outer, holes, tolerance))
+        .map(|((outer, _), holes)| Profile::new(outer, holes, tolerance))
         .collect()
 }
 

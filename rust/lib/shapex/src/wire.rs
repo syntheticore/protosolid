@@ -1,12 +1,12 @@
 use cgmath::prelude::*;
 
-use crate::{Point2, Vec2, Vec3};
+use crate::{Point2, Point3, Vec2, Vec3};
 
 use super::geometry::de_casteljau_split;
 use super::polygon::on_segment;
 use super::{
-    invalid, Circle2, Curve2, DiagnosticKind, KernelError, KernelResult, Line2, ModelTolerance,
-    ParameterRange,
+    invalid, Circle2, Curve2, Curve3, DiagnosticKind, KernelError, KernelResult, Line2,
+    ModelTolerance, ParameterRange, Plane3,
 };
 
 /// A finite, oriented use of an exact two-dimensional basis curve.
@@ -135,11 +135,417 @@ impl TrimmedCurve2 {
     }
 }
 
-/// A validated closed sequence of oriented 2D curve uses.
+/// A finite, oriented use of an exact spatial basis curve.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Wire2 {
-    segments: Vec<TrimmedCurve2>,
-    signed_area: f64,
+pub struct TrimmedCurve3 {
+    curve: Curve3,
+    range: ParameterRange,
+}
+
+impl TrimmedCurve3 {
+    pub fn new(curve: impl Into<Curve3>, range: ParameterRange) -> KernelResult<Self> {
+        let curve = curve.into();
+        if !curve
+            .domain()
+            .contains_range(range, ModelTolerance::default().parameter)
+        {
+            return Err(invalid("trim range lies outside the curve domain"));
+        }
+        Ok(Self { curve, range })
+    }
+    pub fn curve(&self) -> &Curve3 {
+        &self.curve
+    }
+    pub fn range(&self) -> ParameterRange {
+        self.range
+    }
+    pub fn start(&self) -> KernelResult<Point3> {
+        Ok(self.curve.evaluate(self.range.start)?.point)
+    }
+    pub fn end(&self) -> KernelResult<Point3> {
+        Ok(self.curve.evaluate(self.range.end)?.point)
+    }
+    pub fn reversed(&self) -> Self {
+        Self {
+            curve: self.curve.clone(),
+            range: self.range.reversed(),
+        }
+    }
+}
+
+/// A trimmed curve use that wires chain together: [`TrimmedCurve2`] in a
+/// plane or [`TrimmedCurve3`] in space.
+pub trait WireSegment: Clone + std::fmt::Debug + PartialEq {
+    type Point: EuclideanSpace<Scalar = f64, Diff = Self::Vector> + MetricSpace<Metric = f64>;
+    type Vector: InnerSpace<Scalar = f64>;
+    fn range(&self) -> ParameterRange;
+    /// The same basis curve trimmed to another range.
+    fn retrimmed(&self, range: ParameterRange) -> KernelResult<Self>;
+    fn reversed(&self) -> Self;
+    /// Point and derivative with respect to the basis parameter.
+    fn basis_first_order(&self, parameter: f64) -> KernelResult<(Self::Point, Self::Vector)>;
+    /// Basis parameters inside the trim where smoothness may drop.
+    fn basis_breakpoints(&self) -> Vec<f64>;
+}
+
+impl WireSegment for TrimmedCurve2 {
+    type Point = Point2;
+    type Vector = Vec2;
+    fn range(&self) -> ParameterRange {
+        self.range
+    }
+    fn retrimmed(&self, range: ParameterRange) -> KernelResult<Self> {
+        Self::new(self.curve.clone(), range)
+    }
+    fn reversed(&self) -> Self {
+        TrimmedCurve2::reversed(self)
+    }
+    fn basis_first_order(&self, parameter: f64) -> KernelResult<(Point2, Vec2)> {
+        self.curve.first_order(parameter)
+    }
+    fn basis_breakpoints(&self) -> Vec<f64> {
+        self.curve.integration_breakpoints(self.range)
+    }
+}
+
+impl WireSegment for TrimmedCurve3 {
+    type Point = Point3;
+    type Vector = Vec3;
+    fn range(&self) -> ParameterRange {
+        self.range
+    }
+    fn retrimmed(&self, range: ParameterRange) -> KernelResult<Self> {
+        Self::new(self.curve.clone(), range)
+    }
+    fn reversed(&self) -> Self {
+        TrimmedCurve3::reversed(self)
+    }
+    fn basis_first_order(&self, parameter: f64) -> KernelResult<(Point3, Vec3)> {
+        self.curve.first_order(parameter)
+    }
+    fn basis_breakpoints(&self) -> Vec<f64> {
+        self.curve.integration_breakpoints(self.range)
+    }
+}
+
+/// Point and travel derivative at a segment's start or end.
+fn segment_end<S: WireSegment>(segment: &S, last: bool) -> KernelResult<(S::Point, S::Vector)> {
+    let range = segment.range();
+    let (point, derivative) =
+        segment.basis_first_order(if last { range.end } else { range.start })?;
+    Ok((point, derivative * range.span().signum()))
+}
+
+/// Connected oriented curve uses traversed in order, open or closed: the
+/// planar [`Wire2`] or the spatial [`Wire3`]. Each segment starts where the
+/// previous one ends, and a closed wire's last segment returns to its start.
+/// A wire makes no claim about simplicity, tangency or enclosed area; profiles
+/// and the operations consuming a wire require what they need.
+///
+/// The wire parameter runs from zero over the segments in travel order, each
+/// contributing the length of its own parameter range, so evaluation stays
+/// exact. Joints are breakpoints where the parameter speed, and at corners
+/// the direction, may change.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Wire<S> {
+    segments: Vec<S>,
+    closed: bool,
+    tolerance: ModelTolerance,
+}
+
+pub type Wire2 = Wire<TrimmedCurve2>;
+pub type Wire3 = Wire<TrimmedCurve3>;
+
+impl<S: WireSegment> Wire<S> {
+    /// Segments in travel order, each starting where the previous one ends.
+    /// The wire is closed when the last segment returns to the first.
+    pub fn new(segments: impl IntoIterator<Item = S>, tolerance: ModelTolerance) -> KernelResult<Self> {
+        tolerance.validate()?;
+        let segments: Vec<_> = segments.into_iter().collect();
+        if segments.is_empty() {
+            return Err(invalid("a wire needs at least one curve segment"));
+        }
+        let mut wire = Self { segments, closed: false, tolerance };
+        for index in 1..wire.segments.len() {
+            if !wire.touch(segment_end(&wire.segments[index - 1], true)?.0, segment_end(&wire.segments[index], false)?.0) {
+                return Err(invalid("wire curve segments must connect end-to-start"));
+            }
+        }
+        wire.closed = wire.ends_meet()?;
+        Ok(wire)
+    }
+
+    /// Chain segments given in any order and direction into one wire. Gaps
+    /// and branches are rejected.
+    pub fn connect(segments: impl IntoIterator<Item = S>, tolerance: ModelTolerance) -> KernelResult<Self> {
+        tolerance.validate()?;
+        let mut remaining = segments.into_iter().collect::<Vec<_>>();
+        if remaining.is_empty() {
+            return Err(invalid("a wire needs at least one curve segment"));
+        }
+        let mut wire = Self { segments: vec![remaining.remove(0)], closed: false, tolerance };
+        while !remaining.is_empty() {
+            if wire.ends_meet()? {
+                return Err(invalid("wire segments must not branch"));
+            }
+            let mut attached = false;
+            for back in [true, false] {
+                let mut found = wire.continuations(&remaining, back, false)?;
+                if found.len() > 1 {
+                    return Err(invalid("wire segments must not branch"));
+                }
+                if let Some((index, segment)) = found.pop() {
+                    remaining.swap_remove(index);
+                    wire.attach(segment, back);
+                    attached = true;
+                    break;
+                }
+            }
+            if !attached {
+                return Err(invalid("wire segments must form one connected chain"));
+            }
+        }
+        wire.closed = wire.ends_meet()?;
+        Ok(wire)
+    }
+
+    /// Continue both open ends through candidates touching them, stopping
+    /// where the continuation is missing or ambiguous. With `tangent_only`,
+    /// only candidates that keep the wire's tangent qualify.
+    pub fn extended(mut self, candidates: &[S], tangent_only: bool) -> KernelResult<Self> {
+        let mut remaining = candidates.to_vec();
+        for back in [true, false] {
+            while !self.closed {
+                let mut found = self.continuations(&remaining, back, tangent_only)?;
+                if found.len() != 1 {
+                    break;
+                }
+                let (index, segment) = found.pop().unwrap();
+                remaining.swap_remove(index);
+                self.attach(segment, back);
+                self.closed = self.ends_meet()?;
+            }
+        }
+        Ok(self)
+    }
+
+    pub fn segments(&self) -> &[S] {
+        &self.segments
+    }
+    pub fn tolerance(&self) -> ModelTolerance {
+        self.tolerance
+    }
+    pub fn is_closed(&self) -> bool {
+        self.closed
+    }
+    pub fn reversed(&self) -> Self {
+        Self {
+            segments: self.segments.iter().rev().map(S::reversed).collect(),
+            closed: self.closed,
+            tolerance: self.tolerance,
+        }
+    }
+    /// Point and unit travel direction where the wire starts.
+    pub fn start(&self) -> KernelResult<(S::Point, S::Vector)> {
+        let (point, derivative) = segment_end(&self.segments[0], false)?;
+        Ok((point, derivative.normalize()))
+    }
+    /// Point and unit travel direction where the wire ends.
+    pub fn end(&self) -> KernelResult<(S::Point, S::Vector)> {
+        let (point, derivative) = segment_end(&self.segments[self.segments.len() - 1], true)?;
+        Ok((point, derivative.normalize()))
+    }
+    /// Whether the direction carries across every joint, including the seam
+    /// of a closed wire.
+    pub fn is_tangent_continuous(&self) -> KernelResult<bool> {
+        let count = self.segments.len();
+        for index in 1..count + usize::from(self.closed) {
+            let before = segment_end(&self.segments[index - 1], true)?.1;
+            let after = segment_end(&self.segments[index % count], false)?.1;
+            if !self.tangent(before, after) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// The wire parameter range, from zero to the summed segment spans.
+    pub fn parameter_range(&self) -> ParameterRange {
+        ParameterRange {
+            start: 0.0,
+            end: self.segments.iter().map(|segment| segment.range().span().abs()).sum(),
+        }
+    }
+    /// The segment holding a wire parameter and that segment's own parameter.
+    pub fn locate(&self, parameter: f64) -> (usize, f64) {
+        let mut start = 0.0;
+        for (index, segment) in self.segments.iter().enumerate() {
+            let span = segment.range().span();
+            if parameter <= start + span.abs() || index + 1 == self.segments.len() {
+                return (index, segment.range().start + (parameter - start) * span.signum());
+            }
+            start += span.abs();
+        }
+        unreachable!("a wire has at least one segment")
+    }
+    /// Point and derivative with respect to the wire parameter. At a joint
+    /// this is the segment ending there.
+    pub fn first_order(&self, parameter: f64) -> KernelResult<(S::Point, S::Vector)> {
+        let (index, local) = self.locate(parameter);
+        let segment = &self.segments[index];
+        let (point, derivative) = segment.basis_first_order(local)?;
+        Ok((point, derivative * segment.range().span().signum()))
+    }
+    pub fn point(&self, parameter: f64) -> KernelResult<S::Point> {
+        Ok(self.first_order(parameter)?.0)
+    }
+    /// Interior wire parameters where smoothness may drop: the joints and
+    /// the segments' own breakpoints.
+    pub fn breakpoints(&self) -> Vec<f64> {
+        let mut result = Vec::new();
+        let mut start = 0.0;
+        for (index, segment) in self.segments.iter().enumerate() {
+            let range = segment.range();
+            if index > 0 {
+                result.push(start);
+            }
+            result.extend(
+                segment
+                    .basis_breakpoints()
+                    .into_iter()
+                    .map(|parameter| start + (parameter - range.start) * range.span().signum()),
+            );
+            start += range.span().abs();
+        }
+        result.sort_by(f64::total_cmp);
+        result
+    }
+    /// Arc length between two wire parameters.
+    pub fn length_between(&self, from: f64, to: f64) -> KernelResult<f64> {
+        Ok(super::integration::adaptive_gauss_kronrod_partitioned(
+            from,
+            to,
+            |t| Ok([self.first_order(t)?.1.magnitude()]),
+            [self.tolerance.linear],
+            24,
+            "wire length integration did not converge",
+            &self.breakpoints(),
+        )?[0]
+            .abs())
+    }
+    pub fn length(&self) -> KernelResult<f64> {
+        self.length_between(0.0, self.parameter_range().end)
+    }
+    /// The wire parameter at an arc length from the start.
+    pub fn parameter_at_length(&self, length: f64) -> KernelResult<f64> {
+        let (mut low, mut high) = (0.0, self.parameter_range().end);
+        for _ in 0..64 {
+            let middle = (low + high) * 0.5;
+            if self.length_between(0.0, middle)? < length {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        Ok((low + high) * 0.5)
+    }
+    /// The wire parameter of the point nearest to `target`, that point and
+    /// its distance.
+    pub fn closest_point(&self, target: S::Point) -> KernelResult<(f64, S::Point, f64)> {
+        let distance = |parameter: f64| self.point(parameter).map(|point| point.distance(target));
+        let range = self.parameter_range();
+        let samples = 32 * self.segments.len();
+        let at = |i: usize| range.end * i as f64 / samples as f64;
+        let mut best = (0, f64::INFINITY);
+        for i in 0..=samples {
+            let value = distance(at(i))?;
+            if value < best.1 {
+                best = (i, value);
+            }
+        }
+        let (mut low, mut high) = (at(best.0.saturating_sub(1)), at((best.0 + 1).min(samples)));
+        for _ in 0..64 {
+            let third = (high - low) / 3.0;
+            if distance(low + third)? < distance(high - third)? {
+                high -= third;
+            } else {
+                low += third;
+            }
+        }
+        let parameter = (low + high) * 0.5;
+        let point = self.point(parameter)?;
+        Ok((parameter, point, point.distance(target)))
+    }
+    /// A closed wire reopened at a wire parameter, splitting the segment
+    /// there unless the parameter lies at a joint.
+    pub fn opened_at(&self, parameter: f64) -> KernelResult<Self> {
+        if !self.closed {
+            return Err(invalid("only a closed wire can be reopened"));
+        }
+        let (index, local) = self.locate(parameter);
+        let segment = &self.segments[index];
+        let range = segment.range();
+        let point = segment.basis_first_order(local)?.0;
+        let near = |end: f64| Ok::<_, KernelError>(self.touch(segment.basis_first_order(end)?.0, point));
+        let mut segments = self.segments.clone();
+        if near(range.start)? {
+            segments.rotate_left(index);
+        } else if near(range.end)? {
+            segments.rotate_left(index + 1);
+        } else {
+            segments[index] = segment.retrimmed(ParameterRange::new(local, range.end)?)?;
+            segments.insert(index, segment.retrimmed(ParameterRange::new(range.start, local)?)?);
+            segments.rotate_left(index + 1);
+        }
+        Ok(Self { segments, closed: true, tolerance: self.tolerance })
+    }
+
+    fn touch(&self, first: S::Point, second: S::Point) -> bool {
+        let scale = first.to_vec().magnitude().max(second.to_vec().magnitude());
+        first.distance(second) <= self.tolerance.linear_at_scale(scale)
+    }
+    fn tangent(&self, before: S::Vector, after: S::Vector) -> bool {
+        before.normalize().dot(after.normalize()) >= 1.0 - self.tolerance.angular * 16.0
+    }
+    fn ends_meet(&self) -> KernelResult<bool> {
+        Ok(self.touch(
+            segment_end(&self.segments[0], false)?.0,
+            segment_end(&self.segments[self.segments.len() - 1], true)?.0,
+        ))
+    }
+    /// Candidates touching the wire's end (`back`) or start, oriented to
+    /// continue it, with their index.
+    fn continuations(&self, candidates: &[S], back: bool, tangent_only: bool) -> KernelResult<Vec<(usize, S)>> {
+        let (point, direction) = if back {
+            segment_end(&self.segments[self.segments.len() - 1], true)?
+        } else {
+            segment_end(&self.segments[0], false)?
+        };
+        let mut found = Vec::new();
+        for (index, candidate) in candidates.iter().enumerate() {
+            // A continuation at the end starts there; one at the start ends there.
+            let segment = if self.touch(segment_end(candidate, !back)?.0, point) {
+                candidate.clone()
+            } else if self.touch(segment_end(candidate, back)?.0, point) {
+                candidate.reversed()
+            } else {
+                continue;
+            };
+            let joined = segment_end(&segment, !back)?.1;
+            let tangent = if back { self.tangent(direction, joined) } else { self.tangent(joined, direction) };
+            if !tangent_only || tangent {
+                found.push((index, segment));
+            }
+        }
+        Ok(found)
+    }
+    fn attach(&mut self, segment: S, back: bool) {
+        if back {
+            self.segments.push(segment);
+        } else {
+            self.segments.insert(0, segment);
+        }
+    }
 }
 
 impl Wire2 {
@@ -164,67 +570,54 @@ impl Wire2 {
             .collect::<KernelResult<Vec<_>>>()?;
         Self::new(segments, tolerance)
     }
-
-    pub fn new(
-        segments: impl IntoIterator<Item = TrimmedCurve2>,
-        tolerance: ModelTolerance,
-    ) -> KernelResult<Self> {
-        tolerance.validate()?;
-        let segments: Vec<_> = segments.into_iter().collect();
-        if segments.is_empty() {
-            return Err(invalid("a wire needs at least one curve segment"));
-        }
-        for index in 0..segments.len() {
-            let end = segments[index].end()?;
-            let next = segments[(index + 1) % segments.len()].start()?;
-            if end.distance(next)
-                > tolerance.linear_at_scale(end.to_vec().magnitude().max(next.to_vec().magnitude()))
-            {
-                return Err(invalid("wire curve segments must connect end-to-start"));
-            }
-        }
-        if segments.len() == 1 && !segments[0].is_closed(tolerance)? {
-            return Err(invalid(
-                "a one-segment wire must be a closed periodic curve",
-            ));
-        }
-        validate_no_self_intersection(&segments, tolerance)?;
-        let signed_area = segments
+    /// Oriented area, positive when the wire runs counter-clockwise. An open
+    /// wire is closed by the chord from its end back to its start. The wire
+    /// need not be simple: a segment traversed in both directions, such as a
+    /// bridge between two loops, contributes nothing, and a wire crossing
+    /// itself yields the winding-weighted area.
+    pub fn signed_area(&self) -> KernelResult<f64> {
+        let mut area = self
+            .segments
             .iter()
-            .map(|segment| segment.signed_area(tolerance))
-            .collect::<KernelResult<Vec<_>>>()?
-            .into_iter()
-            .sum::<f64>();
-        if signed_area.abs() <= tolerance.linear.powi(2) {
+            .map(|segment| segment.signed_area(self.tolerance))
+            .sum::<KernelResult<f64>>()?;
+        if !self.closed {
+            let start = self.segments[0].start()?;
+            let end = self.segments[self.segments.len() - 1].end()?;
+            area += (end.x * start.y - start.x * end.y) * 0.5;
+        }
+        Ok(area)
+    }
+    pub fn area(&self) -> KernelResult<f64> {
+        Ok(self.signed_area()?.abs())
+    }
+    pub fn is_counter_clockwise(&self) -> KernelResult<bool> {
+        Ok(self.signed_area()? > 0.0)
+    }
+    /// The wire placed into space on a plane, keeping each segment's parameter.
+    pub fn lifted(&self, plane: Plane3) -> KernelResult<Wire3> {
+        Wire3::new(
+            self.segments
+                .iter()
+                .map(|segment| {
+                    TrimmedCurve3::new(plane.lift_trimmed_curve(segment, self.tolerance)?, segment.range())
+                })
+                .collect::<KernelResult<Vec<_>>>()?,
+            self.tolerance,
+        )
+    }
+    /// Require a closed boundary loop without self-intersections that
+    /// encloses an area, as profiles do.
+    pub(crate) fn validate_boundary(&self) -> KernelResult<f64> {
+        if !self.closed {
+            return Err(invalid("a profile wire must be closed"));
+        }
+        validate_no_self_intersection(&self.segments, self.tolerance)?;
+        let signed_area = self.signed_area()?;
+        if signed_area.abs() <= self.tolerance.linear.powi(2) {
             return Err(invalid("wire must enclose an area larger than tolerance"));
         }
-        Ok(Self {
-            segments,
-            signed_area,
-        })
-    }
-    pub fn segments(&self) -> &[TrimmedCurve2] {
-        &self.segments
-    }
-    pub fn signed_area(&self) -> f64 {
-        self.signed_area
-    }
-    pub fn area(&self) -> f64 {
-        self.signed_area.abs()
-    }
-    pub fn is_counter_clockwise(&self) -> bool {
-        self.signed_area > 0.0
-    }
-    pub fn reversed(&self) -> Self {
-        Self {
-            segments: self
-                .segments
-                .iter()
-                .rev()
-                .map(TrimmedCurve2::reversed)
-                .collect(),
-            signed_area: -self.signed_area,
-        }
+        Ok(signed_area)
     }
 }
 
@@ -1571,7 +1964,7 @@ mod tests {
         let arc = TrimmedCurve2::new(curve, ParameterRange::new(0.0, 1.0 + 1e-9).unwrap()).unwrap();
         let chord = TrimmedCurve2::line(arc.end().unwrap(), arc.start().unwrap()).unwrap();
         let cap = Wire2::new([arc, chord], ModelTolerance::default()).unwrap();
-        assert!(cap.signed_area() > 0.0);
+        assert!(cap.signed_area().unwrap() > 0.0);
     }
 
     #[test]
@@ -1579,7 +1972,7 @@ mod tests {
         let t = ModelTolerance::default();
         let cap = Wire2::polygon([Point2::new(0.0, 0.0), Point2::new(0.014, 0.0),
             Point2::new(0.014, 2e-7), Point2::new(0.0, 2e-7)], t).unwrap();
-        assert!((cap.signed_area() - 2.8e-9).abs() < 1e-18);
+        assert!((cap.signed_area().unwrap() - 2.8e-9).abs() < 1e-18);
     }
 
     #[test]

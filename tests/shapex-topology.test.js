@@ -260,7 +260,7 @@ test(`loft, sweep, revolution and circular extrusion seed selectable constructio
     } else if(type == 'loft') {
       const other = rectangle(size, size, 'end')
       other.sketch.workplane.makeTranslation(0, 0, 10)
-      result = rectangle().loft('component', [other], true)
+      result = rectangle().loft('component', [other], true, [])
     } else if(type == 'sweep') {
       const rail = new Line(new THREE.Vector3(), new THREE.Vector3(0, 20, 0))
       rail.id = 'rail'

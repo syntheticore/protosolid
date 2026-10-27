@@ -11,15 +11,14 @@ use shapex::{
     Axis3, BooleanKind, Circle2, Curve2, Curve3, Line2, NurbsCurve2, Origin, ParameterRange,
     RigidTransform3, Surface3, SurfaceChart,
     ChamferMode, Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
-    ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, RailSegment, Resolution, ShellJoin, Solid, SplitKeep,
-    SweepRail,
+    ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, ShellJoin, Solid, SplitKeep,
     StepAssembly, StepLengthUnit, StepOccurrence, StepProduct,
-    TessellationOptions, TriangleMesh, TrimmedCurve2, Vec2, Vec3, VertexHandle, Wire2,
+    TessellationOptions, TriangleMesh, TrimmedCurve2, TrimmedCurve3, Vec2, Vec3, VertexHandle, Wire2, Wire3,
 };
 use wasm_bindgen::prelude::*;
 
 mod planar;
-use planar::NativeCurve3;
+use planar::{NativeCurve3, NativeWire3, NativeWire3List};
 
 fn js_error(error: impl std::fmt::Display + 'static) -> JsValue {
     if let Some(error) = (&error as &dyn std::any::Any).downcast_ref::<shapex::KernelError>() {
@@ -260,14 +259,12 @@ pub fn profile_area(description: JsValue) -> Result<f64, JsValue> {
 #[wasm_bindgen(js_name = wireProperties)]
 pub fn wire_properties(description: JsValue) -> Result<Float64Array, JsValue> {
     let wire = from_js::<WireDto>(description)?.build()?;
+    let signed_area = wire.signed_area().map_err(js_error)?;
     Ok(f64_array(&[
-        wire.signed_area(),
-        wire.area(),
-        if wire.is_counter_clockwise() {
-            1.0
-        } else {
-            0.0
-        },
+        signed_area,
+        signed_area.abs(),
+        if signed_area > 0.0 { 1.0 } else { 0.0 },
+        if wire.is_closed() { 1.0 } else { 0.0 },
     ]))
 }
 
@@ -362,66 +359,26 @@ pub fn revolve_between_faces(
         .map_err(js_error)
 }
 
-/// Sweep along a sketch rail, given in its plane's coordinates.
+/// Sweep along a spatial rail wire.
 #[wasm_bindgen(js_name = sweep)]
 pub fn sweep(
     description: JsValue,
     plane_values: &[f64],
-    rail_description: JsValue,
-    rail_plane_values: &[f64],
-) -> Result<NativeCompound, JsValue> {
-    let profile = profile(description)?;
-    let tolerance = profile.tolerance();
-    let rail = from_js::<TrimmedCurveDto>(rail_description)?.build()?;
-    let curve = plane(rail_plane_values, tolerance)?
-        .lift_curve(rail.curve(), tolerance)
-        .map_err(js_error)?;
-    profile
-        .sweep(plane(plane_values, tolerance)?, &curve, rail.range())
-        .map(|inner| NativeCompound { inner })
-        .map_err(js_error)
-}
-
-/// Sweep along a model edge.
-#[wasm_bindgen(js_name = sweepAlongEdge)]
-pub fn sweep_along_edge(
-    description: JsValue,
-    plane_values: &[f64],
-    rail: &NativeEdge,
+    rail: &NativeWire3,
 ) -> Result<NativeCompound, JsValue> {
     let profile = profile(description)?;
     profile
-        .sweep(
-            plane(plane_values, profile.tolerance())?,
-            rail.inner.curve(),
-            rail.inner.range().map_err(js_error)?,
-        )
-        .map(|inner| NativeCompound { inner })
-        .map_err(js_error)
-}
-
-/// Sweep along connected spatial rail segments, extended through any
-/// tangent-continuous candidates.
-#[wasm_bindgen(js_name = sweepAlongRail)]
-pub fn sweep_along_rail(
-    description: JsValue,
-    plane_values: &[f64],
-    rails: &NativeCurve3List,
-    candidates: &NativeCurve3List,
-) -> Result<NativeCompound, JsValue> {
-    let profile = profile(description)?;
-    let tolerance = profile.tolerance();
-    let rail = SweepRail::new(rails.values.clone(), tolerance)
-        .and_then(|rail| rail.extended_tangentially(&candidates.values))
-        .map_err(js_error)?;
-    profile
-        .sweep_along(plane(plane_values, tolerance)?, &rail)
+        .sweep(plane(plane_values, profile.tolerance())?, &rail.inner)
         .map(|inner| NativeCompound { inner })
         .map_err(js_error)
 }
 
 #[wasm_bindgen(js_name = loft)]
-pub fn loft(sections: JsValue, align_sections: bool) -> Result<NativeCompound, JsValue> {
+pub fn loft(
+    sections: JsValue,
+    align_sections: bool,
+    guides: &NativeWire3List,
+) -> Result<NativeCompound, JsValue> {
     let sections = from_js::<Vec<SectionDto>>(sections)?;
     if sections.len() < 2 {
         return Err(JsValue::from_str("a loft needs at least two profiles"));
@@ -436,13 +393,14 @@ pub fn loft(sections: JsValue, align_sections: bool) -> Result<NativeCompound, J
         .collect::<Result<Vec<_>, JsValue>>()?;
     let (first_plane, first_profile) = &built[0];
     first_profile
-        .loft_with_alignment(
+        .loft_with_guides(
             *first_plane,
             built
                 .iter()
                 .skip(1)
                 .map(|(plane, profile)| (*plane, profile)),
             align_sections,
+            &guides.values,
         )
         .map(|inner| NativeCompound { inner })
         .map_err(js_error)
@@ -1016,22 +974,6 @@ impl NativeEdgeList {
     }
     pub fn add(&mut self, value: &NativeEdge) {
         self.values.push(value.inner.clone())
-    }
-}
-
-#[wasm_bindgen(js_name = NativeCurve3List)]
-pub struct NativeCurve3List {
-    values: Vec<RailSegment>,
-}
-
-#[wasm_bindgen(js_class = NativeCurve3List)]
-impl NativeCurve3List {
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
-        Self { values: Vec::new() }
-    }
-    pub fn add(&mut self, value: &NativeCurve3) {
-        self.values.push(RailSegment::new(value.inner.clone(), value.range))
     }
 }
 

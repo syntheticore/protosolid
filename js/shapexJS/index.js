@@ -670,7 +670,9 @@ export class Wire2 {
   signedArea() { return this._properties()[0] }
   area() { return this._properties()[1] }
   isCounterClockwise() { return Boolean(this._properties()[2]) }
+  isClosed() { return Boolean(this._properties()[3]) }
   classifyPoint(point) { return nativeCall(() => curveModule(this).classifyWire2(this._dto(), point.x, point.y)) }
+  validateSimple() { nativeCall(() => curveModule(this).validateSimpleWire2(this._dto())) }
   reversed() { return new this.constructor(this._segments.toReversed().map(segment => segment.reversed()), this._tolerance) }
   _dto() { return { segments: this._segments.map(segment => segment._dto()), tolerance: this._tolerance } }
 }
@@ -736,7 +738,7 @@ function defaultWasmUrl() {
 
 /** Create the public API around this package's initialized private transport. */
 export function createShapex(bindings) {
-  const required = ['wireProperties', 'profileArea', 'extrude', 'revolve', 'loft', 'sweep', 'NativeCompound', 'NativeFaceList', 'NativeEdgeList', 'NativeSolidList']
+  const required = ['wireProperties', 'profileArea', 'extrude', 'revolve', 'loft', 'sweep', 'NativeWire3', 'NativeCompound', 'NativeFaceList', 'NativeEdgeList', 'NativeSolidList']
   required.forEach(name => {
     if(typeof bindings?.[name] != 'function') throw new TypeError(`invalid ShapexJS transport: missing ${name}`)
   })
@@ -831,26 +833,43 @@ export function createShapex(bindings) {
     }
   }
 
-  class Path2 {
-    constructor(segments, closed = false, tolerance = ModelTolerance.default()) {
-      this._segments = Object.freeze(Array.from(segments))
-      this._closed = closed
-      this._tolerance = tolerance
-      nativeCall(() => bindings.validatePath2(this._dto(), closed))
+  const withCurveList = (curves, action) => {
+    const list = new bindings.NativeCurve3List()
+    try {
+      array(curves, 'segments').forEach((curve, index) => nativeCall(() => list.add(instance(curve, TrimmedCurve3, `segments[${index}]`)._native)))
+      return action(list)
+    } finally { free(list) }
+  }
+
+  class Wire3 {
+    constructor(segments, tolerance = ModelTolerance.default()) {
+      this._native = segments instanceof bindings.NativeWire3 ? segments : withCurveList(segments, list =>
+        nativeCall(() => new bindings.NativeWire3(list, instance(tolerance, ModelTolerance, 'tolerance').toArray())))
       Object.freeze(this)
     }
-    _dto() { return { segments: this._segments.map(curve => curve._dto()), tolerance: this._tolerance } }
-    static new(...values) { return new this(...values) }
-    segments() { return this._segments }
-    isClosed() { return this._closed }
-    reversed() { return new Path2(this._segments.toReversed().map(curve => curve.reversed()), this._closed, this._tolerance) }
-    validateSimple() { nativeCall(() => bindings.validateSimplePath2(this._dto(), this._closed)) }
-    signedArea() { return nativeCall(() => bindings.pathSignedArea2(this._dto())) }
-    classifyPoint(point) { return nativeCall(() => bindings.classifyPath2(this._dto(), point.x, point.y)) }
-    offset(distance, { join = 'round', miterLimit = 4 } = {}) {
-      const result = nativeCall(() => bindings.offsetPath2(this._dto(), this._closed, distance, join, miterLimit))
-      return Object.freeze({ path: new Path2(Array.from(result.curves, raw => BoundTrimmedCurve2._fromNative(raw)), this._closed, this._tolerance),
-        sources: Object.freeze(result.sources) })
+    static new(segments, tolerance) { return new this(segments, tolerance) }
+    static connect(segments, tolerance = ModelTolerance.default()) {
+      return new Wire3(withCurveList(segments, list =>
+        nativeCall(() => bindings.NativeWire3.connect(list, instance(tolerance, ModelTolerance, 'tolerance').toArray()))))
+    }
+    extended(candidates, tangentOnly = true) {
+      return new Wire3(withCurveList(candidates, list => nativeCall(() => this._native.extended(list, Boolean(tangentOnly)))))
+    }
+    segments() { return Object.freeze(Array.from(this._native.segments(), raw => new TrimmedCurve3(raw))) }
+    isClosed() { return this._native.isClosed() }
+    isTangentContinuous() { return nativeCall(() => this._native.isTangentContinuous()) }
+    reversed() { return new Wire3(this._native.reversed()) }
+    openedAt(parameter) { return new Wire3(nativeCall(() => this._native.openedAt(finite(parameter, 'parameter')))) }
+    parameterRange() { return new ParameterRange(0, this._native.parameterEnd()) }
+    length() { return nativeCall(() => this._native.length()) }
+    evaluate(parameter) {
+      const [x, y, z, dx, dy, dz] = nativeCall(() => this._native.evaluate(finite(parameter, 'parameter')))
+      return Object.freeze({ point: new Point3(x, y, z), derivative: new Vec3(dx, dy, dz) })
+    }
+    closestPoint(point) {
+      instance(point, Point3, 'point')
+      const [parameter, x, y, z, distance] = nativeCall(() => this._native.closestPoint(point.x, point.y, point.z))
+      return Object.freeze({ parameter, point: new Point3(x, y, z), distance })
     }
   }
 
@@ -859,6 +878,15 @@ export function createShapex(bindings) {
       super(segments, tolerance)
       const values = Array.from(nativeCall(() => bindings.wireProperties(this._dto())))
       WIRE_PROPERTIES.set(this, values)
+    }
+    offset(distance, { join = 'round', miterLimit = 4 } = {}) {
+      const result = nativeCall(() => bindings.offsetWire2(this._dto(), finite(distance, 'distance'), join, miterLimit))
+      return Object.freeze({ wire: new BoundWire2(Array.from(result.curves, raw => BoundTrimmedCurve2._fromNative(raw)), this._tolerance),
+        sources: Object.freeze(result.sources) })
+    }
+    lifted(plane) {
+      instance(plane, Plane3, 'plane')
+      return new Wire3(this._segments.map(segment => segment.lifted(plane, this._tolerance)), this._tolerance)
     }
   }
   CURVE_MODULES.set(BoundWire2, curveTransport)
@@ -932,40 +960,24 @@ export function createShapex(bindings) {
         fromBody._raw(), from._raw(), untilBody._raw(), until._raw(), Boolean(forward),
       )))
     }
-    sweep(plane, railPlane, rail) {
-      instance(plane, Plane3, 'plane'); instance(railPlane, Plane3, 'railPlane')
-      instance(rail, TrimmedCurve2, 'rail')
+    sweep(plane, rail) {
+      instance(plane, Plane3, 'plane'); instance(rail, Wire3, 'rail')
       return nativeCall(() => new Compound(bindings.sweep(
-        profileDto(this), new Float64Array(plane._values()), rail._dto(),
-        new Float64Array(railPlane._values()),
+        profileDto(this), new Float64Array(plane._values()), rail._native,
       )))
     }
-    sweepAlongEdge(plane, rail) {
-      instance(plane, Plane3, 'plane'); instance(rail, Edge, 'rail')
-      return nativeCall(() => new Compound(bindings.sweepAlongEdge(
-        profileDto(this), new Float64Array(plane._values()), rail._raw(),
-      )))
-    }
-    sweepAlongRail(plane, rails, candidates = []) {
-      instance(plane, Plane3, 'plane')
-      const railList = new bindings.NativeCurve3List()
-      const candidateList = new bindings.NativeCurve3List()
-      try {
-        array(rails, 'rails').forEach((rail, index) => railList.add(instance(rail, TrimmedCurve3, `rails[${index}]`)._native))
-        array(candidates, 'candidates').forEach((curve, index) => candidateList.add(instance(curve, TrimmedCurve3, `candidates[${index}]`)._native))
-        return nativeCall(() => new Compound(bindings.sweepAlongRail(
-          profileDto(this), new Float64Array(plane._values()), railList, candidateList,
-        )))
-      } finally { free(railList); free(candidateList) }
-    }
-    loft(plane, sections, alignSections = true) {
+    loft(plane, sections, alignSections = true, guides = []) {
       instance(plane, Plane3, 'plane')
       sections = [{ profile: this, plane }, ...array(sections, 'sections')]
       const description = sections.map((section, index) => ({
         profile: profileDto(instance(section?.profile, Profile, `sections[${index}].profile`)),
         plane: instance(section?.plane, Plane3, `sections[${index}].plane`)._values(),
       }))
-      return nativeCall(() => new Compound(bindings.loft(description, Boolean(alignSections))))
+      const guideList = new bindings.NativeWire3List()
+      try {
+        array(guides, 'guides').forEach((guide, index) => guideList.add(instance(guide, Wire3, `guides[${index}]`)._native))
+        return nativeCall(() => new Compound(bindings.loft(description, Boolean(alignSections), guideList)))
+      } finally { free(guideList) }
     }
     loftWithAlignment(plane, sections, alignSections) {
       return this.loft(plane, sections, alignSections)
@@ -1299,7 +1311,7 @@ export function createShapex(bindings) {
     Point2, Vec2, Point3, Vec3, Vector3: Vec3, Matrix3, Quaternion,
     ModelTolerance, ParameterRange, ParameterDomain, Axis3, Frame3, Plane3, RigidTransform2, RigidTransform3,
     Line2: BoundLine2, Circle2: BoundCircle2, NurbsCurve2: BoundNurbsCurve2, Line3, Circle3,
-    Curve2, TrimmedCurve2: BoundTrimmedCurve2, TrimmedCurve3, Path2, Wire2: BoundWire2, Profile,
+    Curve2, TrimmedCurve2: BoundTrimmedCurve2, TrimmedCurve3, Wire2: BoundWire2, Wire3, Profile,
     TessellationOptions, FilletOptions, TriangleMesh, Polyline,
     BooleanKind,
     Face, Edge, Vertex, Solid, Compound, Resolution, StepAssembly,

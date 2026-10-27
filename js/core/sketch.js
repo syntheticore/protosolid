@@ -1561,7 +1561,6 @@ export class ProfileOffsetConstraint extends Dimension {
     this.groups = groups.map(entries => entries.map(entry => ({
       source: sources.indexOf(entry.curve), start: entry.start, end: entry.end,
     })))
-    this.closed = groups.map(entries => entries[0].curve.sample(entries[0].start).almost(entries.at(-1).curve.sample(entries.at(-1).end)))
     this.validDistance = this.distance
     this.validExpression = this.expression
   }
@@ -1572,9 +1571,9 @@ export class ProfileOffsetConstraint extends Dimension {
   outputs() { return this.items.slice(this.sourceCount).map(item => item.curve()).filter(Boolean) }
 
   sourceGroups() {
-    return this.groups.map((entries, index) => Object.assign(entries.map(entry => ({
+    return this.groups.map(entries => entries.map(entry => ({
       ...entry, curve: this.items[entry.source].curve(),
-    })), { closed: this.closed?.[index] }))
+    })))
   }
 
   dimensionPoints() {
@@ -1637,7 +1636,7 @@ export class ProfileOffsetConstraint extends Dimension {
   }
 
   dump() {
-    return { ...super.dump(), sourceCount: this.sourceCount, side: this.side, groups: this.groups, closed: this.closed }
+    return { ...super.dump(), sourceCount: this.sourceCount, side: this.side, groups: this.groups }
   }
 }
 Serialize.register(ProfileOffsetConstraint, 'ProfileOffsetConstraint')

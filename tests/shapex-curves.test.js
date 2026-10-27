@@ -84,44 +84,44 @@ test('spline offsets remain exact derived curves and reverse their signed side',
     segment.curve() instanceof sx.Line2 || segment.curve() instanceof sx.NurbsCurve2))
 })
 
-test('path offsets expose joins and source correspondence', () => {
-  const path = sx.Path2.new([sx.TrimmedCurve2.line(p(0, 0), p(10, 0)), sx.TrimmedCurve2.line(p(10, 0), p(10, 10))])
-  const result = path.offset(-1)
-  assert.equal(result.path.segments().length, 3)
+test('wire offsets expose joins and source correspondence', () => {
+  const wire = sx.Wire2.new([sx.TrimmedCurve2.line(p(0, 0), p(10, 0)), sx.TrimmedCurve2.line(p(10, 0), p(10, 10))])
+  const result = wire.offset(-1)
+  assert.equal(result.wire.segments().length, 3)
   assert.deepEqual(result.sources, [0, null, 1])
-  pointNear(result.path.segments()[0].end(), result.path.segments()[1].start())
-  pointNear(result.path.segments()[1].end(), result.path.segments()[2].start())
+  pointNear(result.wire.segments()[0].end(), result.wire.segments()[1].start())
+  pointNear(result.wire.segments()[1].end(), result.wire.segments()[2].start())
   const square = sx.Wire2.polygon([p(0, 0), p(10, 0), p(10, 10), p(0, 10)])
-  const miter = sx.Path2.new(square.segments(), true).offset(-1, { join: 'miter' })
-  near(sx.Wire2.new(miter.path.segments()).area(), 144)
+  const miter = sx.Wire2.new(square.segments()).offset(-1, { join: 'miter' })
+  near(sx.Wire2.new(miter.wire.segments()).area(), 144)
 })
 
-test('path simplicity is explicit and rejects crossings and overlaps', () => {
+test('wire simplicity is explicit and rejects crossings and overlaps', () => {
   const line = (a, b) => sx.TrimmedCurve2.line(p(...a), p(...b))
-  const simple = sx.Path2.new([line([0, 0], [1, 0]), line([1, 0], [1, 1])])
+  const simple = sx.Wire2.new([line([0, 0], [1, 0]), line([1, 0], [1, 1])])
   simple.validateSimple()
-  sx.Path2.new([sx.TrimmedCurve2.circle(p(0, 0), 1)], true).validateSimple()
-  const crossing = sx.Path2.new([
+  sx.Wire2.new([sx.TrimmedCurve2.circle(p(0, 0), 1)]).validateSimple()
+  const crossing = sx.Wire2.new([
     line([0, 0], [2, 2]), line([2, 2], [0, 2]), line([0, 2], [2, 0]),
   ])
   assert.throws(() => crossing.validateSimple(), sx.ShapexError)
-  const overlap = sx.Path2.new([line([0, 0], [2, 0]), line([2, 0], [1, 0])])
+  const overlap = sx.Wire2.new([line([0, 0], [2, 0]), line([2, 0], [1, 0])])
   assert.throws(() => overlap.validateSimple(), sx.ShapexError)
 })
 
-test('path offsets support per-corner styles and explicit uncapped miters', () => {
+test('wire offsets support per-corner styles and explicit uncapped miters', () => {
   const points = [[0, 0], [10, 0], [10, 10], [0, 10]].map(([x, y]) => p(x, y))
-  const path = sx.Path2.new(points.slice(0, -1).map((point, index) => sx.TrimmedCurve2.line(point, points[index + 1])))
-  const mixed = path.offset(-1, { join: ['round', 'miter'] })
+  const wire = sx.Wire2.new(points.slice(0, -1).map((point, index) => sx.TrimmedCurve2.line(point, points[index + 1])))
+  const mixed = wire.offset(-1, { join: ['round', 'miter'] })
   assert.deepEqual(mixed.sources, [0, null, 1, 2])
-  mixed.path.validateSimple()
-  assert.throws(() => path.offset(-1, { join: ['miter'] }), sx.ShapexError)
-  const sharp = sx.Path2.new([
+  mixed.wire.validateSimple()
+  assert.throws(() => wire.offset(-1, { join: ['miter'] }), sx.ShapexError)
+  const sharp = sx.Wire2.new([
     sx.TrimmedCurve2.line(p(0, 0), p(10, 0)), sx.TrimmedCurve2.line(p(10, 0), p(0, 1)),
   ])
-  assert.equal(sharp.offset(-1, { join: 'miter' }).path.segments().length, 3)
-  assert.equal(sharp.offset(-1, { join: 'miter', miterLimit: Infinity }).path.segments().length, 2)
-  const box = sx.Path2.new(sx.Wire2.polygon([p(0, 0), p(10, 0), p(10, 4), p(0, 4)]).segments(), true)
+  assert.equal(sharp.offset(-1, { join: 'miter' }).wire.segments().length, 3)
+  assert.equal(sharp.offset(-1, { join: 'miter', miterLimit: Infinity }).wire.segments().length, 2)
+  const box = sx.Wire2.polygon([p(0, 0), p(10, 0), p(10, 4), p(0, 4)])
   assert.throws(() => box.offset(3, { join: 'miter' }), sx.ShapexError)
 })
 

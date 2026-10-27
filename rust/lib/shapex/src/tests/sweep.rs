@@ -3,8 +3,12 @@ use super::*;
 fn xy(rail: &TrimmedCurve2) -> Curve3 {
     Plane3::xy().lift_curve(rail.curve(), ModelTolerance::default()).unwrap()
 }
+/// A one-segment rail wire
+fn rail3(curve: &Curve3, range: ParameterRange) -> Wire3 {
+    Wire3::new([TrimmedCurve3::new(curve.clone(), range).unwrap()], ModelTolerance::default()).unwrap()
+}
 fn sweep_xy(p: &Profile, plane: Plane3, rail: &TrimmedCurve2) -> KernelResult<Compound> {
-    p.sweep(plane, &xy(rail), rail.range())
+    p.sweep(plane, &rail3(&xy(rail), rail.range()))
 }
 fn circle() -> Profile {
     let tolerance = ModelTolerance::default();
@@ -452,14 +456,14 @@ fn sweep_along_planar_3d_rails() {
     .unwrap();
     assert!(matches!(surface.orientation, Orientation::Planar(_)));
     verify(
-        &p.sweep(start_plane(&spline, range), &spline, range).unwrap(),
+        &p.sweep(start_plane(&spline, range), &rail3(&spline, range)).unwrap(),
         p.area() * curve_length(&spline, range),
     );
 
     let line: Curve3 = Line3::new(Point3::new(1.0, 2.0, 3.0), Vec3::new(1.0, 1.0, 0.0)).unwrap().into();
     let range = ParameterRange::new(0.0, 5.0).unwrap();
     verify(
-        &p.sweep(start_plane(&line, range), &line, range).unwrap(),
+        &p.sweep(start_plane(&line, range), &rail3(&line, range)).unwrap(),
         p.area() * 50.0_f64.sqrt(),
     );
 
@@ -473,7 +477,7 @@ fn sweep_along_planar_3d_rails() {
     .into();
     let range = ParameterRange::new(0.0, std::f64::consts::FRAC_PI_2).unwrap();
     verify(
-        &p.sweep(start_plane(&arc, range), &arc, range).unwrap(),
+        &p.sweep(start_plane(&arc, range), &rail3(&arc, range)).unwrap(),
         p.area() * 10.0 * std::f64::consts::FRAC_PI_2,
     );
 }
@@ -518,7 +522,7 @@ fn sweep_along_spatial_rail() {
         assert!((dv - value.dv).magnitude() < 1e-6 * value.dv.magnitude(), "dv at {v}");
         assert!((dvv - value.dvv).magnitude() < 1e-4 * value.dvv.magnitude().max(1.0), "dvv at {v}");
     }
-    verify(&p.sweep(plane, &spline, range).unwrap(), p.area() * curve_length(&spline, range));
+    verify(&p.sweep(plane, &rail3(&spline, range)).unwrap(), p.area() * curve_length(&spline, range));
 }
 #[test]
 fn sweep_along_closed_spatial_rail() {
@@ -559,7 +563,7 @@ fn sweep_along_closed_spatial_rail() {
     // The section closes up at the seam
     let [start, end] = [range.start, range.end].map(|v| surface.section_plane(v).unwrap());
     assert!((start.u() - end.u()).magnitude() < 1e-8 && start.origin().distance(end.origin()) < 1e-8);
-    verify(&p.sweep(plane, &rail, range).unwrap(), p.area() * curve_length(&rail, range));
+    verify(&p.sweep(plane, &rail3(&rail, range)).unwrap(), p.area() * curve_length(&rail, range));
 }
 #[test]
 fn sweep_along_surface_intersection_edge() {
@@ -600,7 +604,7 @@ fn sweep_along_surface_intersection_edge() {
     }
     let p = disc(0.3);
     verify(
-        &p.sweep(start_plane(rail, range), rail, range).unwrap(),
+        &p.sweep(start_plane(rail, range), &rail3(rail, range)).unwrap(),
         p.area() * curve_length(rail, range),
     );
 }
@@ -625,7 +629,7 @@ fn swept_circle_through_cuts_from_cut_fails_document() {
         [], t,
     ).unwrap();
     let plane = Plane3::new(Point3::new(0.0, 0.0, 0.0), -Vec3::unit_z(), Vec3::unit_y(), t).unwrap();
-    let body = profile.sweep(plane, &rail, ParameterRange::new(0.0, 1.0).unwrap()).unwrap();
+    let body = profile.sweep(plane, &rail3(&rail, ParameterRange::new(0.0, 1.0).unwrap())).unwrap();
     let polygons = [
         [(-106.20972552812498, 11.868346132014786), (-53.986287235871465, -14.172223915621164),
          (-44.940053217144865, 12.550922107568695), (-64.08968090020764, 34.50590926012473)],
@@ -645,8 +649,8 @@ fn swept_circle_through_cuts_from_cut_fails_document() {
 }
 
 /// A rail segment given in XY plane coordinates
-fn segment(curve: TrimmedCurve2) -> RailSegment {
-    RailSegment::new(xy(&curve), curve.range())
+fn segment(curve: TrimmedCurve2) -> TrimmedCurve3 {
+    TrimmedCurve3::new(xy(&curve), curve.range()).unwrap()
 }
 fn line(a: (f64, f64), b: (f64, f64)) -> TrimmedCurve2 {
     TrimmedCurve2::line(Point2::new(a.0, a.1), Point2::new(b.0, b.1)).unwrap()
@@ -671,10 +675,10 @@ fn sweep_along_unordered_tangent_chain() {
         segment(line((15.0, 5.0), (15.0, 15.0))),
         segment(line((0.0, 0.0), (10.0, 0.0)).reversed()),
     ];
-    let rail = SweepRail::new(segments, p.tolerance()).unwrap();
+    let rail = Wire3::connect(segments, p.tolerance()).unwrap();
     assert_eq!(rail.segments().len(), 3);
     verify(
-        &p.sweep_along(x_normal_plane(0.0), &rail).unwrap(),
+        &p.sweep(x_normal_plane(0.0), &rail).unwrap(),
         p.area() * (20.0 + 2.5 * PI),
     );
 }
@@ -688,13 +692,13 @@ fn sweep_rail_propagates_through_tangent_segments() {
         segment(line((0.0, 0.0), (0.0, -10.0))),
         segment(arc((10.0, 5.0), 1.5 * PI, TAU)),
     ];
-    let rail = SweepRail::new([segment(line((0.0, 0.0), (10.0, 0.0)))], p.tolerance())
+    let rail = Wire3::connect([segment(line((0.0, 0.0), (10.0, 0.0)))], p.tolerance())
         .unwrap()
-        .extended_tangentially(&candidates)
+        .extended(&candidates, true)
         .unwrap();
     assert_eq!(rail.segments().len(), 3);
     verify(
-        &p.sweep_along(x_normal_plane(0.0), &rail).unwrap(),
+        &p.sweep(x_normal_plane(0.0), &rail).unwrap(),
         p.area() * (20.0 + 2.5 * PI),
     );
 }
@@ -712,18 +716,20 @@ fn sweep_along_closed_tangent_chain_from_its_middle() {
         segment(line((-5.0, 15.0), (-5.0, 5.0))),
         segment(arc((0.0, 5.0), PI, 1.5 * PI)),
     ];
-    let rail = SweepRail::new(segments, p.tolerance()).unwrap();
-    assert!(rail.is_closed().unwrap());
+    let rail = Wire3::connect(segments, p.tolerance()).unwrap();
+    assert!(rail.is_closed());
     verify(
-        &p.sweep_along(x_normal_plane(5.0), &rail).unwrap(),
+        &p.sweep(x_normal_plane(5.0), &rail).unwrap(),
         p.area() * (40.0 + 10.0 * PI),
     );
 }
 
 #[test]
 fn sweep_rail_rejects_corners_and_gaps() {
-    let t = ModelTolerance::default();
+    let p = circle();
+    let t = p.tolerance();
     let first = segment(line((0.0, 0.0), (10.0, 0.0)));
-    assert!(SweepRail::new([first.clone(), segment(line((10.0, 0.0), (10.0, 10.0)))], t).is_err());
-    assert!(SweepRail::new([first, segment(line((11.0, 0.0), (20.0, 0.0)))], t).is_err());
+    let corner = Wire3::connect([first.clone(), segment(line((10.0, 0.0), (10.0, 10.0)))], t).unwrap();
+    assert!(p.sweep(x_normal_plane(0.0), &corner).is_err());
+    assert!(Wire3::connect([first, segment(line((11.0, 0.0), (20.0, 0.0)))], t).is_err());
 }

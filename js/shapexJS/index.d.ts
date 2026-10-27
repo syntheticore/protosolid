@@ -451,6 +451,11 @@ export interface Profile {
   sweep(plane: Plane3, railPlane: Plane3, rail: TrimmedCurve2): Compound
   /** Sweep along a model edge, planar or spatial. */
   sweepAlongEdge(plane: Plane3, rail: Edge): Compound
+  /**
+   * Sweep along connected, tangent-continuous segments given in any order and
+   * direction, extended at open ends through tangent-continuous candidates.
+   */
+  sweepAlongRail(plane: Plane3, rails: Iterable<TrimmedCurve3>, candidates?: Iterable<TrimmedCurve3>): Compound
   loft(plane: Plane3, sections: Iterable<{ profile: Profile, plane: Plane3 }>, alignSections?: boolean): Compound
   loftWithAlignment(plane: Plane3, sections: Iterable<{ profile: Profile, plane: Plane3 }>, alignSections: boolean): Compound
 }

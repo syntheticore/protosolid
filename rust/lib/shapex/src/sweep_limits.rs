@@ -300,7 +300,7 @@ fn turned(plane: Plane3, axis: Axis3, angle: f64, tol: ModelTolerance) -> Kernel
     )
 }
 
-fn profile_center(profile: &Profile, plane: Plane3) -> KernelResult<Point3> {
+pub(super) fn profile_center(profile: &Profile, plane: Plane3) -> KernelResult<Point3> {
     // Use the exact area centroid, including curved boundaries and holes. A
     // circle's sole seam vertex is not a representative profile location.
     let normal = plane.normal();

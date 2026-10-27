@@ -534,66 +534,108 @@ impl Profile {
     /// frame. The sweep starts at whichever rail end lies closer to the
     /// profile plane.
     pub fn sweep(&self, plane: Plane3, rail: &Curve3, range: ParameterRange) -> KernelResult<Compound> {
+        self.sweep_along(
+            plane,
+            &SweepRail::new([RailSegment::new(rail.clone(), range)], self.tolerance())?,
+        )
+    }
+
+    /// Sweep along a chain of tangent-continuous rail segments. The section
+    /// leaves each segment in the frame it reached and continues from there.
+    pub fn sweep_along(&self, plane: Plane3, rail: &SweepRail) -> KernelResult<Compound> {
         let tolerance = self.tolerance();
         if !self.holes().is_empty() {
             return Err(invalid("sweeps with holes are not supported"));
         }
-        let point = |parameter: f64| rail.evaluate(parameter).map(|value| value.point);
         let offset = |point: Point3| plane.normal().dot(point - plane.origin()).abs();
-        let range = if offset(point(range.end)?) < offset(point(range.start)?) {
-            range.reversed()
+        let rail = if rail.segments().len() > 1 && rail.is_closed()? {
+            // A closed chain starts where it passes through the profile
+            rail.opened_near(super::sweep_limits::profile_center(self, plane)?)?
+        } else if offset(rail.end()?.0) < offset(rail.start()?.0) {
+            rail.reversed()
         } else {
-            range
+            rail.clone()
         };
-        let start = point(range.start)?;
-        let end = point(range.end)?;
-        if let Curve3::Line(_) = rail {
-            return self.extrude(plane, end - start);
+        let (start, tangent) = rail.start()?;
+        let end = rail.end()?.0;
+        if let [segment] = rail.segments() {
+            if let Curve3::Line(_) = segment.curve {
+                return self.extrude(plane, end - start);
+            }
+            if let Curve3::Circle(circle) = &segment.curve {
+                return self.revolve(
+                    plane,
+                    Axis3::new(circle.center(), circle.normal())?,
+                    segment.range.span(),
+                );
+            }
         }
-        if let Curve3::Circle(circle) = rail {
-            return self.revolve(
-                plane,
-                Axis3::new(circle.center(), circle.normal())?,
-                range.span(),
-            );
+        let mut frames = Vec::new();
+        let mut section_plane = plane;
+        for segment in rail.segments() {
+            let frame = SweptSurface3::new(
+                section_plane,
+                self.outer().segments()[0].clone(),
+                segment.curve.clone(),
+                segment.range,
+                tolerance,
+            )?;
+            section_plane = frame.section_plane(segment.range.end)?;
+            frames.push(frame);
         }
-        let frame = SweptSurface3::new(
-            plane,
-            self.outer().segments()[0].clone(),
-            rail.clone(),
-            range,
-            tolerance,
-        )?;
-        let tangent = rail.evaluate(range.start)?.first_derivative * range.span().signum();
-        let alignment = tangent.normalize().dot(plane.normal());
+        let alignment = tangent.dot(plane.normal());
         if alignment.abs() <= tolerance.angular {
             return Err(invalid(
                 "sweep rail must leave the profile plane at its start",
             ));
         }
         let forward = alignment > 0.0;
-        let closed = start.distance(end) <= tolerance.linear;
+        let closed = rail.is_closed()?;
+        let single = frames.len() == 1;
+        // A single closed rail closes its own frame; a chain must return the
+        // section to where it started.
+        if closed
+            && !single
+            && [(section_plane.u(), plane.u()), (section_plane.v(), plane.v())]
+                .iter()
+                .any(|(end, start)| (end - start).magnitude() > start.magnitude() * tolerance.angular * 16.0)
+        {
+            return Err(invalid("closed sweep rail frame does not close at its seam"));
+        }
         let mut patches = Vec::new();
         let mut roles = Vec::new();
         if !closed {
             patches.push(super::sew::cap(self, plane, forward)?);
-            patches.push(super::sew::cap(
-                self,
-                frame.section_plane(range.end)?,
-                !forward,
-            )?);
+            patches.push(super::sew::cap(self, section_plane, !forward)?);
             roles.extend([super::CreationRole::ProfileStart, super::CreationRole::ProfileEnd]);
         }
-        let mut parameters = rail.integration_breakpoints(range);
-        parameters.extend([range.start, range.end]);
-        if closed {
-            parameters.push((range.start + range.end) * 0.5);
+        for (segment, frame) in rail.segments().iter().zip(&frames) {
+            let range = segment.range;
+            let mut parameters = segment.curve.integration_breakpoints(range);
+            parameters.extend([range.start, range.end]);
+            if closed && single {
+                parameters.push((range.start + range.end) * 0.5);
+            }
+            parameters.sort_by(f64::total_cmp);
+            parameters.dedup();
+            if range.span() < 0.0 {
+                parameters.reverse();
+            }
+            self.sweep_sides(frame, &parameters, forward, &mut patches, &mut roles)?;
         }
-        parameters.sort_by(f64::total_cmp);
-        parameters.dedup();
-        if range.span() < 0.0 {
-            parameters.reverse();
-        }
+        super::sew::publish_with_roles(patches, roles, tolerance)
+    }
+
+    /// Side patches of one rail segment between consecutive rail parameters.
+    fn sweep_sides(
+        &self,
+        frame: &SweptSurface3,
+        parameters: &[f64],
+        forward: bool,
+        patches: &mut Vec<BrepPatch>,
+        roles: &mut Vec<super::CreationRole>,
+    ) -> KernelResult<()> {
+        let tolerance = self.tolerance();
         // Keep each source section edge intact. Periodic charts and display
         // subdivision must not introduce artificial CAD edges into the solid.
         for (source, section) in self.outer().segments().iter().enumerate() {
@@ -661,7 +703,7 @@ impl Profile {
                 roles.push(super::CreationRole::ProfileSide { generators: vec![[0, 0, self.generator(0, source)]], chart: None });
             }
         }
-        super::sew::publish_with_roles(patches, roles, tolerance)
+        Ok(())
     }
 }
 

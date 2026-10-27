@@ -11,7 +11,8 @@ use shapex::{
     Axis3, BooleanKind, Circle2, Curve2, Curve3, Line2, NurbsCurve2, Origin, ParameterRange,
     RigidTransform3, Surface3, SurfaceChart,
     ChamferMode, Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
-    ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, ShellJoin, Solid, SplitKeep,
+    ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, RailSegment, Resolution, ShellJoin, Solid, SplitKeep,
+    SweepRail,
     StepAssembly, StepLengthUnit, StepOccurrence, StepProduct,
     TessellationOptions, TriangleMesh, TrimmedCurve2, Vec2, Vec3, VertexHandle, Wire2,
 };
@@ -395,6 +396,26 @@ pub fn sweep_along_edge(
             rail.inner.curve(),
             rail.inner.range().map_err(js_error)?,
         )
+        .map(|inner| NativeCompound { inner })
+        .map_err(js_error)
+}
+
+/// Sweep along connected spatial rail segments, extended through any
+/// tangent-continuous candidates.
+#[wasm_bindgen(js_name = sweepAlongRail)]
+pub fn sweep_along_rail(
+    description: JsValue,
+    plane_values: &[f64],
+    rails: &NativeCurve3List,
+    candidates: &NativeCurve3List,
+) -> Result<NativeCompound, JsValue> {
+    let profile = profile(description)?;
+    let tolerance = profile.tolerance();
+    let rail = SweepRail::new(rails.values.clone(), tolerance)
+        .and_then(|rail| rail.extended_tangentially(&candidates.values))
+        .map_err(js_error)?;
+    profile
+        .sweep_along(plane(plane_values, tolerance)?, &rail)
         .map(|inner| NativeCompound { inner })
         .map_err(js_error)
 }
@@ -995,6 +1016,22 @@ impl NativeEdgeList {
     }
     pub fn add(&mut self, value: &NativeEdge) {
         self.values.push(value.inner.clone())
+    }
+}
+
+#[wasm_bindgen(js_name = NativeCurve3List)]
+pub struct NativeCurve3List {
+    values: Vec<RailSegment>,
+}
+
+#[wasm_bindgen(js_class = NativeCurve3List)]
+impl NativeCurve3List {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { values: Vec::new() }
+    }
+    pub fn add(&mut self, value: &NativeCurve3) {
+        self.values.push(RailSegment::new(value.inner.clone(), value.range))
     }
 }
 

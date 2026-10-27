@@ -215,14 +215,20 @@ export class Profile {
     )
     return new Compound(componentId, geometry).seedProfileTopology(profiles, featureId)
   }
-  sweep(componentId, rail, featureId) {
+  sweep(componentId, rails, followTangents, featureId) {
     if(this.rings.length != 1) fail('Sweeps with holes are not supported')
-    const railSource = rail instanceof Edge ? 'rail' : rail.id.split('/')[0]
-    const profile = this.geom(), plane = planeFromMatrix(this.sketch.workplane)
-    const geometry = rail.sketch ?
-      profile.sweep(plane, planeFromMatrix(rail.sketch.workplane), rail.geom()) :
-      profile.sweepAlongEdge(plane, rail.geom())
-    return new Compound(componentId, geometry).seedProfileTopology([this], featureId, [railSource])
+    const railSources = [...new Set(rails.map(rail => rail instanceof Edge ? 'rail' : rail.id.split('/')[0]))]
+    const curve = rail => rail.sketch ?
+      planeFromMatrix(rail.sketch.workplane).liftCurve(rail.geom(), modelTolerance) :
+      rail.geom().trimmedCurve()
+    // Tangent continuations come from the same body or sketch as the selection
+    const selected = new Set(rails.map(rail => rail.id))
+    const candidates = !followTangents ? [] : [...new Set(rails.flatMap(rail => rail.sketch ?
+      rail.sketch.elements.filter(elem => elem.geom && !!elem.isReference == !!rail.isReference) :
+      rail.solid.edges()))].filter(item => !selected.has(item.id))
+    const geometry = this.geom().sweepAlongRail(planeFromMatrix(this.sketch.workplane),
+      rails.map(curve), candidates.map(curve))
+    return new Compound(componentId, geometry).seedProfileTopology([this], featureId, railSources)
   }
   update() {
     const elements = this.sketch.profileElements()

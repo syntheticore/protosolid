@@ -946,6 +946,18 @@ export function createShapex(bindings) {
         profileDto(this), new Float64Array(plane._values()), rail._raw(),
       )))
     }
+    sweepAlongRail(plane, rails, candidates = []) {
+      instance(plane, Plane3, 'plane')
+      const railList = new bindings.NativeCurve3List()
+      const candidateList = new bindings.NativeCurve3List()
+      try {
+        array(rails, 'rails').forEach((rail, index) => railList.add(instance(rail, TrimmedCurve3, `rails[${index}]`)._native))
+        array(candidates, 'candidates').forEach((curve, index) => candidateList.add(instance(curve, TrimmedCurve3, `candidates[${index}]`)._native))
+        return nativeCall(() => new Compound(bindings.sweepAlongRail(
+          profileDto(this), new Float64Array(plane._values()), railList, candidateList,
+        )))
+      } finally { free(railList); free(candidateList) }
+    }
     loft(plane, sections, alignSections = true) {
       instance(plane, Plane3, 'plane')
       sections = [{ profile: this, plane }, ...array(sections, 'sections')]

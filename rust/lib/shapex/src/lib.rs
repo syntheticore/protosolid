@@ -49,6 +49,7 @@ mod sew;
 mod step;
 mod sweep;
 mod sweep_limits;
+mod sweep_rail;
 mod revolve_loft;
 mod tessellation;
 mod tolerance;
@@ -70,6 +71,7 @@ pub(crate) use domain::{box_center, nearest_uv, whole_periods};
 pub use error::{Diagnostic, DiagnosticKind, KernelError, KernelResult};
 pub(crate) use error::{geometry_error, invalid, topology_error, unsupported};
 pub use sweep::SweptSurface3;
+pub use sweep_rail::{RailSegment, SweepRail};
 pub use geometry::{
     Axis3, Circle2, Circle3, Cone3, Curve2, Curve2Evaluation, Curve3, CurveEvaluation, Cylinder3,
     EdgeBlendSurface3, Frame3, Line2, Line3, NurbsCurve2, NurbsCurve3, NurbsSurface3,

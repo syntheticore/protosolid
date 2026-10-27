@@ -265,7 +265,7 @@ test(`loft, sweep, revolution and circular extrusion seed selectable constructio
       const rail = new Line(new THREE.Vector3(), new THREE.Vector3(0, 20, 0))
       rail.id = 'rail'
       rail.sketch = { workplane: new THREE.Matrix4().makeRotationX(Math.PI / 2) }
-      result = rectangle(size).sweep('component', rail, [0, 1])
+      result = rectangle(size).sweep('component', [rail], false, [0, 1])
     } else {
       const profile = rectangle(size)
       profile.sketch.workplane.makeTranslation(20, 0, 0)

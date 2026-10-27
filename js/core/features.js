@@ -2593,6 +2593,14 @@ Serialize.register(DraftFeature, 'DraftFeature')
 
 export class SweepFeature extends SolidFeature {
   static icon = 'sweep'
+  static undump(dump, context) {
+    const feature = super.undump(dump, context)
+    // Existing sweeps predate multi-segment rails and followed only their selection.
+    if(feature.rail && !Array.isArray(feature.rail())) feature.rail = () => [dump.values.rail]
+    if(dump.values?.propagation == null) feature.propagation = 'selected'
+    return feature
+  }
+
   constructor(document) {
     super(document, true, 'Sweep', {
       profile: {
@@ -2602,18 +2610,22 @@ export class SweepFeature extends SolidFeature {
       rail: {
         title: 'Rail',
         type: 'path',
+        multi: true,
         consumesSketch: true,
       },
+      propagation: edgePropagationSetting(),
     })
 
     this.profile = null
     this.rail = null
+    this.propagation = 'tangent'
   }
 
   updateFeature(tree, references) {
     const comp = tree.findChild(this.componentId)
     try {
-      const tool = references.profile.sweep(this.componentId, references.rail, this.id)
+      const tool = references.profile.sweep(this.componentId, references.rail,
+        this.propagation === 'tangent', this.id)
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) { this.error = featureError(err, 'Sweep could not be built') }

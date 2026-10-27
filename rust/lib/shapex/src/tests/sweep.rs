@@ -643,3 +643,87 @@ fn swept_circle_through_cuts_from_cut_fails_document() {
     assert!(cut.volume() > 0.0 && cut.volume() < body.volume());
     assert!(!cut.tessellate(TessellationOptions::new(0.05, 0.15, 24).unwrap()).unwrap().triangles.is_empty());
 }
+
+/// A rail segment given in XY plane coordinates
+fn segment(curve: TrimmedCurve2) -> RailSegment {
+    RailSegment::new(xy(&curve), curve.range())
+}
+fn line(a: (f64, f64), b: (f64, f64)) -> TrimmedCurve2 {
+    TrimmedCurve2::line(Point2::new(a.0, a.1), Point2::new(b.0, b.1)).unwrap()
+}
+fn arc(center: (f64, f64), start: f64, end: f64) -> TrimmedCurve2 {
+    TrimmedCurve2::new(
+        Circle2::new(Point2::new(center.0, center.1), 5.0).unwrap(),
+        ParameterRange::new(start, end).unwrap(),
+    )
+    .unwrap()
+}
+fn x_normal_plane(x: f64) -> Plane3 {
+    Plane3::new(Point3::new(x, 0.0, 0.0), Vec3::unit_y(), Vec3::unit_z(), ModelTolerance::default()).unwrap()
+}
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
+
+#[test]
+fn sweep_along_unordered_tangent_chain() {
+    let p = circle();
+    let segments = [
+        segment(arc((10.0, 5.0), 1.5 * PI, TAU).reversed()),
+        segment(line((15.0, 5.0), (15.0, 15.0))),
+        segment(line((0.0, 0.0), (10.0, 0.0)).reversed()),
+    ];
+    let rail = SweepRail::new(segments, p.tolerance()).unwrap();
+    assert_eq!(rail.segments().len(), 3);
+    verify(
+        &p.sweep_along(x_normal_plane(0.0), &rail).unwrap(),
+        p.area() * (20.0 + 2.5 * PI),
+    );
+}
+
+#[test]
+fn sweep_rail_propagates_through_tangent_segments() {
+    let p = circle();
+    let candidates = [
+        segment(line((15.0, 15.0), (15.0, 5.0))),
+        segment(line((15.0, 15.0), (25.0, 15.0))),
+        segment(line((0.0, 0.0), (0.0, -10.0))),
+        segment(arc((10.0, 5.0), 1.5 * PI, TAU)),
+    ];
+    let rail = SweepRail::new([segment(line((0.0, 0.0), (10.0, 0.0)))], p.tolerance())
+        .unwrap()
+        .extended_tangentially(&candidates)
+        .unwrap();
+    assert_eq!(rail.segments().len(), 3);
+    verify(
+        &p.sweep_along(x_normal_plane(0.0), &rail).unwrap(),
+        p.area() * (20.0 + 2.5 * PI),
+    );
+}
+
+#[test]
+fn sweep_along_closed_tangent_chain_from_its_middle() {
+    let p = circle();
+    let segments = [
+        segment(line((0.0, 0.0), (10.0, 0.0))),
+        segment(arc((10.0, 5.0), 1.5 * PI, TAU)),
+        segment(line((15.0, 5.0), (15.0, 15.0))),
+        segment(arc((10.0, 15.0), 0.0, FRAC_PI_2)),
+        segment(line((10.0, 20.0), (0.0, 20.0))),
+        segment(arc((0.0, 15.0), FRAC_PI_2, PI)),
+        segment(line((-5.0, 15.0), (-5.0, 5.0))),
+        segment(arc((0.0, 5.0), PI, 1.5 * PI)),
+    ];
+    let rail = SweepRail::new(segments, p.tolerance()).unwrap();
+    assert!(rail.is_closed().unwrap());
+    verify(
+        &p.sweep_along(x_normal_plane(5.0), &rail).unwrap(),
+        p.area() * (40.0 + 10.0 * PI),
+    );
+}
+
+#[test]
+fn sweep_rail_rejects_corners_and_gaps() {
+    let t = ModelTolerance::default();
+    let first = segment(line((0.0, 0.0), (10.0, 0.0)));
+    assert!(SweepRail::new([first.clone(), segment(line((10.0, 0.0), (10.0, 10.0)))], t).is_err());
+    assert!(SweepRail::new([first, segment(line((11.0, 0.0), (20.0, 0.0)))], t).is_err());
+}

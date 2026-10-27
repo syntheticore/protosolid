@@ -12,7 +12,7 @@
   const highlight = inject('highlight')
   const renderNeeded = inject('render-needed')
 
-  const highlighted = computed(() => props.parentHighlighted || props.helper == highlight.value )
+  const highlighted = computed(() => props.parentHighlighted || props.helper == highlight.value || props.helper.id == highlight.value?.planeId )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.helper) )
 
   let mesh
@@ -25,6 +25,7 @@
       [PointHelper]: PointHelperObject,
     }[props.helper.constructor]
     mesh = new HelperObject(props.helper)
+    mesh.setMaterial(highlighted.value, selected.value)
     props.helper.mesh = () => mesh
     props.helper.component = props.component
 

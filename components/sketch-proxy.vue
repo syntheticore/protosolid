@@ -117,7 +117,7 @@
   provide('constraint-icons', constraintIcons)
   provide('constraint-icon-layout', constraintIconLayout)
 
-  const highlighted = computed(() => props.parentHighlighted || props.sketch == highlight.value )
+  const highlighted = computed(() => props.parentHighlighted || props.sketch == highlight.value || props.sketch.creator == highlight.value )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.sketch) )
   const active = computed(() => props.sketch == props.document.activeSketch )
 

@@ -459,7 +459,7 @@
     methods: {
       toggleVisibility: function() {
         this.component.creator.hidden = !this.component.creator.hidden
-        this.document.updateFeatureVisibility()
+        this.document.updateFeatureVisibility(this.component)
       },
 
       activateComponent: async function() {

@@ -573,6 +573,7 @@ export default class Document extends Emitter {
       // Activate sketch for sketch features
       if(feature.constructor === CreateSketchFeature) {
         this.activeSketch = feature.sketch
+        this.activeComponent.creator.itemsHidden[this.activeSketch.id] = false
         this.activeSketch.startHistory()
 
         // Store camera view
@@ -649,11 +650,27 @@ export default class Document extends Emitter {
     this.selection.clear()
   }
 
-  async updateFeatureVisibility() {
+  async updateFeatureVisibility(component, itemId) {
     this.markChanged()
     const feature = this.activeFeature || this.creatingFeature
     if(!(feature instanceof SolidFeature)) return
-    feature.captureVisibility()
+
+    // Keep temporary reference reveals out of the operation's saved scope.
+    // Only the explicitly toggled body or component changes that scope.
+    const visibilities = this.captureVisualViewState().visibilities
+    this.top().getChildren().forEach(comp => {
+      const saved = feature.visibilities?.[comp.id]
+      if(saved) visibilities[comp.id] = { ...saved, itemsHidden: { ...saved.itemsHidden } }
+
+      // Instances can inherit the same visibility map as their source.
+      if(itemId && comp.creator.itemsHidden === component.creator.itemsHidden) {
+        const key = component.sourceItemId(itemId)
+        visibilities[comp.id].itemsHidden[key] = component.creator.itemsHidden[key]
+      }
+    })
+    if(!itemId) visibilities[component.id].compHidden = component.creator.hidden
+    feature.visibilities = visibilities
+
     this.timeline.invalidateFeature(feature)
     await this.regenerate()
     this.emit('feature-visibility-changed', feature)

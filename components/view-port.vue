@@ -110,6 +110,15 @@
         :position="pointerCoords"
       )
 
+      //- Ends the line or spline being drawn to start a new one
+      RestartWidget(
+        v-if="isReady && document.activeSketch"
+        :document="document"
+        :tool="activeTool"
+        @restart="restartTool"
+        @wheel="forwardWheelToCanvas"
+      )
+
       //- Floating UI widgets
       Transition(name="hide-selector")
         SelectionFeatureWidget(
@@ -1207,6 +1216,11 @@
         this.$emit('update:active-tool', tool)
         this.$emit('update:highlight', null)
         // this.renderer.render()
+      },
+
+      restartTool: function() {
+        this.activateTool(this.activeTool.constructor)
+        this.updateRegions(true)
       },
 
       resetProxyInteraction: function() {

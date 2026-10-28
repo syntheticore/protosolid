@@ -104,6 +104,9 @@ class Tool {
   // [{ key, label, dimension, value }]
   inputFields() { return [] }
 
+  // Last placed point of a running chain, where the viewport offers to restart the tool
+  restartPoint() { return null }
+
   snapExclusions() { return this.curve ? [this.curve] : [] }
 
   historyState() {
@@ -1601,6 +1604,10 @@ export class LineTool extends SketchTool {
     return this.curve ? polarPoint(this.curve.endpoints()[0], vec, this.locks) : vec
   }
 
+  restartPoint() {
+    return this.curve?.endpoints()[0]
+  }
+
   constrainCompletedLine(line, endSnap) {
     this.addLockedDimension('length', [line], dimensionPosition(line, line.length() * 0.2))
     this.constrainPoint(line, 1, endSnap)
@@ -1762,6 +1769,10 @@ export class SplineTool extends SketchTool {
 
   tangentSnapStart() {
     return this.mode == 'draw' && this.curve ? this.curve.handles().at(-2) : null
+  }
+
+  restartPoint() {
+    return this.tangentSnapStart()
   }
 
   lineSnapContext() {

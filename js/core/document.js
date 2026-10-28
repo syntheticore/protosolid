@@ -3,7 +3,7 @@ import { nextTick, markRaw } from 'vue'
 
 import { Timeline } from './timeline.js'
 import { saveFile, loadFile, chooseSavePath } from '../utils.js'
-import { Feature, SolidFeature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature, PlaceFeature } from './features.js'
+import { Feature, SolidFeature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PlaneFeature, PoseFeature, PlaceFeature } from './features.js'
 import { Selection } from '../selection.js'
 import { SectionView } from './component.js'
 import Emitter from '../emitter.js'
@@ -581,10 +581,16 @@ export default class Document extends Emitter {
         this.emit('look-at', this.activeSketch.workplane)
       }
 
-      // Show involved sketches while editing.
-      feature.involvedSketches().forEach(sketch => {
-        this.activeComponent.creator.itemsHidden[sketch.id] = false
+      // Show referenced geometry and the components containing it while editing.
+      feature.referencedItems().forEach(({ componentId, itemId }) => {
+        const component = this.getComponent(componentId)
+        if(!component) return
+        if(itemId) component.creator.itemsHidden[component.sourceItemId(itemId)] = false
+        for(let comp = component; comp; comp = comp.parent) comp.creator.hidden = false
       })
+
+      // Show the edited plane while editing.
+      if(feature instanceof PlaneFeature) this.activeComponent.creator.itemsHidden[feature.planeId] = false
 
       // Legacy and non-solid features do not have a saved visibility state.
       if(!feature.visibilities) compIds.forEach(id => this.getComponent(id).creator.hidden = false )

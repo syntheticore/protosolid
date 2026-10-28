@@ -52,7 +52,7 @@
   template(v-for="helper in component.helpers")
 
     HelperProxy(
-      v-if="!(document.activeMerge && helper.isStandard()) && (isHelperHighlighted(helper) || !component.isItemHidden(helper.id) && (component.id === document.activeComponent?.id || document.activeFeature instanceof JointFeature || (projectingPoints && helper instanceof PointHelper)))"
+      v-if="!(document.activeMerge && helper.isStandard()) && (isHelperHighlighted(helper) || !component.isItemHidden(helper.id) && (component.id === document.activeComponent?.id || referencedItemIds.has(helper.id) || document.activeFeature instanceof JointFeature || (projectingPoints && helper instanceof PointHelper)))"
       :key="helper.id"
       :document="document"
       :component="component"
@@ -141,6 +141,9 @@
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.component) )
   const projecting = computed(() => props.activeTool instanceof ProjectionTool )
   const projectingPoints = computed(() => props.activeTool instanceof ProjectTool )
+  const referencedItemIds = computed(() => new Set((props.document.activeFeature?.referencedItems() || [])
+    .filter(item => item.componentId == props.component.id)
+    .map(item => item.itemId)))
 
   const transform = computed(() => {
     return (props.parentTransform || new THREE.Matrix4())

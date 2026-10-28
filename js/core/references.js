@@ -17,6 +17,10 @@ export class Reference {
 
   update(_tree) {}
 
+  // Geometry that must be shown while the referencing feature is edited,
+  // as { componentId, itemId }. Whole components have no item id.
+  referencedItems() { return [] }
+
   clone() {
     return new this.constructor(this.item)
   }
@@ -33,6 +37,8 @@ export class ComponentReference extends Reference {
     if(!component) return { type: 'error', msg: 'Component reference was lost' }
     this.item = component
   }
+
+  referencedItems() { return [{ componentId: this.componentId }] }
 
   clone() { return new ComponentReference(this.item, this.componentId) }
   dump() { return { componentId: this.componentId } }
@@ -84,6 +90,10 @@ class TopoReference extends Reference {
   }
 
   getItems() { return this.items }
+
+  referencedItems() {
+    return this.items.map(item => ({ componentId: this.componentId, itemId: (item.solid || item).id }))
+  }
 
   updateTopology(tree, label) {
     const compound = tree.findChild(this.componentId)?.compound
@@ -185,6 +195,10 @@ export class PatternInputReference extends Reference {
     }
   }
 
+  referencedItems() {
+    return (this.componentReference || this.solidReference)?.referencedItems() || []
+  }
+
   clone() {
     return new PatternInputReference(
       this.item,
@@ -235,6 +249,8 @@ export class CurveReference extends Reference {
     return new CurveReference(this.item, this.componentId, this.sketchId, this.isProjection, this.itemId, this.outputIndex)
   }
 
+  referencedItems() { return [{ componentId: this.componentId, itemId: this.sketchId }] }
+
   update(tree) {
     const comp = tree.findChild(this.componentId)
     const sketch = comp?.sketches.find(sketch => sketch.id == this.sketchId )
@@ -274,6 +290,8 @@ export class SketchOriginReference extends Reference {
     this.item = sketch.origin()
   }
 
+  referencedItems() { return [{ componentId: this.componentId, itemId: this.sketchId }] }
+
   clone() {
     return new SketchOriginReference(this.item, this.componentId, this.sketchId)
   }
@@ -296,6 +314,8 @@ export class ProfileReference extends Reference {
   update(_tree) {
     return this.item.update()
   }
+
+  referencedItems() { return [{ componentId: this.item.sketch.component.id, itemId: this.item.sketch.id }] }
 
   clone() {
     return new ProfileReference(this.item.clone())
@@ -359,6 +379,8 @@ export class HelperReference extends Reference {
     this.item = helper
   }
 
+  referencedItems() { return [{ componentId: this.componentId, itemId: this.helperId }] }
+
   clone() {
     return new HelperReference(this.item, this.componentId, this.helperId)
   }
@@ -388,6 +410,8 @@ export class PlanarReference extends Reference {
     return this.item.update(tree)
   }
 
+  referencedItems() { return this.item.referencedItems() }
+
   clone() {
     return new PlanarReference(this.item.clone())
   }
@@ -409,6 +433,8 @@ export class AxialReference extends Reference {
     return this.item.update(tree)
   }
 
+  referencedItems() { return this.item.referencedItems() }
+
   clone() {
     return new AxialReference(this.item.clone())
   }
@@ -429,6 +455,8 @@ export class PointReference extends Reference {
   update(tree) {
     return this.item.update(tree)
   }
+
+  referencedItems() { return this.item.referencedItems() }
 
   clone() {
     return new PointReference(this.item.clone())

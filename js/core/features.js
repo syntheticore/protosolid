@@ -267,6 +267,12 @@ export class Feature {
     })
   }
 
+  referencedItems() {
+    return Object.keys(this.settings)
+      .filter(key => this[key] && this.needsPicker(key, true))
+      .flatMap(key => [this[key]()].flat().flatMap(ref => ref.referencedItems()))
+  }
+
   getValues() {
     const values = {}
     Object.keys(this.settings).forEach(key => {

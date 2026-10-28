@@ -345,13 +345,11 @@ pub(super) fn insert_homogeneous_knot4(
     controls: &mut Vec<Vec4>,
 ) -> KernelResult<()> {
     let old_count = controls.len();
-    let span = if knot >= knots[old_count] {
-        old_count - 1
-    } else {
-        (degree..old_count)
-            .find(|index| knot >= knots[*index] && knot < knots[*index + 1])
-            .ok_or_else(|| invalid("NURBS knot insertion parameter is outside the domain"))?
-    };
+    // At an unclamped natural endpoint the insertion span lies beyond the
+    // last active span. Retain those exterior knots while clamping the hull.
+    let span = (degree..knots.len() - 1)
+        .find(|index| knot >= knots[*index] && knot < knots[*index + 1])
+        .ok_or_else(|| invalid("NURBS knot insertion parameter is outside the domain"))?;
     let multiplicity = knots.iter().filter(|candidate| **candidate == knot).count();
     let mut inserted = vec![Vec4::new(0.0, 0.0, 0.0, 0.0); old_count + 1];
     inserted[..=span - degree].copy_from_slice(&controls[..=span - degree]);

@@ -17,8 +17,8 @@ use cgmath::prelude::*;
 use super::{fit, StepAssembly, StepLengthUnit, StepOccurrence};
 use crate::{
     invalid, BodyId, Compound, Curve2, Curve3, EdgeId, FaceId, FaceOrientation, KernelResult,
-    LoopKind, ModelTolerance, NurbsCurve3, NurbsSurface3, Point2, Point3, RevolvedSurface3,
-    ShellId, Surface3, Topology, Vec2, Vec3, VertexId,
+    LoopKind, ModelTolerance, NurbsCurve3, NurbsSurface3, Point3, RevolvedSurface3,
+    ShellId, Surface3, Topology, Vec3, VertexId,
 };
 
 pub(super) fn write(compound: &Compound, name: &str, timestamp: &str) -> KernelResult<String> {
@@ -134,6 +134,15 @@ impl Writer<'_> {
         self.add(format!("CIRCLE('',#{placement},{})", real(radius * self.scale)))
     }
 
+    fn exact_curve(&mut self, curve: &Curve3) -> Option<usize> {
+        match curve {
+            Curve3::Line(line) => Some(self.line(line.origin(), line.direction())),
+            Curve3::Circle(circle) => Some(self.circle(circle.center(), circle.normal(), circle.x_radius(), circle.radius())),
+            Curve3::Nurbs(curve) => Some(self.bspline_curve(curve)),
+            _ => None,
+        }
+    }
+
     fn bspline_curve(&mut self, curve: &NurbsCurve3) -> usize {
         let points = curve
             .control_points()
@@ -211,16 +220,11 @@ impl Writer<'_> {
         let (start, end) = (self.vertex(start)?, self.vertex(end)?);
         let range = edge.range();
         let forward = range.span() > 0.0;
-        let (curve, same_sense) = match edge.curve() {
-            Curve3::Line(line) => (self.line(line.origin(), line.direction()), forward),
-            Curve3::Circle(circle) => (
-                self.circle(circle.center(), circle.normal(), circle.x_radius(), circle.radius()),
-                forward,
-            ),
-            Curve3::Nurbs(curve) => (self.bspline_curve(curve), forward),
+        let (curve, same_sense) = match self.exact_curve(edge.curve()) {
+            Some(curve) => (curve, forward),
             // Curves are cheap to fit closely; keeping them on their exact
             // neighbours leaves the support fits as the only deviation.
-            curve => (self.bspline_curve(&fit::curve(curve, range, self.fit_tolerance * 0.01)?), true),
+            None => (self.bspline_curve(&fit::curve(edge.curve(), range, self.fit_tolerance * 0.01)?), true),
         };
         let id = self.add(format!("EDGE_CURVE('',#{start},#{end},#{curve},{})", logical(same_sense)));
         self.edges.insert(edge_id, id);
@@ -301,6 +305,25 @@ impl Writer<'_> {
                 (id, Sense::Normal(sample - tube))
             }
             Surface3::Nurbs(nurbs) => (self.bspline_surface(nurbs), Sense::Parameterization),
+            Surface3::Swept(swept) => match swept.rail() {
+                Curve3::Line(rail) => {
+                    // A straight rail has a constant moving frame. Lift the
+                    // profile at v=0 so STEP retains S(u,v) = C(u) + v * D.
+                    let plane = swept.section_plane(0.0)?;
+                    let curve = Surface3::Plane(plane).boundary_curve(swept.profile().curve().clone(),
+                        swept.profile().range(), self.tolerance)?;
+                    match self.exact_curve(&curve) {
+                        Some(profile) => {
+                            let direction = rail.direction();
+                            let unit = self.direction(direction);
+                            let vector = self.add(format!("VECTOR('',#{unit},{})", real(direction.magnitude() * self.scale)));
+                            (self.add(format!("SURFACE_OF_LINEAR_EXTRUSION('',#{profile},#{vector})")), Sense::Parameterization)
+                        }
+                        None => self.fitted_surface(face_id)?,
+                    }
+                }
+                _ => self.fitted_surface(face_id)?,
+            },
             Surface3::Revolved(revolved) => match self.profile_curve(revolved) {
                 Some(curve) => {
                     let frame = revolved.frame();
@@ -326,31 +349,20 @@ impl Writer<'_> {
     /// parameter, so the revolution keeps the kernel parameterization.
     fn profile_curve(&mut self, surface: &RevolvedSurface3) -> Option<usize> {
         let frame = surface.frame();
-        let lift = |point: Point2| frame.origin() + frame.x() * point.x + frame.z() * point.y;
-        let lift_vector = |vector: Vec2| frame.x() * vector.x + frame.z() * vector.y;
-        match surface.profile() {
-            Curve2::Line(line) => Some(self.line(lift(line.origin()), lift_vector(line.direction()))),
-            // A whole circle would sweep its support twice with opposite
-            // normals; write only the retained arc.
-            Curve2::Circle(circle) => {
-                let range = surface.profile_range();
-                let arc = arc(lift(circle.center()), frame.x() * circle.radius(), frame.z() * circle.radius(),
-                    range.start.min(range.end), range.start.max(range.end)).ok()?;
-                let arc = if range.span() < 0.0 { reversed(&arc).ok()? } else { arc };
-                Some(self.bspline_curve(&arc))
-            }
-            Curve2::Nurbs(curve) => {
-                let lifted = NurbsCurve3::new(
-                    curve.degree(),
-                    curve.control_points().iter().map(|point| lift(*point)).collect(),
-                    curve.weights().to_vec(),
-                    curve.knots().to_vec(),
-                )
-                .ok()?;
-                Some(self.bspline_curve(&lifted))
-            }
-            _ => None,
+        let plane = crate::Plane3::new(frame.origin(), frame.x(), frame.z(), self.tolerance).ok()?;
+        if let Curve2::Circle(circle) = surface.profile() {
+            // A whole circle would sweep its support twice with opposite normals.
+            let range = surface.profile_range();
+            let arc = arc(plane.point_at(circle.center()), frame.x() * circle.radius(),
+                frame.z() * circle.radius(), range.start.min(range.end), range.start.max(range.end)).ok()?;
+            let arc = if range.span() < 0.0 {
+                let end = *arc.knots().last()?;
+                arc.reparameterized(end, -1.0).ok()?
+            } else { arc };
+            return Some(self.bspline_curve(&arc));
         }
+        let curve = plane.lift_curve(surface.profile(), self.tolerance).ok()?;
+        self.exact_curve(&curve)
     }
 
     fn face(&mut self, face_id: FaceId, reversed: bool) -> KernelResult<usize> {
@@ -607,17 +619,6 @@ fn arc(center: Point3, x: Vec3, y: Vec3, start: f64, end: f64) -> KernelResult<N
     NurbsCurve3::new(2, points, weights, knots)
 }
 
-fn reversed(curve: &NurbsCurve3) -> KernelResult<NurbsCurve3> {
-    let last = *curve.knots().last().unwrap();
-    let first = curve.knots()[0];
-    NurbsCurve3::new(
-        curve.degree(),
-        curve.control_points().iter().rev().copied().collect(),
-        curve.weights().iter().rev().copied().collect(),
-        curve.knots().iter().rev().map(|knot| first + last - knot).collect(),
-    )
-}
-
 /// Distinct knots and their multiplicities.
 fn knot_runs(knots: &[f64]) -> (String, String) {
     let mut runs = Vec::<(f64, usize)>::new();
@@ -671,4 +672,51 @@ fn string(value: &str) -> String {
         }
     }
     text + "'"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Point2;
+
+    #[test]
+    fn straight_sweep_exports_without_fitting() {
+        let tolerance = ModelTolerance::default();
+        let profile = crate::TrimmedCurve2::new(crate::NurbsCurve2::new(2,
+            vec![Point2::new(0.0, 0.0), Point2::new(2.0, 3.0), Point2::new(4.0, 0.0)],
+            vec![1.0, 0.7, 1.0], vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap(),
+            crate::ParameterRange::new(0.0, 1.0).unwrap()).unwrap();
+        let wire = crate::Wire2::new([profile.clone(),
+            crate::TrimmedCurve2::line(Point2::new(4.0, 0.0), Point2::origin()).unwrap()], tolerance).unwrap();
+        let body = crate::Profile::new(wire, [], tolerance).unwrap()
+            .extrude(crate::Plane3::xy(), Vec3::unit_z() * 5.0).unwrap();
+        let mut topology = body.topology().clone();
+        let face = topology.faces().find(|(_, face)| matches!(face.surface(), Surface3::Nurbs(_))).unwrap().0;
+        let Surface3::Nurbs(surface) = topology.face(face).unwrap().surface() else { unreachable!() };
+        let curve: Curve3 = surface.isoparametric_curve(1, 0.0).unwrap().into();
+        let flat = crate::Plane3::xy().flatten_curve(&curve, tolerance).unwrap().unwrap();
+        // A nonzero rail start must not translate the exported support.
+        let plane = crate::Plane3::xy();
+        topology.faces.get_mut(face).unwrap().surface = Surface3::Swept(crate::SweptSurface3::new(plane,
+            crate::TrimmedCurve2::new(flat, profile.range()).unwrap(),
+            crate::Line3::new(Point3::new(1.0, 2.0, 3.0), Vec3::unit_z() * 5.0).unwrap().into(),
+            crate::ParameterRange::new(2.0, 3.0).unwrap(), tolerance).unwrap());
+        for loop_id in topology.face(face).unwrap().loops().to_vec() {
+            for coedge_id in topology.loop_coedges(loop_id).unwrap() {
+                let coedge = topology.coedges.get_mut(coedge_id).unwrap();
+                let Curve2::Line(line) = &coedge.pcurve else { panic!("expected affine trim") };
+                coedge.pcurve = crate::Line2::new(line.origin() + crate::Vec2::new(0.0, 2.0), line.direction()).unwrap().into();
+            }
+        }
+        let mut document = Document::new(StepLengthUnit::Millimetre);
+        let mut writer = Writer { topology: &topology, tolerance, fit_tolerance: 1.0e-6, scale: 1.0,
+            entities: &mut document.entities, vertices: BTreeMap::new(), edges: BTreeMap::new() };
+        let solid = writer.body(topology.bodies().next().unwrap().0).unwrap();
+        let text = document.finish(&[ProductShape { name: "sweep", solids: vec![solid], colors: &[], occurrences: &[] }], "sweep", "");
+        assert!(text.contains("SURFACE_OF_LINEAR_EXTRUSION"));
+        assert!(!text.contains("B_SPLINE_SURFACE"));
+        let imported = Compound::from_step(&text, tolerance).unwrap();
+        assert!((imported.volume() - body.volume()).abs() < 1.0e-8);
+        assert!(imported.centroid().distance(body.centroid()) < 1.0e-8);
+    }
 }

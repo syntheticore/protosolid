@@ -2319,7 +2319,7 @@ fn trace_surface_intersections_in_domains(
     })
 }
 
-/// Replace a complete isoparametric plane section with its exact rational
+/// Replace an isoparametric plane section with its exact rational
 /// curve. The control hull certifies planarity; trace samples only identify
 /// which parameter is constant. This avoids repeated implicit corrections in
 /// projected profiles and their later extrusions.
@@ -2332,11 +2332,10 @@ fn isoparametric_plane_section(surface: &super::NurbsSurface3, plane: Plane3,
         if parameters.iter().any(|uv| (uv[side + axis] - constant).abs() > epsilon) { continue; }
         let basis = surface.isoparametric_curve(axis, constant)?;
         let DomainBounds::Bounded(domain) = basis.domain().bounds else { unreachable!() };
-        let start = parameters[0][side + 1 - axis];
-        let end = parameters.last().unwrap()[side + 1 - axis];
-        let epsilon = f64::EPSILON * domain.start.abs().max(domain.end.abs()).max(1.0) * 256.0;
-        let range = if start < end { domain } else { domain.reversed() };
-        if (start - range.start).abs() > epsilon || (end - range.end).abs() > epsilon { continue; }
+        let start = parameters[0][side + 1 - axis].clamp(domain.start, domain.end);
+        let end = parameters.last().unwrap()[side + 1 - axis].clamp(domain.start, domain.end);
+        let range = super::ParameterRange::new(start, end)?;
+        let basis = basis.restricted(range)?;
         let mut error = 0.0_f64;
         let planar = basis.control_points().iter().all(|point| {
             let distance = (*point - plane.origin()).dot(plane_normal).abs();
@@ -2344,11 +2343,7 @@ fn isoparametric_plane_section(surface: &super::NurbsSurface3, plane: Plane3,
             distance <= f64::EPSILON * point.to_vec().magnitude().max(1.0) * 256.0
         });
         if !planar { continue; }
-        let mut points = basis.control_points().to_vec();
-        let mut weights = basis.weights().to_vec();
-        let mut knots = basis.knots().iter().map(|knot| (*knot - range.start) / range.span()).collect::<Vec<_>>();
-        if range.span() < 0.0 { points.reverse(); weights.reverse(); knots.reverse(); }
-        let curve: Curve3 = super::NurbsCurve3::new(basis.degree(), points, weights, knots)?.into();
+        let curve: Curve3 = basis.reparameterized(range.start, range.span())?.into();
         let (origin, direction) = if axis == 0 {
             (Point2::new(constant, range.start), crate::Vec2::new(0.0, range.span()))
         } else { (Point2::new(range.start, constant), crate::Vec2::new(range.span(), 0.0)) };
@@ -2357,6 +2352,29 @@ fn isoparametric_plane_section(surface: &super::NurbsSurface3, plane: Plane3,
         return Ok(Some(SurfaceSurfaceCurve { curve, first_pcurve, second_pcurve, achieved_error: error }));
     }
     Ok(None)
+}
+
+#[test]
+fn trimmed_isoparametric_sections_retain_exact_curves() {
+    let tolerance = ModelTolerance::default();
+    let surface = super::NurbsSurface3::new((2, 1), [0.0, 1.0].into_iter().map(|y| {
+        vec![Point3::new(0.0, y, 0.0), Point3::new(1.0, y, 2.0), Point3::new(3.0, y, 1.0)]
+    }).collect(), vec![vec![1.0, 0.7, 1.0]; 2],
+        (vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0])).unwrap();
+    let plane = Plane3::new(Point3::new(0.0, 0.3, 0.0), Vec3::unit_x(), Vec3::unit_z(), tolerance).unwrap();
+    for (start, end) in [(0.2, 0.8), (0.8, 0.2)] {
+        let parameters = [[start, 0.3, 0.0, 0.0], [(start + end) * 0.5, 0.3, 0.0, 0.0], [end, 0.3, 0.0, 0.0]];
+        let section = isoparametric_plane_section(&surface, plane, &parameters, 0, tolerance).unwrap().unwrap();
+        assert!(matches!(section.curve, Curve3::Nurbs(_)));
+        assert_eq!(section.curve.domain().bounds, DomainBounds::Bounded(super::ParameterRange::new(0.0, 1.0).unwrap()));
+        for t in [0.0, 0.2, 0.7, 1.0] {
+            let point = section.curve.evaluate(t).unwrap().point;
+            let uv = section.first_pcurve.evaluate(t).unwrap().point;
+            assert!(point.distance(Surface3::Nurbs(surface.clone()).evaluate(uv.x, uv.y).unwrap().point) < 1.0e-12);
+            let uv = section.second_pcurve.evaluate(t).unwrap().point;
+            assert!(point.distance(plane.point_at(uv)) < 1.0e-12);
+        }
+    }
 }
 
 fn bounded_surface_domains(surface: &Surface3) -> KernelResult<[super::ParameterRange; 2]> {

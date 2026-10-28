@@ -2,6 +2,105 @@ use super::*;
 use super::super::{IntersectionKind, IntersectionSet};
 
 #[test]
+fn analytic_plane_cylinder_correction_preserves_the_guide_gauge_and_jets() {
+    let tolerance = ModelTolerance::default();
+    let plane: Surface3 = Plane3::new(Point3::new(2.0, -1.0, 3.0),
+        Vec3::new(2.0, 0.0, 0.8), Vec3::new(0.5, 3.0, 0.3), tolerance).unwrap().into();
+    let cylinder: Surface3 = Cylinder3::new(Point3::new(-0.7, 0.6, -1.1), Vec3::unit_z() * 7.0,
+        Vec3::unit_x() * 3.0, Vec3::unit_y() * 3.0, tolerance).unwrap().into();
+    let IntersectionSet::Isolated(curves) = plane.intersect_surface(&cylinder, tolerance).unwrap() else { panic!("missing ellipse") };
+    let Curve3::SurfaceIntersection(curve) = &curves[0].curve else { panic!("lost surface pair") };
+    let swapped = SurfaceIntersectionCurve::new(cylinder, plane, curve.second_pcurve().clone(),
+        curve.first_pcurve().clone(), curve.range(), tolerance, 0.0).unwrap();
+    for curve in [curve, &swapped] {
+        for t in [0.1, 0.7, 2.1, 4.3, 6.1] {
+            let uv = curve.corrected_parameters(t).unwrap();
+            let first = curve.first_pcurve().evaluate(t).unwrap();
+            let second = curve.second_pcurve().evaluate(t).unwrap();
+            let guide = [first.point.x, first.point.y, second.point.x, second.point.y];
+            let tangent = [first.first_derivative.x, first.first_derivative.y,
+                second.first_derivative.x, second.first_derivative.y];
+            let gauge = (0..4).map(|i| (uv[i] - guide[i]) * tangent[i]).sum::<f64>();
+            assert!(gauge.abs() < 1.0e-10);
+            let point = curve.evaluate(t).unwrap();
+            assert!(point.point.distance(curve.first_surface().evaluate(uv[0], uv[1]).unwrap().point) < 1.0e-10);
+            assert!(point.point.distance(curve.second_surface().evaluate(uv[2], uv[3]).unwrap().point) < 1.0e-10);
+            let before = curve.evaluate(t - 1.0e-5).unwrap();
+            let after = curve.evaluate(t + 1.0e-5).unwrap();
+            assert!((point.first_derivative - (after.point - before.point) / 2.0e-5).magnitude() < 1.0e-6);
+            assert!((point.second_derivative - (after.first_derivative - before.first_derivative) / 2.0e-5).magnitude() < 1.0e-5);
+        }
+    }
+}
+
+#[test]
+fn exact_boundary_images_preserve_parameters_and_derivatives() {
+    let tolerance = ModelTolerance::default();
+    let plane = Plane3::new(Point3::new(3.0, -2.0, 4.0), Vec3::new(2.0, 0.0, 0.0),
+        Vec3::new(0.5, 3.0, 0.0), tolerance).unwrap();
+    let profile: Curve2 = NurbsCurve2::new(2,
+        vec![Point2::new(0.0, 0.0), Point2::new(1.0, 2.0), Point2::new(3.0, 1.0)],
+        vec![1.0, 0.7, 1.0], vec![2.0, 2.0, 2.0, 5.0, 5.0, 5.0]).unwrap().into();
+    let range = ParameterRange::new(2.5, 4.5).unwrap();
+    let image = Surface3::Plane(plane).boundary_curve(profile.clone(), range, tolerance).unwrap();
+    assert!(matches!(image, Curve3::Nurbs(_)));
+    for i in 0..=16 {
+        let t = range.start + range.span() * i as f64 / 16.0;
+        let uv = profile.evaluate(t).unwrap();
+        let value = image.evaluate(t).unwrap();
+        assert!(value.point.distance(plane.point_at(uv.point)) < 1.0e-12);
+        assert!((value.first_derivative - plane.vector_at(uv.first_derivative)).magnitude() < 1.0e-12);
+    }
+    let surface: Surface3 = NurbsSurface3::new((2, 1),
+        vec![vec![Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 2.0), Point3::new(3.0, 0.0, 1.0)],
+             vec![Point3::new(0.0, 4.0, 1.0), Point3::new(1.0, 4.0, 3.0), Point3::new(3.0, 4.0, 2.0)]],
+        vec![vec![1.0, 0.7, 1.0]; 2],
+        (vec![2.0, 2.0, 2.0, 5.0, 5.0, 5.0], vec![-1.0, -1.0, 1.0, 1.0])).unwrap().into();
+    for (origin, direction) in [(Point2::new(4.8, 0.3), Vec2::new(-2.0, 0.0)),
+        (Point2::new(2.1, -0.9), Vec2::new(2.0, 0.0)),
+        (Point2::new(3.3, 0.9), Vec2::new(0.0, -1.5))] {
+        let pcurve: Curve2 = Line2::new(origin, direction).unwrap().into();
+        let range = ParameterRange::new(0.1, 0.8).unwrap();
+        let image = surface.boundary_curve(pcurve.clone(), range, tolerance).unwrap();
+        assert!(matches!(image, Curve3::Nurbs(_)));
+        for i in 0..=16 {
+            let t = range.start + range.span() * i as f64 / 16.0;
+            let uv = pcurve.evaluate(t).unwrap().point;
+            let value = surface.evaluate(uv.x, uv.y).unwrap();
+            let exact = image.evaluate(t).unwrap();
+            assert!(exact.point.distance(value.point) < 1.0e-12);
+            assert!((exact.first_derivative - value.du * direction.x - value.dv * direction.y).magnitude() < 1.0e-11);
+            assert!((exact.second_derivative - value.duu * direction.x.powi(2) - value.dvv * direction.y.powi(2)).magnitude() < 1.0e-10);
+        }
+    }
+}
+
+#[test]
+fn rational_curve_restriction_preserves_interior_knots_and_reversal() {
+    for knots in [vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
+        vec![-2.0, -1.0, 0.0, 0.5, 1.0, 2.0, 3.0]] {
+        let curve = NurbsCurve3::new(2,
+            vec![Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 0.0),
+                Point3::new(2.0, -1.0, 1.0), Point3::new(3.0, 1.0, 2.0)],
+            vec![1.0, 0.7, 1.2, 1.0], knots).unwrap();
+        for (start, end) in [(-0.1, 0.8), (0.2, 1.5), (1.5, 0.2)] {
+            assert!(curve.restricted(ParameterRange::new(start, end).unwrap()).is_err());
+        }
+        for (start, end) in [(0.0, 1.0), (0.2, 0.8), (0.5, 0.9), (0.8, 0.2)] {
+            let trimmed = curve.restricted(ParameterRange::new(start, end).unwrap()).unwrap()
+                .reparameterized(start, end - start).unwrap();
+            for i in 0..=32 {
+                let t = i as f64 / 32.0;
+                let original = curve.evaluate(start + (end - start) * t).unwrap();
+                let value = trimmed.evaluate(t).unwrap();
+                assert!(value.point.distance(original.point) < 1.0e-12, "{start}..{end} at {t}");
+                assert!((value.first_derivative - original.first_derivative * (end - start)).magnitude() < 1.0e-11);
+            }
+        }
+    }
+}
+
+#[test]
 fn fillet_modes_preserve_width_and_curvature_along_varying_support_normals() {
     let tolerance = ModelTolerance::default();
     let plane: Surface3 = Plane3::new(Point3::origin(), Vec3::new(1.0, 0.0, 0.4), Vec3::unit_y(), tolerance).unwrap().into();

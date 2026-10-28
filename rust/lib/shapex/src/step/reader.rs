@@ -23,7 +23,7 @@ use crate::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment};
 use crate::{
     invalid, unsupported, Compound, Cone3, Curve2, Curve3, Cylinder3, DomainBounds, FaceOrientation,
     Frame3, Kernel, KernelResult, Line3, LoopKind, Matrix3, ModelTolerance, NurbsCurve2,
-    NurbsCurve3, NurbsSurface3, OffsetSurface3, ParameterRange, Plane3, Point2, Point3, RigidTransform3,
+    NurbsCurve3, NurbsSurface3, ParameterRange, Plane3, Point2, Point3, RigidTransform3,
     RevolvedSurface3, Sphere3, Surface3, SurfaceProjectionPcurve2, Torus3, Vec3, Circle3,
 };
 
@@ -664,16 +664,9 @@ impl<'a> Reader<'a> {
             "OFFSET_SURFACE" => {
                 let (base, flipped) = self.surface(reference(argument(record, 1)?)?, placement, extent)?;
                 let distance = self.length(argument(record, 2)?)? * if flipped { -1.0 } else { 1.0 };
-                let surface = match base {
-                    Surface3::Plane(plane) => Plane3::new(
-                        plane.origin() + plane.normal() * distance,
-                        plane.u(),
-                        plane.v(),
-                        tolerance,
-                    )?
-                    .into(),
-                    base => OffsetSurface3::new(base, distance, tolerance)?.into(),
-                };
+                let surface = base.offset(distance, tolerance).or_else(|_| {
+                    crate::OffsetSurface3::new(base, distance, tolerance).map(Surface3::Offset)
+                })?;
                 (surface, flipped)
             }
             "SURFACE_OF_REVOLUTION" => {
@@ -1573,4 +1566,50 @@ fn signed_area(charts: &[Vec<Point2>]) -> f64 {
         })
         .sum::<f64>()
         * 0.5
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn imported_offsets_retain_analytic_supports_and_normals() {
+        let model = super::super::parser::parse("DATA;
+            #1=CARTESIAN_POINT('',(1.,2.,3.));
+            #2=DIRECTION('',(0.,0.,1.)); #3=DIRECTION('',(1.,0.,0.));
+            #4=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+            #5=PLANE('',#4); #6=CYLINDRICAL_SURFACE('',#4,4.);
+            #7=SPHERICAL_SURFACE('',#4,4.); #8=TOROIDAL_SURFACE('',#4,6.,2.);
+            #9=OFFSET_SURFACE('',#5,0.5,.F.); #10=OFFSET_SURFACE('',#6,-0.5,.F.);
+            #11=OFFSET_SURFACE('',#7,0.5,.F.); #12=OFFSET_SURFACE('',#8,-0.5,.F.);
+            #13=OFFSET_SURFACE('',#8,4.5,.F.); #14=OFFSET_SURFACE('',#6,-5.,.F.);
+            #15=OFFSET_SURFACE('',#7,-5.,.F.); #16=OFFSET_SURFACE('',#7,-4.,.F.);
+            #17=OFFSET_SURFACE('',#6,-4.,.F.);
+            ENDSEC;").unwrap();
+        let reader = Reader::new(&model, ModelTolerance::default());
+        for (base, offset, distance) in [(5, 9, 0.5), (6, 10, -0.5), (7, 11, 0.5), (8, 12, -0.5)] {
+            let placement = Placement::identity();
+            let (base, _) = reader.surface(base, &placement, &[]).unwrap();
+            let (offset, flipped) = reader.surface(offset, &placement, &[]).unwrap();
+            assert_eq!(offset.kind_name(), base.kind_name());
+            assert!(!flipped);
+            for (u, v) in [(0.0, 0.0), (0.8, 0.4), (5.9, -0.3)] {
+                let expected = base.evaluate(u, v).unwrap().point + base.normal(u, v).unwrap() * distance;
+                assert!(offset.evaluate(u, v).unwrap().point.distance(expected) < 1.0e-12);
+                assert!(offset.normal(u, v).unwrap().dot(base.normal(u, v).unwrap()) > 1.0 - 1.0e-12);
+            }
+        }
+        for (base, offset, distance) in [(8, 13, 4.5), (6, 14, -5.0), (7, 15, -5.0),
+            (7, 16, -4.0), (6, 17, -4.0)] {
+            let placement = Placement::identity();
+            let (base, _) = reader.surface(base, &placement, &[]).unwrap();
+            let (offset, flipped) = reader.surface(offset, &placement, &[]).unwrap();
+            assert!(matches!(offset, Surface3::Offset(_)));
+            assert!(!flipped);
+            for (u, v) in [(0.0, 0.0), (0.8, 0.4), (5.9, -0.3)] {
+                let expected = base.evaluate(u, v).unwrap().point + base.normal(u, v).unwrap() * distance;
+                assert!(offset.evaluate(u, v).unwrap().point.distance(expected) < 1.0e-12);
+            }
+        }
+    }
 }

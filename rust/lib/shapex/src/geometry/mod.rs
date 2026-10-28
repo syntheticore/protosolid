@@ -1013,6 +1013,9 @@ impl Surface3 {
                 ).map(Curve3::from);
             }
         }
+        if let (Self::Plane(plane), Curve2::Line(_) | Curve2::Nurbs(_)) = (self, &pcurve) {
+            return plane.lift_curve(&pcurve, tolerance);
+        }
         if let Curve2::SurfaceProjection(projected) = &pcurve {
             if projected.surface() == self {
                 return Ok(projected.curve().clone());
@@ -1036,6 +1039,11 @@ impl Surface3 {
                             )
                             .map(Curve3::from);
                         }
+                        Curve3::Nurbs(curve) => {
+                            return NurbsCurve3::new(curve.degree(),
+                                curve.control_points().iter().map(|point| *point + translation).collect(),
+                                curve.weights().to_vec(), curve.knots().to_vec()).map(Curve3::from);
+                        }
                         _ => {}
                     }
                 }
@@ -1045,12 +1053,12 @@ impl Surface3 {
             let origin = line.origin();
             let direction = line.direction();
             match self {
-                Self::Plane(plane) => {
-                    return Line3::new(
-                        plane.origin() + plane.u() * origin.x + plane.v() * origin.y,
-                        plane.u() * direction.x + plane.v() * direction.y,
-                    )
-                    .map(Curve3::from);
+                Self::Nurbs(surface) if direction.x == 0.0 || direction.y == 0.0 => {
+                    let (axis, constant, origin, rate) = if direction.x == 0.0 {
+                        (0, origin.x, origin.y, direction.y)
+                    } else { (1, origin.y, origin.x, direction.x) };
+                    return surface.isoparametric_curve(axis, constant)?
+                        .reparameterized(origin, rate).map(Curve3::from);
                 }
                 Self::Cylinder(_) | Self::Cone(_) if direction.x == 0.0 => {
                     let value = self.evaluate(origin.x, origin.y)?;

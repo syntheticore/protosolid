@@ -42,6 +42,43 @@ impl NurbsCurve3 {
         &self.knots
     }
 
+    /// Change parameters without changing the rational curve: the result at
+    /// `t` is this curve at `origin + scale * t`.
+    pub(crate) fn reparameterized(mut self, origin: f64, scale: f64) -> KernelResult<Self> {
+        for knot in &mut self.knots { *knot = (*knot - origin) / scale; }
+        if scale < 0.0 {
+            self.control_points.reverse();
+            self.weights.reverse();
+            self.knots.reverse();
+        }
+        Self::new(self.degree, self.control_points, self.weights, self.knots)
+    }
+
+    /// Restrict the control hull to a subrange by exact homogeneous knot
+    /// insertion. Parameters are retained, including at repeated knots.
+    pub(crate) fn restricted(&self, range: ParameterRange) -> KernelResult<Self> {
+        let low = range.start.min(range.end);
+        let high = range.start.max(range.end);
+        if low < self.knots[self.degree] || high > self.knots[self.control_points.len()] {
+            return Err(invalid("NURBS restriction lies outside the natural domain"));
+        }
+        let mut knots = self.knots.clone();
+        let mut controls = self.control_points.iter().zip(&self.weights)
+            .map(|(point, weight)| Vec4::new(point.x * weight, point.y * weight, point.z * weight, *weight))
+            .collect::<Vec<_>>();
+        for parameter in [low, high] {
+            while knots.iter().filter(|knot| **knot == parameter).count() <= self.degree {
+                insert_homogeneous_knot4(self.degree, parameter, &mut knots, &mut controls)?;
+            }
+        }
+        let start = knots.iter().position(|knot| *knot == low).unwrap();
+        let end = knots.iter().rposition(|knot| *knot == high).unwrap() + 1;
+        let controls = &controls[start..end - self.degree - 1];
+        Self::new(self.degree,
+            controls.iter().map(|value| Point3::from_vec(value.truncate() / value.w)).collect(),
+            controls.iter().map(|value| value.w).collect(), knots[start..end].to_vec())
+    }
+
     pub fn domain(&self) -> ParameterDomain {
         ParameterDomain {
             bounds: DomainBounds::Bounded(ParameterRange {

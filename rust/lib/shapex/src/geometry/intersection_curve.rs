@@ -1162,6 +1162,42 @@ impl SurfaceIntersectionCurve {
             "constant-width contact-rail solver did not converge on the selected branch"))
     }
 
+    /// A plane cuts a cylinder in an affine circle. Express its four surface
+    /// parameters in that angular coordinate and solve only the existing guide
+    /// gauge, preserving the parameterization used by blends and tessellation.
+    fn plane_cylinder_parameters(&self, plane: &Plane3, cylinder: &Cylinder3, side: usize,
+        guide: [f64; 4], tangent: [f64; 4]) -> KernelResult<Option<[f64; 4]>> {
+        let normal = plane.normal();
+        let denominator = normal.dot(cylinder.axis());
+        if denominator.abs() <= self.tolerance.angular * cylinder.axis().magnitude() { return Ok(None); }
+        let height = normal.dot(plane.origin() - cylinder.origin()) / denominator;
+        let x_height = -normal.dot(cylinder.x_radius()) / denominator;
+        let y_height = -normal.dot(cylinder.y_radius()) / denominator;
+        let center = plane.coordinates(cylinder.origin() + cylinder.axis() * height)?;
+        let x = plane.coordinates(cylinder.origin() + cylinder.axis() * height + cylinder.x_radius()
+            + cylinder.axis() * x_height)? - center;
+        let y = plane.coordinates(cylinder.origin() + cylinder.axis() * height + cylinder.y_radius()
+            + cylinder.axis() * y_height)? - center;
+        let mut angle = guide[side];
+        let target = f64::EPSILON * angle.abs().max(1.0) * 8.0;
+        for _ in 0..12 {
+            let (sin, cos) = angle.sin_cos();
+            let uv = center + x * cos + y * sin;
+            let derivative = -x * sin + y * cos;
+            let v = height + x_height * cos + y_height * sin;
+            let dv = -x_height * sin + y_height * cos;
+            let (parameters, derivative) = if side == 2 {
+                ([uv.x, uv.y, angle, v], [derivative.x, derivative.y, 1.0, dv])
+            } else { ([angle, v, uv.x, uv.y], [1.0, dv, derivative.x, derivative.y]) };
+            let slope = dot4(derivative, tangent);
+            if slope.abs() <= f64::EPSILON { return Ok(None); }
+            let step = dot4(sub4(parameters, guide), tangent) / slope;
+            if step.abs() <= target { return Ok(Some(parameters)); }
+            angle -= step;
+        }
+        Ok(None)
+    }
+
     pub(super) fn corrected_parameters(&self, parameter: f64) -> KernelResult<[f64; 4]> {
         if !self.range.contains(parameter, self.tolerance) {
             return Err(invalid(
@@ -1201,6 +1237,14 @@ impl SurfaceIntersectionCurve {
         let tangent = tangent.map(|value| value / tangent_norm);
         let mut parameters = guide;
         let plane_normal = match (self.first_surface.as_ref(), self.second_surface.as_ref()) {
+            (Surface3::Plane(plane), Surface3::Cylinder(cylinder)) | (Surface3::Cylinder(cylinder), Surface3::Plane(plane)) => {
+                let side = if matches!(self.first_surface.as_ref(), Surface3::Plane(_)) { 2 } else { 0 };
+                if let Some(parameters) = self.plane_cylinder_parameters(plane, cylinder, side, guide, tangent)? {
+                    self.evaluations.insert(parameter, (parameters, None, None));
+                    return Ok(parameters);
+                }
+                None
+            }
             (Surface3::Plane(plane), Surface3::Torus(_)) | (Surface3::Torus(_), Surface3::Plane(plane)) => Some(plane.normal()),
             _ => None,
         };

@@ -546,6 +546,7 @@ class HighlightTool extends Tool {
     if(this.viewport.pickingPath) this.viewport.updatePath(this.viewport.pickingPath)
     const object = await this.getObject(coords, true)
     this.viewport.$emit('update:highlight', object)
+    return object
   }
 
   getObject(coords, any) {
@@ -2911,7 +2912,9 @@ export class DimensionTool extends HighlightTool {
     if(!this.canPlaceDimension()) return super.mouseMove(vec, coords)
     if(this.items.length == 1 &&
       (this.items[0] instanceof Line || this.items[0] instanceof Circle || this.items[0] instanceof Arc)) {
-      await super.mouseMove(vec, coords)
+      // Hide the label while hovering a valid second element
+      const hovered = await super.mouseMove(vec, coords)
+      if(hovered && hovered != this.items[0]) return this.clearPreview()
     }
     this.updatePreview(vec)
   }

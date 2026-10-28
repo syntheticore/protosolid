@@ -105,6 +105,7 @@
       DrawingInput(
         v-if="hasDrawingInput"
         :key="activeTool.inputStage"
+        :class="{ hidden: drawingInputHidden }"
         :tool="activeTool"
         :component="document.top()"
         :position="pointerCoords"
@@ -245,6 +246,10 @@
         transform: scale(1)
         opacity: 1
 
+  // Stays mounted, keeping focus and typed values
+  .drawing-input.hidden
+    opacity: 0
+
   .selector-widget
     pointer-events: auto
     position: absolute
@@ -363,6 +368,7 @@
         exportPreviewMesh: null,
         sketchSectionSide: false,
         pointerCoords: null,
+        drawingInputHidden: false,
       }
     },
 
@@ -506,6 +512,8 @@
       this.renderer.on('change-view', (position, target) => {
         this.document.viewChanged(position, target)
         if(!this.widgets.length) this.$emit('update:highlight', null)
+        // The input stays at the last cursor position, so hide it until the pointer moves again
+        this.drawingInputHidden = true
       })
       this.isReady = true
 
@@ -1081,6 +1089,7 @@
         if(e.altKey) return
         const [vec, coords] = this.snap(e)
         this.pointerCoords = coords
+        this.drawingInputHidden = false
         if(this.pickingPath) this.pickingPath.target = coords
         if(vec || this.activeTool.probesSurface) this.activeTool.mouseMove(vec, coords)
         // At close zoom, background rays can miss the projection plane.

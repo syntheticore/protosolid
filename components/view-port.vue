@@ -111,12 +111,13 @@
         :position="pointerCoords"
       )
 
-      //- Ends the line or spline being drawn to start a new one
+      //- Ends the line or spline being drawn, to start a new one or exit the tool
       RestartWidget(
         v-if="isReady && document.activeSketch"
         :document="document"
         :tool="activeTool"
         @restart="restartTool"
+        @cancel="cancelTool"
         @wheel="forwardWheelToCanvas"
       )
 
@@ -1231,6 +1232,11 @@
 
       restartTool: function() {
         this.activateTool(this.activeTool.constructor)
+        this.updateRegions(true)
+      },
+
+      cancelTool: function() {
+        this.activateTool(ManipulationTool)
         this.updateRegions(true)
       },
 

@@ -163,7 +163,7 @@ test('circle splitting merges intersections on either side of the seam', () => {
   assert.ok(pieces.every(piece => Math.abs(piece.geom().range().span()) > 3))
 })
 
-test('degenerate projection input invalidates the projection', () => {
+test('degenerate projection input keeps the last outputs as broken', () => {
   const spatial = sx.TrimmedCurve3.new(
     sx.Line3.through(sx.Point3.new(0, 0, 0), sx.Point3.new(1, 0, 0)), sx.ParameterRange.new(0, 1),
   )
@@ -172,8 +172,8 @@ test('degenerate projection input invalidates the projection', () => {
   const previous = new Line(vector(0, 0), vector(1, 0))
   projection.outputs = [previous]
   projection.update({ findChild() {} })
-  assert.deepEqual(projection.outputs, [])
-  assert.equal(previous.geom, null)
+  assert.deepEqual(projection.outputs, [previous])
+  assert.ok(previous.geom)
   assert.match(projection.error, /cannot be projected/)
 })
 

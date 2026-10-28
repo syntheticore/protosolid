@@ -70,6 +70,13 @@ class Materials {
     this.projectedLine = this.line.clone()
     this.projectedLine.color.set('#51bb89')
 
+    // Projections whose source was lost
+    this.brokenProjectedLine = this.line.clone()
+    this.brokenProjectedLine.color.set('#ff6f6f')
+
+    this.brokenReferenceLine = this.referenceLine.clone()
+    this.brokenReferenceLine.color.set('#ff6f6f')
+
     this.wire = this.line.clone()
     this.wire.color.set('darkgray')
     this.wire.linewidth = 2
@@ -108,6 +115,10 @@ class Materials {
             actual: this.projectedLine,
             reference: this.referenceLine,
           },
+          broken: {
+            actual: this.brokenProjectedLine,
+            reference: this.brokenReferenceLine,
+          },
         },
         selected: {
           regular: {
@@ -115,6 +126,10 @@ class Materials {
             reference: this.referenceSelectionLine,
           },
           projected: {
+            actual: this.selectionLine,
+            reference: this.referenceSelectionLine,
+          },
+          broken: {
             actual: this.selectionLine,
             reference: this.referenceSelectionLine,
           },
@@ -128,6 +143,10 @@ class Materials {
             actual: this.highlightLine,
             reference: this.referenceHighlightLine,
           },
+          broken: {
+            actual: this.highlightLine,
+            reference: this.referenceHighlightLine,
+          },
         },
         constrained: {
           regular: {
@@ -137,6 +156,10 @@ class Materials {
           projected: {
             actual: this.projectedLine,
             reference: this.referenceLine,
+          },
+          broken: {
+            actual: this.brokenProjectedLine,
+            reference: this.brokenReferenceLine,
           },
         },
       },

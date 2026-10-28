@@ -25,6 +25,7 @@
   const fullyConstrained = computed(() =>
     !props.element.projection && props.element.fullyConstrained
   )
+  const brokenProjection = computed(() => !!props.element.projection?.error)
 
   let mesh
   let hiddenMesh
@@ -89,7 +90,7 @@
   watch(() => props.element, renderElement, { immediate: true, deep: 1 })
   watch(() => props.showSplineControls, renderElement)
 
-  watch([highlighted, selected, toolSelected, fullyConstrained, () => props.displayMode], () => {
+  watch([highlighted, selected, toolSelected, fullyConstrained, brokenProjection, () => props.displayMode], () => {
     // Zero-length drawing elements have no mesh, but their reactive selection
     // state can still change before Vue unmounts their proxy.
     if(!mesh) return
@@ -130,7 +131,7 @@
         ((selected.value || toolSelected.value) ? 'selected' :
           (fullyConstrained.value ? 'constrained' : 'unselected'))
     ][
-      props.element.projection ? 'projected' : 'regular'
+      brokenProjection.value ? 'broken' : (props.element.projection ? 'projected' : 'regular')
     ][
       props.element.isReference ? 'reference' : 'actual'
     ]

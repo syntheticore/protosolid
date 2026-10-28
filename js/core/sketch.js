@@ -108,6 +108,7 @@ export class Sketch {
     this.elements.forEach(elem => elem.sketch = this)
     this.constraints.forEach(constraint => constraint.sketch = this)
     this.projections.forEach(projection => projection.sketch = this)
+    this.projectedElements().forEach(elem => elem.sketch = this)
     this.projections.forEach(projection => projection.update(tree))
     this.constraints.forEach(constraint => constraint.update(tree))
     this.constraints.filter(constraint => constraint instanceof ProfileOffsetConstraint)
@@ -684,7 +685,7 @@ export class Sketch {
       !constraint.rebuild({ preserveTopology: !!draggedHandle }))) return false
     // Generated edges are read-only solver references. Their endpoints are
     // fixed points; curve contacts below use the exact curve's local tangent.
-    this.elements.filter(elem => elem instanceof DerivedCurve).forEach(curve => {
+    this.elements.concat(this.projectedElements()).filter(elem => elem instanceof DerivedCurve).forEach(curve => {
       const points = curve.handles().map(point => ({
         id: `${id++}`, type: 'point', x: point.x, y: point.y, fixed: true,
       }))
@@ -816,6 +817,9 @@ export class Sketch {
       })
 
     const constraints = [...arcRules, ...projectionRadiusRules].concat(this.constraints.flatMap(c => {
+      // Projections loaded without saved outputs have nothing to attach to,
+      // and a projection that changed type may lack the referenced point
+      if(c.items.some(item => !item.curve() || (item.index !== undefined && !pointPrimitive(item)))) return []
       if(c.items.some(item => item.curve() instanceof DerivedCurve && !item.curve().handles().length)) return []
       if(c instanceof ProfileOffsetConstraint) {
         return [] // Exact offsets are regenerated after their sources solve.
@@ -1170,6 +1174,7 @@ export class Sketch {
     sketch.elements.forEach(elem => elem.sketch = sketch )
     sketch.constraints.forEach(constraint => constraint.sketch = sketch )
     sketch.projections.forEach(projection => projection.sketch = sketch )
+    sketch.projectedElements().forEach(elem => elem.sketch = sketch )
     context.sketches[sketch.id] = sketch
     return sketch
   }
@@ -1187,11 +1192,47 @@ export class ProjectedPoint {
   center() { return this.point }
   snapPoints() { return [this.point] }
   handles() { return [this.point] }
+
+  dump() { return { id: this.id, point: this.point } }
+
+  static undump(dump) { return new ProjectedPoint(dump.point, dump.id) }
 }
+Serialize.register(ProjectedPoint, 'ProjectedPoint')
+
+
+// Projected free-form curve. Unlike offset curves, it is saved as a NURBS,
+// as its source may be lost by the time it is loaded.
+export class ProjectedCurve extends DerivedCurve {
+  dump() {
+    const geom = this.geom()
+    const nurbs = geom.curve() instanceof sx.NurbsCurve2 ? geom : geom.approximateNurbs(modelTolerance).curve
+    const basis = nurbs.curve(), range = nurbs.range()
+    return {
+      id: this.id,
+      isReference: this.isReference,
+      degree: basis.degree(),
+      points: basis.controlPoints().map(point => [point.x, point.y]),
+      weights: basis.weights(),
+      knots: basis.knots(),
+      range: [range.start, range.end],
+    }
+  }
+
+  static undump(dump) {
+    const basis = sx.NurbsCurve2.new(dump.degree, dump.points.map(([x, y]) => sx.Point2.new(x, y)), dump.weights, dump.knots)
+    const curve = ProjectedCurve.fromGeometry(sx.TrimmedCurve2.new(basis, sx.ParameterRange.new(...dump.range)), dump.id)
+    curve.isReference = dump.isReference || false
+    return curve
+  }
+}
+Serialize.register(ProjectedCurve, 'ProjectedCurve')
 
 
 // Native sketch element for a curve in sketch coordinates. Images that
 // collapse onto a line, like circles seen edge-on, become that line.
+// Free-form curves lying on a line or circle become lines, arcs or circles,
+// so a projection keeps its type, and with it its constraint points, when
+// the kernel represents its source differently.
 function sketchCurve(curve, id) {
   const basis = curve.curve()
   if(basis instanceof sx.Line2) return Line.fromGeometry(curve, id)
@@ -1199,9 +1240,32 @@ function sketchCurve(curve, id) {
     const Type = Math.abs(Math.abs(curve.range().span()) - Math.PI * 2) <= EPSILON ? Circle : Arc
     return Type.fromGeometry(curve, id)
   }
-  const extent = collinearExtent(curve.tessellate().points.map(point => new THREE.Vector2(point.x, point.y)))
+  const points = curve.tessellate().points.map(point => new THREE.Vector2(point.x, point.y))
+  const extent = collinearExtent(points)
   if(extent) return Line.fromGeometry(sx.TrimmedCurve2.line(...extent.map(point2)), id)
-  return DerivedCurve.fromGeometry(curve, id)
+  const circle = circularCurve(points)
+  if(circle) return circle.isClosed ? Circle.fromGeometry(circle.curve, id) : Arc.fromGeometry(circle.curve, id)
+  return ProjectedCurve.fromGeometry(curve, id)
+}
+
+// Circle or arc through a polyline lying on one circle
+function circularCurve(points) {
+  const [a, b, c] = [0, 1, 2].map(i => points[Math.floor(i * (points.length - 1) / 3)])
+  const ab = b.clone().sub(a), ac = c.clone().sub(a)
+  const d = 2 * cross2d(ab, ac)
+  if(Math.abs(d) <= EPSILON) return
+  const center = a.clone().add(new THREE.Vector2(
+    (ac.y * ab.lengthSq() - ab.y * ac.lengthSq()) / d,
+    (ab.x * ac.lengthSq() - ac.x * ab.lengthSq()) / d,
+  ))
+  const radius = center.distanceTo(a)
+  if(points.some(point => Math.abs(point.distanceTo(center) - radius) > modelTolerance.linear)) return
+  const [start, end] = [points[0], points.at(-1)]
+  if(start.distanceTo(end) <= modelTolerance.linear) {
+    return { isClosed: true, curve: sx.TrimmedCurve2.circle(point2(center), radius) }
+  }
+  const middle = points[Math.floor(points.length / 2)]
+  return { isClosed: false, curve: sx.TrimmedCurve2.arcThrough(point2(start), point2(middle), point2(end)) }
 }
 
 // Outermost points of a polyline lying on one line
@@ -1261,10 +1325,13 @@ export class Projection {
     }
   }
 
+  // Like a broken link, the last outputs stay in the sketch, so constraints
+  // remain attached. They no longer follow their source until it resolves again.
   invalidate(message) {
-    this.outputs.forEach(output => output instanceof SketchElement && output.clear())
-    this.outputs = []
     this.error = message
+    this.outputs.forEach(output => {
+      if(output instanceof SketchElement) output.isReference = this.isReference
+    })
   }
 
   outputId(index) {
@@ -1324,11 +1391,14 @@ export class Projection {
 
   geometries() { return this.outputs }
 
+  // Outputs are saved, so projections whose source is already lost on load
+  // still show their last geometry
   dump() {
     return {
       id: this.id,
       itemRef: this.itemRef,
       isReference: this.isReference,
+      outputs: this.outputs,
     }
   }
 
@@ -1336,6 +1406,8 @@ export class Projection {
     const projection = new this(dump.itemRef)
     projection.id = dump.id || projection.id
     projection.isReference = dump.isReference || false
+    projection.outputs = dump.outputs || []
+    projection.outputs.forEach(output => output.projection = projection)
     return projection
   }
 }

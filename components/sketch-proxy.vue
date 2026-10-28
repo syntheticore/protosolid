@@ -41,7 +41,7 @@
     .drag-handle.handle(
       v-for="{ handle, pos } in projectedHandles"
       :key="handle.id"
-      :class="{ highlighted: highlight instanceof ElemRef && highlight.curve() == handle.elem && highlight.index == handle.index, projected: !!handle.elem.projection }"
+      :class="{ highlighted: highlight instanceof ElemRef && highlight.curve() == handle.elem && highlight.index == handle.index, projected: !!handle.elem.projection, broken: !!handle.elem.projection?.error }"
       :style="{ top: pos.y + 'px', left: pos.x + 'px' }"
       @mouseup="emit('handleMouseUp', $event, handle)"
       @mousedown="emit('handleMouseDown', $event, handle)"
@@ -81,6 +81,13 @@
         width: 100%
         height: 100%
         border-color: $projected
+
+      &.broken
+        &::before
+          background: $brokenProjected
+
+        &::after
+          border-color: $brokenProjected
 
       &.highlighted
         &::before
@@ -173,7 +180,9 @@
   function solve() {
     const activeHandle = props.activeHandle
     const releasedHandle = !activeHandle && props.sketch.solveHandle
-    props.sketch.solve(props.document.top(), activeHandle, {
+    // Hidden sketches may be revealed while the marker is past them. Their
+    // projections refer to geometry as it was at the sketch's own position.
+    props.sketch.solve(props.document.top(props.sketch.creator), activeHandle, {
       applyResults: !releasedHandle && !props.sketch.restoringHistory,
     })
   }

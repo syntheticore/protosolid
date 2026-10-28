@@ -1063,3 +1063,47 @@ fn boolean_unifies_circular_rims_across_the_old_seam() {
     cut.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
         .unwrap();
 }
+
+#[test]
+fn rotated_loft_section_extrusion_touches_inside_a_patch() {
+    // A section through the axis of a circular loft, extruded both ways, is
+    // tangent to the loft along a meridian. At 0° that meridian is a Bézier
+    // patch boundary; at 45° it lies inside a patch and runs opposite to the
+    // patch rows. Both must give the same Boolean volumes.
+    let tolerance = ModelTolerance::default();
+    let circle = |radius: f64| Profile::new(
+        Wire2::new([TrimmedCurve2::circle(Point2::new(0.0, 0.0), radius).unwrap()], tolerance).unwrap(),
+        [], tolerance).unwrap();
+    let level = |z: f64| Plane3::new(Point3::new(0.0, 0.0, z), Vec3::unit_x(), Vec3::unit_y(), tolerance).unwrap();
+    let loft = circle(30.5).loft(Plane3::xy(), [(level(-22.5), &circle(17.3)), (level(-52.5), &circle(26.0))]).unwrap();
+    let volumes = [0.0_f64, 45.0].map(|degrees| {
+        let x_axis = Vec3::new(degrees.to_radians().cos(), degrees.to_radians().sin(), 0.0);
+        let plane = Plane3::new(Point3::origin(), x_axis, -Vec3::unit_z(), tolerance).unwrap();
+        let section = loft.split(plane, SplitKeep::Left).unwrap();
+        let mut segments = section.edges().filter(|edge| {
+            let middle = edge.curve().evaluate(edge.range().unwrap().middle()).unwrap().point;
+            let [start, end] = edge.endpoints().unwrap();
+            [start, middle, end].iter().all(|point| point.to_vec().dot(plane.normal()).abs() < 1.0e-6)
+        })
+            .map(|edge| match plane.project_curve(edge.curve(), edge.range().unwrap(), tolerance).unwrap() {
+                crate::PlaneCurveProjection::Curve(curve) => curve,
+                crate::PlaneCurveProjection::Point(_) => panic!("section edge collapsed"),
+            }).collect::<Vec<_>>();
+        let mut chain = vec![segments.remove(0)];
+        while !segments.is_empty() {
+            let end = chain.last().unwrap().end().unwrap();
+            let index = segments.iter().position(|segment| [segment.start().unwrap(), segment.end().unwrap()]
+                .iter().any(|point| (point - end).magnitude() < 1.0e-6)).unwrap();
+            let segment = segments.remove(index);
+            chain.push(if (segment.start().unwrap() - end).magnitude() < 1.0e-6 { segment } else { segment.reversed() });
+        }
+        let profile = Profile::new(Wire2::new(chain, tolerance).unwrap(), [], tolerance).unwrap();
+        let start = Plane3::new(Point3::from_vec(plane.normal() * -10.0), x_axis, -Vec3::unit_z(), tolerance).unwrap();
+        let tool = profile.extrude(start, plane.normal() * 20.0).unwrap();
+        [BooleanKind::Union, BooleanKind::Difference].map(|kind| loft.boolean(&tool, kind).unwrap().volume())
+    });
+    for (aligned, rotated) in volumes[0].iter().zip(volumes[1]) {
+        assert!((aligned - rotated).abs() < aligned * 1.0e-8, "{aligned} != {rotated}");
+    }
+    assert!(volumes[0][0] > loft.volume() && volumes[0][1] < loft.volume());
+}

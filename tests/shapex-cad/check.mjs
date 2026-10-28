@@ -70,6 +70,16 @@ function checkDocument(file, source) {
     }
   }
   const compound = document.top().findChild(final.componentId).compound
+  if(file.startsWith('048-')) {
+    const profiles = features.at(-2).sketch.profiles(document.top().findChild(final.componentId))
+    assert.equal(profiles.length, 1, `${file}: section must form one region`)
+    const base = document.top(document.timeline.previousFeature(final)).compound
+    assert.equal(compound.solids().length, 1, `${file}: extrusion must join the loft`)
+    assert.ok(compound.volume() > base.volume(), `${file}: extrusion must add material`)
+    assert.ok(compound.volume() < base.volume() + final.previewBody.volume(), `${file}: extrusion must overlap the loft`)
+    for(const face of compound.faces()) tessellateMesh(face.geom())
+    console.log('  OK section extrusion, tangent join and face tessellation')
+  }
   if(file.startsWith('019-')) {
     const edges = compound.solids().flatMap(solid => solid.edges())
     assert.equal(edges.length, 24, `${file}: chamfer must retain all boundary edges`)

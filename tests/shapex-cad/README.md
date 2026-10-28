@@ -48,6 +48,7 @@ reference loss.
 | `045-cut-rounded-shell-rim-fillets.cad` | Cut rounded shell with lower corner fillets and 1 mm fillets on both complete upper rims; hidden circle seams must not subdivide the selection or result |
 | `046-chamfered-box-staged-fillets.cad` | Box with a 7 mm top chamfer, then successive fillets: 8 mm vertical corners and 4.5 mm ridges ending on four-face chamfer corners, a top edge, a chamfer base and a corner fillet's bottom rim |
 | `047-spline-prism-curved-edge-fillet.cad` | Prism with two spline sides, 1 mm fillet on all four curved cap edges; at the obtuse spline/line corners the cap contacts end beyond the spline ends |
+| `048-loft-section-extrusion.cad` | Circular loft section projected onto an axial sketch plane, then extruded 1 mm and joined along its tangent meridians |
 
 From the repository root:
 

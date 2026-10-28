@@ -1874,7 +1874,7 @@ fn trace_surface_intersections_in_domains(
         }
         for parameters in candidates {
             let (point, du, dv) = first.first_order(parameters[0], parameters[1])?;
-            let (_, eu, ev) = second.first_order(parameters[2], parameters[3])?;
+            let (other_point, eu, ev) = second.first_order(parameters[2], parameters[3])?;
             // Both interior and boundary-constrained seeds must be regular.
             // A collapsed chart direction can otherwise manufacture tiny
             // intersection loops around an isolated contact point.
@@ -1884,7 +1884,35 @@ fn trace_surface_intersections_in_domains(
                 u.cross(v).magnitude() > tolerance.linear_at_scale(point.to_vec().magnitude()) * u.magnitude().max(v.magnitude())
             };
             if !regular_chart(du, dv, first_domains) || !regular_chart(eu, ev, second_domains) { continue; }
-            if du.cross(dv).normalize().cross(eu.cross(ev).normalize()).magnitude() <= tolerance.angular * 8.0 { continue; }
+            let first_normal = du.cross(dv).normalize();
+            let second_normal = eu.cross(ev).normalize();
+            let angle = first_normal.cross(second_normal).magnitude();
+            if angle <= tolerance.angular * 8.0 { continue; }
+            if angle <= (f64::EPSILON * 2048.0).sqrt() * 8.0 {
+                // A small angle alone also describes a real shallow crossing.
+                // In the transverse tangent direction the local separation is
+                // g + slope*t + curvature*t²/2. Only an unresolved double root
+                // of this equation is a numerical seed beside a contact.
+                let direction = (second_normal - first_normal * first_normal.dot(second_normal)).normalize();
+                let along = |value: super::SurfaceEvaluation| {
+                    let a = value.du.magnitude2();
+                    let b = value.du.dot(value.dv);
+                    let c = value.dv.magnitude2();
+                    let x = value.du.dot(direction);
+                    let y = value.dv.dot(direction);
+                    let u = (c * x - b * y) / (a * c - b * b);
+                    let v = (a * y - b * x) / (a * c - b * b);
+                    (value.du * u + value.dv * v,
+                        value.duu * (u * u) + value.duv * (2.0 * u * v) + value.dvv * (v * v))
+                };
+                let (first_velocity, first_acceleration) = along(first.evaluate(parameters[0], parameters[1])?);
+                let (second_velocity, second_acceleration) = along(second.evaluate(parameters[2], parameters[3])?);
+                let slope = first_normal.dot(first_velocity - second_velocity);
+                let curvature = first_normal.dot(first_acceleration - second_acceleration);
+                let discriminant = slope * slope - 2.0 * curvature * first_normal.dot(point - other_point);
+                let roundoff = f64::EPSILON * point.to_vec().magnitude().max(other_point.to_vec().magnitude()).max(1.0) * 2048.0;
+                if curvature != 0.0 && discriminant.abs() <= roundoff * curvature.abs() { continue; }
+            }
             if seeds.iter().any(|existing| {
                 first.evaluate(existing[0], existing[1]).is_ok_and(|value| {
                     value.point.distance(point)
@@ -1926,6 +1954,22 @@ fn trace_surface_intersections_in_domains(
             let first_bounds = first_cell.bounds()?;
             let second_bounds = second_cell.bounds()?;
             if Bounds(first_bounds[0], first_bounds[1]).separated(Bounds(second_bounds[0], second_bounds[1]), tolerance.linear) {
+                continue;
+            }
+            if depth == 0 && (first_cell.only_touches_extrusion(&second_cell, 0.0)
+                || second_cell.only_touches_extrusion(&first_cell, 0.0)
+                || first_cell.touches_extrusion_inside(first, &second_cell, tolerance)?
+                || second_cell.touches_extrusion_inside(second, &first_cell, tolerance)?) {
+                continue;
+            }
+            // Boxes cannot separate tilted, nearly parallel cells whose gap
+            // grows only quadratically away from a tangential contact. Their
+            // control hulls also bound them along either cell's normal.
+            if [first_cell.normal(first)?, second_cell.normal(second)?].into_iter().flatten().any(|normal| {
+                let [first_low, first_high] = first_cell.extent_along(normal);
+                let [second_low, second_high] = second_cell.extent_along(normal);
+                first_high + tolerance.linear < second_low || second_high + tolerance.linear < first_low
+            }) {
                 continue;
             }
             let first_flat = first_cell.directional_flatness()?;
@@ -2199,6 +2243,15 @@ fn trace_surface_intersections_in_domains(
     let curves = traced
         .into_iter()
         .map(|parameters| {
+            for (surface, plane, side) in [(first, second, 0), (second, first, 2)] {
+                if let (Surface3::Nurbs(surface), Surface3::Plane(plane)) = (surface, plane) {
+                    if let Some(curve) = isoparametric_plane_section(surface, *plane, &parameters, side, tolerance)? {
+                        return Ok(if side == 0 { curve } else {
+                            SurfaceSurfaceCurve { first_pcurve: curve.second_pcurve, second_pcurve: curve.first_pcurve, ..curve }
+                        });
+                    }
+                }
+            }
             let mut first_points = parameters
                 .iter()
                 .map(|value| Point2::new(value[0], value[1]))
@@ -2267,6 +2320,46 @@ fn trace_surface_intersections_in_domains(
     })
 }
 
+/// Replace a complete isoparametric plane section with its exact rational
+/// curve. The control hull certifies planarity; trace samples only identify
+/// which parameter is constant. This avoids repeated implicit corrections in
+/// projected profiles and their later extrusions.
+fn isoparametric_plane_section(surface: &super::NurbsSurface3, plane: Plane3,
+    parameters: &[[f64; 4]], side: usize, tolerance: ModelTolerance) -> KernelResult<Option<SurfaceSurfaceCurve>> {
+    let plane_normal = plane.normal();
+    for axis in 0..2 {
+        let constant = parameters[0][side + axis];
+        let epsilon = f64::EPSILON * constant.abs().max(1.0) * 256.0;
+        if parameters.iter().any(|uv| (uv[side + axis] - constant).abs() > epsilon) { continue; }
+        let basis = surface.isoparametric_curve(axis, constant)?;
+        let DomainBounds::Bounded(domain) = basis.domain().bounds else { unreachable!() };
+        let start = parameters[0][side + 1 - axis];
+        let end = parameters.last().unwrap()[side + 1 - axis];
+        let epsilon = f64::EPSILON * domain.start.abs().max(domain.end.abs()).max(1.0) * 256.0;
+        let range = if start < end { domain } else { domain.reversed() };
+        if (start - range.start).abs() > epsilon || (end - range.end).abs() > epsilon { continue; }
+        let mut error = 0.0_f64;
+        let planar = basis.control_points().iter().all(|point| {
+            let distance = (*point - plane.origin()).dot(plane_normal).abs();
+            error = error.max(distance);
+            distance <= f64::EPSILON * point.to_vec().magnitude().max(1.0) * 256.0
+        });
+        if !planar { continue; }
+        let mut points = basis.control_points().to_vec();
+        let mut weights = basis.weights().to_vec();
+        let mut knots = basis.knots().iter().map(|knot| (*knot - range.start) / range.span()).collect::<Vec<_>>();
+        if range.span() < 0.0 { points.reverse(); weights.reverse(); knots.reverse(); }
+        let curve: Curve3 = super::NurbsCurve3::new(basis.degree(), points, weights, knots)?.into();
+        let (origin, direction) = if axis == 0 {
+            (Point2::new(constant, range.start), crate::Vec2::new(0.0, range.span()))
+        } else { (Point2::new(range.start, constant), crate::Vec2::new(range.span(), 0.0)) };
+        let first_pcurve = Line2::new(origin, direction)?.into();
+        let second_pcurve = plane.parameterized_curve_image(&curve, super::ParameterRange::new(0.0, 1.0)?, tolerance)?;
+        return Ok(Some(SurfaceSurfaceCurve { curve, first_pcurve, second_pcurve, achieved_error: error }));
+    }
+    Ok(None)
+}
+
 fn bounded_surface_domains(surface: &Surface3) -> KernelResult<[super::ParameterRange; 2]> {
     let domains = surface.domains();
     let DomainBounds::Bounded(first) = domains[0].bounds else {
@@ -2291,6 +2384,114 @@ struct RationalSurfaceCell {
 }
 
 impl RationalSurfaceCell {
+    /// Certify contact with a translated curve strip by comparing corresponding
+    /// Bernstein coefficients. A shared monotone coordinate fixes the curve
+    /// parameter; the remaining transverse coordinate must stay on one side
+    /// and have zero derivative at any shared boundary. Unlike sampled normals,
+    /// this accounts for the whole patch, including its interior. `slack`
+    /// widens only the transverse contact comparisons.
+    fn only_touches_extrusion(&self, other: &Self, slack: f64) -> bool {
+        if self.padding != 0.0 || other.padding != 0.0 { return false; }
+        let grid = |cell: &Self, axis| -> Vec<Vec<Vec4>> {
+            if axis == 1 { cell.controls.clone() } else {
+                (0..cell.controls[0].len()).map(|u| cell.controls.iter().map(|row| row[u]).collect()).collect()
+            }
+        };
+        let point = |control: Vec4| control.truncate() / control.w;
+        let scale = self.controls.iter().flatten().chain(other.controls.iter().flatten())
+            .map(|control| point(*control).magnitude()).fold(1.0_f64, f64::max);
+        let roundoff = f64::EPSILON * scale * 256.0;
+        let contact = roundoff.max(slack);
+        // The strip's curve may run either way along the patch rows.
+        for (other_axis, reversed) in [(0, false), (0, true), (1, false), (1, true)] {
+            let mut strip = grid(other, other_axis);
+            if strip[0].len() != 2 { continue; }
+            if reversed { strip.reverse(); }
+            let translation = point(strip[0][1]) - point(strip[0][0]);
+            if translation.magnitude() <= roundoff || strip.iter().any(|row| {
+                (row[0].w - row[1].w).abs() > f64::EPSILON * row[0].w * 256.0
+                    || (point(row[1]) - point(row[0]) - translation).magnitude() > roundoff
+            }) { continue; }
+            let translation_direction = translation.normalize();
+            for axis in 0..2 {
+                let patch = grid(self, axis);
+                if patch.len() != strip.len() { continue; }
+                let width = patch[0].len();
+                if width < 3 { continue; }
+                // Factor the weights so every transverse column uses the
+                // strip's same rational curve parameterization.
+                if (0..width).any(|j| {
+                    let ratio = patch[0][j].w / strip[0][0].w;
+                    patch.iter().zip(&strip).any(|(row, base)| {
+                        (row[j].w - base[0].w * ratio).abs() > f64::EPSILON * row[j].w * 256.0
+                    })
+                }) { continue; }
+                let differences = patch.iter().zip(&strip).map(|(row, base)| {
+                    row.iter().map(|control| point(*control) - point(base[0])).collect::<Vec<_>>()
+                }).collect::<Vec<_>>();
+                let Some(longitudinal) = differences.iter().flatten()
+                    .map(|delta| translation_direction.cross(*delta))
+                    .find(|normal| normal.magnitude() > roundoff).map(|normal| normal.normalize())
+                else { continue; };
+                if differences.iter().flatten().any(|delta| longitudinal.dot(*delta).abs() > roundoff) { continue; }
+                let heights = strip.iter().map(|row| longitudinal.dot(point(row[0]))).collect::<Vec<_>>();
+                if !heights.windows(2).all(|pair| pair[1] - pair[0] > roundoff)
+                    && !heights.windows(2).all(|pair| pair[0] - pair[1] > roundoff) { continue; }
+                let transverse = translation.cross(longitudinal).normalize();
+                let residuals = differences.iter().map(|row| row.iter()
+                    .map(|delta| transverse.dot(*delta)).collect::<Vec<_>>()).collect::<Vec<_>>();
+                let low = residuals.iter().flatten().copied().fold(f64::INFINITY, f64::min);
+                let high = residuals.iter().flatten().copied().fold(f64::NEG_INFINITY, f64::max);
+                let sign = if low >= -contact { 1.0 } else if high <= contact { -1.0 } else { continue; };
+                if residuals.iter().any(|row| !row.iter().any(|value| value * sign > contact)) { continue; }
+                let tangent_boundaries = [(0, 1), (width - 1, width - 2)].into_iter().all(|(edge, adjacent)| {
+                    !residuals.iter().all(|row| row[edge].abs() <= contact)
+                        || residuals.iter().all(|row| row[adjacent].abs() <= contact)
+                });
+                if tangent_boundaries { return true; }
+            }
+        }
+        false
+    }
+
+    /// A strip extruded from an interior parameter line of this patch touches
+    /// it along that line, where no single Bernstein form is one-signed. The
+    /// line is the patch silhouette along the strip's translation; split there,
+    /// each half meets the strip only along its boundary. The split parameter
+    /// carries bisection error, so the contact is certified at model tolerance.
+    fn touches_extrusion_inside(&self, surface: &Surface3, other: &Self,
+        tolerance: ModelTolerance) -> KernelResult<bool> {
+        if self.padding != 0.0 { return Ok(false); }
+        let translation = if other.controls.len() == 2 {
+            Self::euclidean(other.controls[1][0])? - Self::euclidean(other.controls[0][0])?
+        } else if other.controls[0].len() == 2 {
+            Self::euclidean(other.controls[0][1])? - Self::euclidean(other.controls[0][0])?
+        } else { return Ok(false); };
+        let ranges = [self.u_range, self.v_range];
+        for axis in 0..2 {
+            let across = ranges[1 - axis].middle();
+            let facing = |parameter: f64| -> KernelResult<f64> {
+                let (u, v) = if axis == 0 { (parameter, across) } else { (across, parameter) };
+                let (_, du, dv) = surface.first_order(u, v)?;
+                Ok(du.cross(dv).dot(translation))
+            };
+            let (mut low, mut high) = (ranges[axis].start, ranges[axis].end);
+            let mut low_value = facing(low)?;
+            if low_value * facing(high)? >= 0.0 { continue; }
+            for _ in 0..64 {
+                let middle = (low + high) * 0.5;
+                let value = facing(middle)?;
+                if (value > 0.0) == (low_value > 0.0) { (low, low_value) = (middle, value); } else { high = middle; }
+            }
+            let fraction = ((low + high) * 0.5 - ranges[axis].start) / ranges[axis].span();
+            let (left, right) = if axis == 0 { self.clone().split_u(fraction) } else { self.clone().split_v(fraction) };
+            if left.only_touches_extrusion(other, tolerance.linear) && right.only_touches_extrusion(other, tolerance.linear) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn euclidean(control: Vec4) -> KernelResult<Point3> {
         if control.w <= 0.0 || !control.w.is_finite() {
             return Err(geometry_error("rational Bézier surface has a nonpositive homogeneous weight"));
@@ -2330,6 +2531,25 @@ impl RationalSurfaceCell {
             })
     }
 
+    /// A separating-axis candidate at the cell center. A singular chart has
+    /// no normal, so only its spatial box participates in this rejection.
+    fn normal(&self, surface: &Surface3) -> KernelResult<Option<Vec3>> {
+        if let Surface3::Offset(offset) = surface { return self.normal(offset.base()); }
+        let (_, du, dv) = surface.first_order(self.u_range.middle(), self.v_range.middle())?;
+        let normal = du.cross(dv);
+        Ok((normal.magnitude2() > 0.0).then(|| normal.normalize()))
+    }
+
+    /// Interval of the cell's control hull, which contains the patch, along a
+    /// unit direction.
+    fn extent_along(&self, direction: Vec3) -> [f64; 2] {
+        let (low, high) = self.controls.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), control| {
+            let value = (control.x * direction.x + control.y * direction.y + control.z * direction.z) / control.w;
+            (low.min(value), high.max(value))
+        });
+        [low - self.padding, high + self.padding]
+    }
+
     fn directional_flatness(&self) -> KernelResult<[f64; 2]> {
         let control_flatness = |controls: Vec<Vec4>| -> KernelResult<f64> {
             let points = controls
@@ -2366,19 +2586,19 @@ impl RationalSurfaceCell {
 
     fn split_direction(self, flatness: [f64; 2]) -> (Self, Self) {
         if flatness[0] >= flatness[1] {
-            self.split_u()
+            self.split_u(0.5)
         } else {
-            self.split_v()
+            self.split_v(0.5)
         }
     }
 
-    fn split_u(self) -> (Self, Self) {
+    fn split_u(self, fraction: f64) -> (Self, Self) {
         let (left_rows, right_rows): (Vec<_>, Vec<_>) = self
             .controls
             .into_iter()
-            .map(|row| de_casteljau_split(&row, 0.5))
+            .map(|row| de_casteljau_split(&row, fraction))
             .unzip();
-        let middle = (self.u_range.start + self.u_range.end) * 0.5;
+        let middle = self.u_range.start + self.u_range.span() * fraction;
         (
             Self {
                 u_range: super::ParameterRange {
@@ -2401,10 +2621,10 @@ impl RationalSurfaceCell {
         )
     }
 
-    fn split_v(self) -> (Self, Self) {
+    fn split_v(self, fraction: f64) -> (Self, Self) {
         let width = self.controls[0].len();
         let (left_columns, right_columns): (Vec<_>, Vec<_>) = (0..width)
-            .map(|u| de_casteljau_split(&self.controls.iter().map(|row| row[u]).collect::<Vec<_>>(), 0.5))
+            .map(|u| de_casteljau_split(&self.controls.iter().map(|row| row[u]).collect::<Vec<_>>(), fraction))
             .unzip();
         let left_height = left_columns[0].len();
         let right_height = right_columns[0].len();
@@ -2414,7 +2634,7 @@ impl RationalSurfaceCell {
         let right = (0..right_height)
             .map(|v| right_columns.iter().map(|column| column[v]).collect())
             .collect();
-        let middle = (self.v_range.start + self.v_range.end) * 0.5;
+        let middle = self.v_range.start + self.v_range.span() * fraction;
         (
             Self {
                 u_range: self.u_range,

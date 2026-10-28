@@ -881,7 +881,30 @@ fn arrange_face(
             };
             return Ok(coincident_orientation);
         }
-        let other = classifiers[1 - operand].classify(value.point)?;
+        let mut other = classifiers[1 - operand].classify(value.point)?;
+        if other == PointClassification::Boundary {
+            // A probe can land on a tangential contact line crossing the
+            // region, such as a symmetric meridian. The region then lies on
+            // one side of the other boundary just beside that line.
+            let step = classification_offset / 8.0;
+            let mut beside = Vec::new();
+            for (direction, offset) in [(value.du, Vec2::unit_x()), (value.dv, Vec2::unit_y())] {
+                if direction.magnitude() <= tolerance.linear { continue; }
+                for sign in [1.0, -1.0] {
+                    let probe = uv + offset * (sign * (step / direction.magnitude()).min(uv_probe_limit));
+                    if domains.iter().enumerate().any(|(axis, domain)| {
+                        domain.period.is_none() && !domain.contains(probe[axis], 0.0)
+                    }) || !point_in_sampled_trim(probe, original_boundary, &original_samples)? {
+                        continue;
+                    }
+                    let location = classifiers[1 - operand].classify(surface.evaluate(probe.x, probe.y)?.point)?;
+                    if location != PointClassification::Boundary { beside.push(location); }
+                }
+            }
+            if beside.first().is_some_and(|first| beside.iter().all(|location| location == first)) {
+                other = beside[0];
+            }
+        }
         if other == PointClassification::Boundary {
             // Resolve a tangent contact by its two material sides, including
             // general supports that share a tangent plane but are not coincident.

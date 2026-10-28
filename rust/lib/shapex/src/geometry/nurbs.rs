@@ -574,6 +574,24 @@ impl NurbsSurface3 {
     pub fn weights(&self) -> &[Vec<f64>] {
         &self.weights
     }
+
+    /// Exact rational curve obtained by fixing one surface parameter.
+    pub(crate) fn isoparametric_curve(&self, axis: usize, parameter: f64) -> KernelResult<NurbsCurve3> {
+        let controls = self.homogeneous_rows();
+        let (degree, knots, fixed_count) = if axis == 0 {
+            (self.degrees.0, &self.knots.0, controls[0].len())
+        } else { (self.degrees.1, &self.knots.1, controls.len()) };
+        let (start, basis) = basis_values(degree, knots, fixed_count, parameter);
+        let curve_count = if axis == 0 { controls.len() } else { controls[0].len() };
+        let values = (0..curve_count).map(|index| basis.iter().enumerate().fold(Vec4::zero(), |value, (offset, weight)| {
+            let control = if axis == 0 { controls[index][start + offset] } else { controls[start + offset][index] };
+            value + control * *weight
+        })).collect::<Vec<_>>();
+        let (degree, knots) = if axis == 0 { (self.degrees.1, &self.knots.1) } else { (self.degrees.0, &self.knots.0) };
+        NurbsCurve3::new(degree, values.iter().map(|value| Point3::from_vec(value.truncate() / value.w)).collect(),
+            values.iter().map(|value| value.w).collect(), knots.clone())
+    }
+
     pub fn knots(&self) -> (&[f64], &[f64]) {
         (&self.knots.0[..], &self.knots.1[..])
     }

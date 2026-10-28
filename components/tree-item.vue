@@ -462,8 +462,10 @@
         this.document.updateFeatureVisibility()
       },
 
-      activateComponent: function() {
+      activateComponent: async function() {
         if(this.component.readOnly) return
+        // Exiting restores the component that was active before editing.
+        await this.document.cancelFeature()
         const source = this.document.getComponent(this.component.sourceId())
         this.document.activateComponent(source || this.component)
       },

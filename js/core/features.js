@@ -2358,7 +2358,7 @@ export class RevolveFeature extends SolidFeature {
     this.extent = 'angle'
     this.fromFace = null
     this.limitFace = null
-    this.angle = 180.0
+    this.angle = 360.0
     this.offset = 0
     this.side = true
   }

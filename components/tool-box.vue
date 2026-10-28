@@ -51,7 +51,7 @@
               :class="{active: isActive(tool)}"
               :title="tool.title"
               :disabled="tool.disabled || tool.isDisabled?.() || (!tool.tool && !tool.feature && !tool.action)"
-              @click="activateTool(tool)"
+              @click="clickTool(tool)"
             )
               Icon(:icon="toolIcon(tool)" fixed-width)
               .title(v-html="tool.title")
@@ -712,6 +712,18 @@
             this.bus.emit('activate-tool', tool.tool)
           }
         }, delay)
+      },
+
+      // Clicking the active feature or tool again exits it,
+      // while its hot key keeps restarting it
+      clickTool: function(tool) {
+        if(this.feature && this.feature.constructor === tool.feature) {
+          this.$refs.featureBox[0].close()
+        } else if(this.activeTool && this.activeTool.constructor === tool.tool) {
+          this.closeActiveTool()
+        } else {
+          this.activateTool(tool)
+        }
       },
 
       isActive: function(tool) {

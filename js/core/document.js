@@ -578,7 +578,7 @@ export default class Document extends Emitter {
         // Store camera view
         this.previousActiveView = this.activeView
         this.previousDirtyView = this.dirtyView
-        this.emit('look-at', this.activeSketch.workplane)
+        if(preferences.sketchCameraMovement != 'off') this.emit('look-at', this.activeSketch.workplane)
       }
 
       // Show referenced geometry and the components containing it while editing.
@@ -605,7 +605,7 @@ export default class Document extends Emitter {
       if(doReset && this.previousComponent) {
 
         // Restore the camera after sketch editing.
-        if(this.activeSketch) {
+        if(this.activeSketch && preferences.sketchCameraMovement == 'both') {
           this.activeView = this.previousActiveView
           this.dirtyView = this.previousDirtyView
           const view = this.dirtyView || this.previewView || this.activeView

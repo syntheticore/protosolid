@@ -15,6 +15,7 @@ const preferences = {
   alwaysShowSideLabels: true,
   timelineFeatureVisibility: 'all',
   previewOnHover: true,
+  sketchCameraMovement: 'both',
   debugMode: false,
   zoomToCursor: true,
   cacheTesselation: true,

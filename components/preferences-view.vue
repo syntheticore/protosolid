@@ -111,6 +111,12 @@
 
           label
             span.setting-label
+              strong Sketch camera
+              small Move the camera when entering or leaving sketches
+            ComboBox(v-model="preferences.sketchCameraMovement" label="Sketch camera" :options="[{ value: 'off', label: 'Off' }, { value: 'enter', label: 'Entering only' }, { value: 'both', label: 'Entering and leaving' }]")
+
+          label
+            span.setting-label
               strong Timeline features
               small Choose which features remain visible in the timeline
             ComboBox.wide(v-model="preferences.timelineFeatureVisibility" label="Timeline features" :options="[{ value: 'active-component', label: 'Active component and children only' }, { value: 'all', label: 'All features (dim unrelated)' }]")

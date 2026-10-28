@@ -1264,6 +1264,44 @@ fn move_faces_resizes_round_slot_ends_between_parallel_walls() {
 }
 
 #[test]
+fn move_top_of_shelled_filleted_box() {
+    // Replay cannot-move -top.cad: rounded vertical corners, bottom fillet,
+    // inward shell and fillets on both rims of the opening.
+    let tolerance = ModelTolerance::default();
+    let wire = Wire2::polygon([
+        Point2::new(-21.962553553265337, 20.37966681068764),
+        Point2::new(-21.962553553265337, -27.898378837931627),
+        Point2::new(52.23526250506349, -27.898378837931627),
+        Point2::new(52.23526250506349, 20.37966681068764),
+    ], tolerance).unwrap();
+    let plane = Plane3::new(Point3::origin(), -Vec3::unit_z(), Vec3::unit_y(), tolerance).unwrap();
+    let body = Profile::new(wire, [], tolerance).unwrap().extrude(plane, Vec3::unit_x() * 45.0).unwrap();
+    let corners = [8, 2, 10, 0].map(|i| body.edges().nth(i).unwrap().clone());
+    let body = body.fillet(&corners, 12.5).unwrap();
+    let bottom = body.edges().nth(6).unwrap().clone();
+    let body = body.fillet(&[bottom], 5.0).unwrap();
+    let opening = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().y > 0.99)).unwrap().clone();
+    let body = body.shell(&[opening], -4.0).unwrap();
+    let rims = [22, 79].map(|i| body.edges().nth(i).unwrap().clone());
+    let body = body.fillet(&rims, 0.5).unwrap();
+    assert_eq!(body.faces().count(), 51);
+    let top = body.faces().find(|face| matches!(face.surface(), Surface3::Plane(p)
+        if p.normal().y > 0.99)).unwrap().clone();
+    let result = body.move_faces(&[top], RigidTransform3::new(
+        Matrix3::identity(), Vec3::unit_y(), tolerance,
+    ).unwrap()).unwrap();
+    assert_eq!(result.faces().count(), body.faces().count());
+    assert!(result.volume() > body.volume());
+    for face in body.faces().filter(|face| matches!(face.surface(), Surface3::Cylinder(c)
+        if c.axis().normalize().y.abs() > 0.99)) {
+        assert!(result.faces().any(|moved| moved.surface() == face.surface()),
+            "vertical corner supports must retain their original parameterization");
+    }
+    result.tessellate(TessellationOptions::default()).unwrap();
+}
+
+#[test]
 fn move_faces_extends_cylinder_and_its_rounded_cap() {
     let tolerance = ModelTolerance::default();
     let cylinder = Profile::new(

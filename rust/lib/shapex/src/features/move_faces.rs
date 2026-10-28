@@ -320,9 +320,14 @@ pub(super) fn adjust_move_blends(
                 }
                 Ok(true)
             };
-            // Moving an entire blend along an invariant neighboring support is
-            // exact (for example, raising a rounded cylindrical cap).
-            let surface = if fits(transform)? {
+            // Prefer the existing chart when it still meets the contacts.
+            // Translating an invariant support (such as along a cylinder's
+            // axis) otherwise changes its unchanged tangent rails' UVs.
+            let surface = if fits(RigidTransform3::identity())? {
+                supports[id].clone()
+            } else if fits(transform)? {
+                // Moving the entire blend along an invariant neighbor is
+                // exact (for example, raising a rounded cylindrical cap).
                 crate::transform::transform_surface(original.clone(), transform, tolerance)?
             } else if let Surface3::Cylinder(cylinder) = original {
                 let planes = rails

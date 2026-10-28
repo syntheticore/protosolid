@@ -1838,6 +1838,8 @@ fn trace_surface_intersections_in_domains(
         .map(|range| range.span().abs())
         .fold(1.0_f64, f64::max);
     let mut seeds = Vec::<[f64; 4]>::new();
+    // Corrected seed points, kept to reject duplicates without re-evaluating.
+    let mut seed_points = Vec::<Point3>::new();
     let mut try_seed = |guess: [f64; 4]| -> KernelResult<()> {
         let mut candidates = Vec::new();
         if let Some(parameters) = correct_surface_pair(
@@ -1913,15 +1915,12 @@ fn trace_surface_intersections_in_domains(
                 let roundoff = f64::EPSILON * point.to_vec().magnitude().max(other_point.to_vec().magnitude()).max(1.0) * 2048.0;
                 if curvature != 0.0 && discriminant.abs() <= roundoff * curvature.abs() { continue; }
             }
-            if seeds.iter().any(|existing| {
-                first.evaluate(existing[0], existing[1]).is_ok_and(|value| {
-                    value.point.distance(point)
-                        <= tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) * 16.0
-                })
-            }) {
+            let duplicate = tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) * 16.0;
+            if seed_points.iter().any(|existing| existing.distance(point) <= duplicate) {
                 continue;
             }
             seeds.push(parameters);
+            seed_points.push(point);
         }
         Ok(())
     };

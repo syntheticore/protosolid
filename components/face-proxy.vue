@@ -7,6 +7,7 @@
   import materials from '../js/materials.js'
   import { Feature } from '../js/core/features.js'
   import { topologyIncludesFeature } from '../js/core/topological-naming.js'
+  import { stressColor } from '../js/core/static.js'
 
   const props = defineProps(['document', 'component', 'face', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
@@ -35,6 +36,7 @@
   let analysisStresses = null
   const coldColor = new THREE.Color(0x003cff)
   const hotColor = new THREE.Color(0xff0000)
+  const deformedColor = new THREE.Color()
   faceMesh.alcTypes = [
     'face',
     props.face.getPlane() && 'plane',
@@ -146,21 +148,19 @@
       const staticSample = props.colorMode == 'static' && simulatedFace && simulation.sampleAt(point)
       const value = props.colorMode == 'thermal'
         ? simulatedFace && simulation.temperatureAt(point)
-        : staticSample?.relativeStress
+        : staticSample?.stress
       if(value === undefined || value === false) {
         color.setRGB(0.18, 0.18, 0.18)
-      } else {
-        const ratio = props.colorMode == 'thermal'
-          ? (value - simulation.coldTemperature) / (simulation.hotTemperature - simulation.coldTemperature)
-          : Math.sqrt(Math.min(1, value))
+      } else if(props.colorMode == 'thermal') {
+        const ratio = (value - simulation.coldTemperature) / (simulation.hotTemperature - simulation.coldTemperature)
         color.copy(coldColor).lerp(hotColor, ratio)
-        if(props.colorMode == 'static') {
-          analysisStresses[i] = value
-          const displacement = staticSample.displacement
-          analysisDisplacements[i * 3] = displacement.x * simulation.result.displayScale
-          analysisDisplacements[i * 3 + 1] = displacement.y * simulation.result.displayScale
-          analysisDisplacements[i * 3 + 2] = displacement.z * simulation.result.displayScale
-        }
+      } else {
+        stressColor(simulation.result, value, color)
+        analysisStresses[i] = value
+        const displacement = staticSample.displacement
+        analysisDisplacements[i * 3] = displacement.x * simulation.result.displayScale
+        analysisDisplacements[i * 3 + 1] = displacement.y * simulation.result.displayScale
+        analysisDisplacements[i * 3 + 2] = displacement.z * simulation.result.displayScale
       }
       values.set(color.toArray(), i * 3)
     }
@@ -189,17 +189,15 @@
     if(!analysisDisplacements || faceMesh.geometry != analysisGeometry) return
     const position = analysisGeometry.getAttribute('position')
     const colors = analysisGeometry.getAttribute('color')
+    const result = props.document.activeSimulation.result
     const factor = props.document.activeSimulation.deformationFactor
     for(let i = 0; i < analysisDisplacements.length; i++) {
       position.array[i] = analysisPositions[i] + analysisDisplacements[i] * factor
     }
     for(let i = 0; i < analysisStresses.length; i++) {
       if(analysisStresses[i] < 0) continue
-      const ratio = Math.sqrt(Math.min(1, analysisStresses[i] * factor))
-      const offset = i * 3
-      colors.array[offset] = coldColor.r + (hotColor.r - coldColor.r) * ratio
-      colors.array[offset + 1] = coldColor.g + (hotColor.g - coldColor.g) * ratio
-      colors.array[offset + 2] = coldColor.b + (hotColor.b - coldColor.b) * ratio
+      stressColor(result, analysisStresses[i] * factor, deformedColor)
+      deformedColor.toArray(colors.array, i * 3)
     }
     position.needsUpdate = true
     colors.needsUpdate = true

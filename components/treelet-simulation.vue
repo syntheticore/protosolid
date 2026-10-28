@@ -2,7 +2,11 @@
 
   li.treelet-simulation(:class="{ expanded, invalid: warning, fluid: simulation.mode == 'fluid' }")
 
-    .box
+    //- The tree clips its overflow, so the legend lives outside of it
+    Teleport(to="body")
+      StressLegend(v-if="showLegend && legendStyle" :result="simulation.result" :style="legendStyle")
+
+    .box(ref="box")
 
       TreeItemHeader(
         :model-value="simulation.title"
@@ -83,22 +87,19 @@
 
         fieldset.result-stats(v-if="simulation.mode == 'static'")
 
-          label.result-summary
-            span Max von Mises
-            span {{ simulation.result ? simulation.result.maxStress.toPrecision(3) + ' MPa' : '-' }}
+          label.result-summary(title="Strength limit of the material divided by the peak stress. Below 1 the part deforms permanently or breaks.")
+            span Safety factor
+            span(:class="{ alert: stressStatusColor }" :style="{ color: stressStatusColor }")
+              | {{ safety ? safety.toPrecision(3) : '-' }}
 
-          label.result-summary
+          label.result-summary(title="Largest distance any point of the part moves under the load. The view exaggerates it to make it visible.")
             span Max displacement
             span {{ simulation.result ? simulation.result.maxDisplacement.toPrecision(3) + ' mm' : '-' }}
 
-          label.result-summary
+          label.result-summary(title="Remaining error of the solver. Values above 0.1% mean it did not fully converge and results may be off.")
             span Solver residual
-            span
-              template(v-if="simulation.result")
-                | {{ (simulation.result.relativeResidual * 100).toFixed(1) }}%
-                template(v-if="simulation.result.relativeResidual > 0.001")  — results may be inaccurate
-
-              template(v-else) -
+            span(:class="{ inaccurate: simulation.result?.relativeResidual > 0.001 }")
+              | {{ simulation.result ? (simulation.result.relativeResidual * 100).toFixed(1) + '%' : '-' }}
 
         transition(
           name="message"
@@ -227,6 +228,17 @@
     white-space: normal
     overflow-wrap: anywhere
 
+  .alert
+    font-weight: bold
+
+  .inaccurate
+    font-weight: bold
+    color: $warn
+
+  .stress-legend
+    position: fixed
+    z-index: 1
+
   .fluid-selector
     width: 120px
     justify-self: end
@@ -254,6 +266,7 @@
   import { fluidMaterials } from '../js/core/fluid.js'
   import { worldTransform } from '../js/core/assembly.js'
   import PickerSession from '../js/picker-session.js'
+  import { safetyFactor, stressColors, stressLimit } from '../js/core/static.js'
   import { cancelSimulation, solveSimulation } from '../js/core/simulation-runner.js'
 
   const configurations = {
@@ -324,6 +337,7 @@
         playbackFrame: null,
         playbackTime: 0,
         previousFrameTime: null,
+        legendStyle: null,
       }
     },
 
@@ -340,6 +354,22 @@
         this.document.timeline.marker
         const problem = this.simulation.resolve(this.document.top(), false)
         return typeof problem == 'string' ? problem : problem?.warning ? problem.message : this.solveWarning
+      },
+
+      showLegend() {
+        return this.expanded && this.simulation.mode == 'static' && this.simulation.result &&
+          !this.document.activeSimulationPicker
+      },
+
+      safety() {
+        return this.simulation.result && safetyFactor(this.simulation.result)
+      },
+
+      // Matches the plastic and failure bands of the stress legend
+      stressStatusColor() {
+        const result = this.simulation.result
+        const limit = result && stressLimit(result, result.maxStress)
+        if(limit) return '#' + stressColors[limit].getHexString()
       },
 
     },
@@ -610,6 +640,7 @@
 
       updatePaths() {
         if(!this.expanded) return
+        this.placeLegend()
         this.bus.emit('clear-pickers')
         const tree = this.document.top()
         this.configuration.pickers.forEach(({ key }) => {
@@ -624,6 +655,15 @@
           })
         })
         if(this.updatePicker) this.updatePicker()
+      },
+
+      // Next to the box, with the bottoms of box and bar aligned
+      placeLegend() {
+        const rectangle = this.$refs.box.getBoundingClientRect()
+        this.legendStyle = {
+          left: `${rectangle.right + 14}px`,
+          bottom: `${window.innerHeight - rectangle.bottom}px`,
+        }
       },
 
       getPickerInfo(key) {

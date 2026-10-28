@@ -53,6 +53,14 @@
             ScalarInput(:value="material.poissonRatio" :min="0" :max="0.449" :step="0.01" stretch @update:value="set('poissonRatio', $event)")
             span Poisson ratio
 
+          label(title="Stress at which the material starts to deform permanently. Leave at 0 for brittle materials.")
+            ScalarInput(:value="material.yieldStrength || 0" :min="0" :step="10" stretch @update:value="set('yieldStrength', $event)")
+            span Yield strength (MPa)
+
+          label(title="Stress at which the material breaks")
+            ScalarInput(:value="material.ultimateStrength || 0" :min="0" :step="10" stretch @update:value="set('ultimateStrength', $event)")
+            span Ultimate strength (MPa)
+
         fieldset.visual
 
           h3 Visual Properties

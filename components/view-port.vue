@@ -514,6 +514,8 @@
         if(!this.widgets.length) this.$emit('update:highlight', null)
         // The input stays at the last cursor position, so hide it until the pointer moves again
         this.drawingInputHidden = true
+        // The probed surface point no longer lies under the cursor
+        this.thermalProbe = null
       })
       this.isReady = true
 

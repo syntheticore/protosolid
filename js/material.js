@@ -8,6 +8,8 @@ export class Material {
     this.density = 1.0 // g/cm^3
     this.elasticModulus = null // MPa = N/mm²
     this.poissonRatio = null
+    this.yieldStrength = null // MPa, onset of plastic deformation
+    this.ultimateStrength = null // MPa, fracture
     // Three.js materials contain mutable render state and should not be
     // deeply proxied when the owning document is made reactive by Vue.
     this.displayMaterial = markRaw(new THREE.MeshPhysicalMaterial({
@@ -86,6 +88,8 @@ export class Material {
     out.density = this.density
     out.elasticModulus = this.elasticModulus
     out.poissonRatio = this.poissonRatio
+    out.yieldStrength = this.yieldStrength
+    out.ultimateStrength = this.ultimateStrength
     out.color = this.color
     out.roughness = this.roughness
     out.metal = this.metal
@@ -102,6 +106,8 @@ export class Material {
       density: this.density,
       elasticModulus: this.elasticModulus,
       poissonRatio: this.poissonRatio,
+      yieldStrength: this.yieldStrength,
+      ultimateStrength: this.ultimateStrength,
       color: this.color,
       roughness: this.roughness,
       metal: this.metal,
@@ -118,6 +124,8 @@ export class Material {
     material.density = dump.density
     material.elasticModulus = dump.elasticModulus ?? material.elasticModulus
     material.poissonRatio = dump.poissonRatio ?? material.poissonRatio
+    material.yieldStrength = dump.yieldStrength ?? material.yieldStrength
+    material.ultimateStrength = dump.ultimateStrength ?? material.ultimateStrength
     material.color = dump.color
     material.roughness = dump.roughness
     material.metal = dump.metal
@@ -141,6 +149,8 @@ export class Aluminum extends Material {
     this.density = 2.7
     this.elasticModulus = 69000
     this.poissonRatio = 0.33
+    this.yieldStrength = 276
+    this.ultimateStrength = 310
 
     this.metal = true
     this.color = '#abc5d9'
@@ -155,6 +165,8 @@ export class DarkViolet extends Material {
     this.density = 2.7
     this.elasticModulus = 69000
     this.poissonRatio = 0.33
+    this.yieldStrength = 276
+    this.ultimateStrength = 310
 
     this.metal = true
     this.color = '#1a1835'
@@ -170,6 +182,7 @@ export class Polystyrene extends Material {
     this.density = 0.9
     this.elasticModulus = 3000
     this.poissonRatio = 0.35
+    this.ultimateStrength = 40
 
     this.color = '#ff57a3'
     this.roughness = 0.3
@@ -197,6 +210,7 @@ export class Glass extends Material {
     this.density = 2.2
     this.elasticModulus = 70000
     this.poissonRatio = 0.22
+    this.ultimateStrength = 40
 
     this.color = 'white'
     this.roughness = 0.0

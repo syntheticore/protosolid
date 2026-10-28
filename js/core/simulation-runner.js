@@ -1,3 +1,5 @@
+import { setStrengths } from './static.js'
+
 const runningSolves = new WeakMap()
 
 const faceKeys = {
@@ -32,6 +34,7 @@ export async function solveSimulation(simulation, tree, onProgress) {
 
   onProgress(0)
 
+  const material = simulation.mode == 'static' ? tree.findChild(componentId).getMaterial() : null
   const worker = new Worker(new URL('./simulation-worker.js', import.meta.url), { type: 'module' })
 
   const result = await new Promise(finish => {
@@ -50,7 +53,6 @@ export async function solveSimulation(simulation, tree, onProgress) {
       groups: groups.map(references => references.some(reference => reference.item === face)),
     }))
 
-    const material = simulation.mode == 'static' ? tree.findChild(componentId).getMaterial() : null
     const settings = Object.fromEntries([
       'quality', 'forceX', 'forceY', 'forceZ', 'coldTemperature', 'hotTemperature',
       'resolution', 'density', 'viscosity', 'inletSpeed', 'outletPressure',
@@ -70,6 +72,7 @@ export async function solveSimulation(simulation, tree, onProgress) {
 
   result.componentId = componentId
   result.solidId = solidId
+  if(material) setStrengths(result, material)
   simulation.result = result
   simulation.revision++
 }

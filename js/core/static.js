@@ -16,6 +16,50 @@ export const qualityLevels = {
 }
 
 
+export const stressColors = {
+  cold: new THREE.Color(0x003cff),
+  hot: new THREE.Color(0xff0000),
+  plastic: new THREE.Color(0xffc800),
+  failure: new THREE.Color(0xffffff),
+}
+
+
+// Unknown strengths are stored as Infinity so they never trigger
+export function setStrengths(result, material) {
+  result.yieldStrength = material.yieldStrength || Infinity
+  result.ultimateStrength = material.ultimateStrength || Infinity
+}
+
+// The blue to red gradient covers the elastic range only
+export function elasticStressRange(result) {
+  return Math.min(result.maxStress, result.yieldStrength, result.ultimateStrength)
+}
+
+export function elasticStressColor(ratio, target) {
+  return target.copy(stressColors.cold).lerp(stressColors.hot, Math.sqrt(Math.min(1, ratio)))
+}
+
+// Names the band of stressColors a stress falls into beyond the elastic range
+export function stressLimit(result, stress) {
+  if(stress >= result.ultimateStrength) return 'failure'
+  if(stress >= result.yieldStrength) return 'plastic'
+}
+
+export function stressColor(result, stress, target) {
+  const limit = stressLimit(result, stress)
+  if(limit) return target.copy(stressColors[limit])
+  const range = elasticStressRange(result)
+  return elasticStressColor(range ? stress / range : 0, target)
+}
+
+// Ratio of the first relevant strength limit to the peak stress
+export function safetyFactor(result) {
+  const limit = Math.min(result.yieldStrength, result.ultimateStrength)
+  if(limit == Infinity || !result.maxStress) return
+  return limit / result.maxStress
+}
+
+
 export class StaticSimulation {
   constructor(id) {
     this.id = id || makeID()
@@ -70,6 +114,7 @@ export class StaticSimulation {
     }
     this.result.componentId = this.fixedFaces[0].componentId
     this.result.solidId = solid.id
+    setStrengths(this.result, material)
     this.revision++
   }
 
@@ -133,13 +178,11 @@ export class StaticSimulation {
           result.displacements[node * 3 + 2],
         ),
         stress: result.stresses[node],
-        relativeStress: result.maxStress ? result.stresses[node] / result.maxStress : 0,
       }
     }
     return {
       displacement: displacement.divideScalar(totalWeight),
       stress: stress / totalWeight,
-      relativeStress: result.maxStress ? stress / totalWeight / result.maxStress : 0,
     }
   }
 

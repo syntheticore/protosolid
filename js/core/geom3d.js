@@ -199,6 +199,18 @@ export class Profile {
     const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(offset)).multiply(axis.clone().invert())
     return compound.transform(turn)
   }
+  coil(componentId, axis, angle, pitch, featureId) {
+    if (!angle || !pitch) fail('Coil has no volume')
+    // Successive turns of a profile taller than the pitch overlap
+    const direction = normalFromMatrix(axis)
+    const heights = this.rings[0].tesselate().map(point =>
+      new THREE.Vector3(point[0], point[1], 0).applyMatrix4(this.sketch.workplane).dot(direction))
+    if (Math.abs(angle) >= 2 * Math.PI && Math.max(...heights) - Math.min(...heights) >= Math.abs(pitch)) {
+      fail('Pitch must exceed the profile height along the axis')
+    }
+    const geometry = this.geom().coil(planeFromMatrix(this.sketch.workplane), axisFromMatrix(axis), angle, pitch)
+    return new Compound(componentId, geometry).seedProfileTopology([this], featureId)
+  }
   revolveUpToFace(componentId, axis, target, featureId, forward = true) {
     if(!target) fail('Select a face to revolve up to')
     const body = target.solid.geom().toCompound()
@@ -237,7 +249,6 @@ export class Profile {
     return new Compound(componentId, geometry).seedProfileTopology(profiles, featureId)
   }
   sweep(componentId, rails, followTangents, featureId) {
-    if(this.rings.length != 1) fail('Sweeps with holes are not supported')
     const railSources = [...new Set(rails.map(rail => rail instanceof Edge ? 'rail' : rail.id.split('/')[0]))]
     // Tangent continuations come from the same body or sketch as the selection
     const selected = new Set(rails.map(rail => rail.id))

@@ -165,7 +165,10 @@ The current publisher certifies:
 - full and partial profile revolutions, retaining primitive supports where
   possible and exact revolved surfaces for other meridians;
 - exact sweeps along line, circle, and regular planar NURBS rails, with a
-  continuous tangent frame through inflections and closed rail seams;
+  continuous tangent frame through inflections and closed rail seams; profile
+  holes stay hollow, and closed rails or full revolutions seal them as cavities;
+- coils screwing a meridian profile, including holes, about an axis in its
+  plane, bounded by one exact helicoidal sweep per profile segment;
 - smooth rational section lofts through line, circle, and NURBS profiles, with
   exact subdivision and degree elevation for section correspondence, retaining
   planar supports and straight boundaries when their control nets permit it;

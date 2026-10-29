@@ -2651,6 +2651,128 @@ export class SweepFeature extends SolidFeature {
 Serialize.register(SweepFeature, 'SweepFeature')
 
 
+export class CoilFeature extends SolidFeature {
+  static icon = 'coil'
+  constructor(document) {
+    super(document, true, 'Coil', {
+      size: {
+        title: 'Size',
+        type: 'select',
+        options: {
+          turnsPitch: { title: 'Revolutions and pitch', icon: 'grip-lines' },
+          turnsHeight: { title: 'Revolutions and height', icon: 'ruler-vertical' },
+          heightPitch: { title: 'Height and pitch', icon: 'text-height' },
+        },
+      },
+      profiles: {
+        title: 'Profiles',
+        type: 'profile',
+        multi: true,
+      },
+      axis: {
+        title: 'Axis',
+        type: 'axis',
+      },
+      revolutions: {
+        title: 'Revolutions',
+        type: 'number',
+        min: 0,
+        step: 0.25,
+        when: feature => feature.size != 'heightPitch',
+      },
+      height: {
+        title: 'Height',
+        type: 'length',
+        when: feature => feature.size != 'turnsPitch',
+      },
+      pitch: {
+        title: 'Pitch',
+        type: 'length',
+        when: feature => feature.size != 'turnsHeight',
+      },
+      handedness: {
+        title: 'Handedness',
+        type: 'select',
+        options: {
+          right: { title: 'Right-handed', icon: 'redo' },
+          left: { title: 'Left-handed', icon: 'undo' },
+        },
+      },
+      side: {
+        title: 'Side',
+        type: 'bool',
+        icons: ['caret-up', 'caret-down'],
+      },
+    })
+
+    this.size = 'turnsPitch'
+    this.profiles = null
+    this.axis = null
+    this.revolutions = 3
+    this.height = 60.0
+    this.pitch = 20.0
+    this.handedness = 'right'
+    this.side = true
+  }
+
+  // Revolutions and pitch, whichever two quantities define the coil
+  coilSize() {
+    if(this.size == 'turnsHeight') return { revolutions: this.revolutions, pitch: this.height / this.revolutions }
+    if(this.size == 'heightPitch') return { revolutions: this.height / this.pitch, pitch: this.pitch }
+    return { revolutions: this.revolutions, pitch: this.pitch }
+  }
+
+  updateFeature(tree, references) {
+    const { revolutions, pitch } = this.coilSize()
+    const sign = this.side ? 1 : -1
+    const angle = 2 * Math.PI * revolutions * sign * (this.handedness == 'right' ? 1 : -1)
+
+    let tool = new Compound(this.componentId)
+    this.previewBody = null
+    const comp = tree.findChild(this.componentId)
+    try {
+      for(const profile of references.profiles) {
+        tool = tool.boolean(profile.coil(this.componentId, references.axis, angle, pitch * sign, this.id), 'join')
+      }
+      comp.compound = comp.compound.boolean(tool, this.operation)
+      this.previewBody = tool
+    } catch(err) { this.error = featureError(err, 'Coil could not be created') }
+  }
+
+  getGizmo() {
+    const axis = this.axis().getItem()
+    const direction = normalFromMatrix(axis)
+    const origin = new THREE.Vector3().setFromMatrixPosition(axis)
+    const profileCenter = this.profiles().at(-1).getItem().center()
+    const center = origin.clone().addScaledVector(direction, profileCenter.clone().sub(origin).dot(direction))
+    const { revolutions, pitch } = this.coilSize()
+    return {
+      distance: {
+        center,
+        direction,
+        distance: revolutions * pitch,
+        side: this.side,
+        cb: (height, side) => {
+          if(this.size == 'turnsPitch') {
+            this.revolutions = height / this.pitch
+          } else {
+            this.setExpression('height', null)
+            this.height = height
+          }
+          this.side = side
+        },
+      },
+    }
+  }
+
+  preview() {
+    return this.isComplete() && this.error?.type != 'error' ? this.previewBody : null
+  }
+}
+
+Serialize.register(CoilFeature, 'CoilFeature')
+
+
 function edgePropagationSetting() {
   return {
     title: 'Propagation',

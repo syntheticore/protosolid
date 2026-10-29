@@ -463,6 +463,8 @@ export interface Profile {
   offset(distance: number): Profile[]
   extrude(plane: Plane3, vector: Vec3): Compound
   revolve(plane: Plane3, axis: Axis3, angle: number): Compound
+  /** Coil about an axis in the profile plane, turning `angle` while advancing `pitch` per turn. */
+  coil(plane: Plane3, axis: Axis3, angle: number, pitch: number): Compound
   extrudeUpToFace(plane: Plane3, target: Compound, limit: Face, offset?: number, endOffset?: number): Compound
   revolveUpToFace(plane: Plane3, axis: Axis3, target: Compound, limit: Face, forward?: boolean): Compound
   revolveBetweenFaces(plane: Plane3, axis: Axis3, fromBody: Compound, from: Face, untilBody: Compound, until: Face, forward?: boolean): Compound

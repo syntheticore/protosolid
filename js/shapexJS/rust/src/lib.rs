@@ -303,6 +303,27 @@ pub fn revolve(
         .map_err(js_error)
 }
 
+/// Coil about an axis in the profile plane, advancing `pitch` per turn.
+#[wasm_bindgen(js_name = coil)]
+pub fn coil(
+    description: JsValue,
+    plane_values: &[f64],
+    axis_values: &[f64],
+    angle: f64,
+    pitch: f64,
+) -> Result<NativeCompound, JsValue> {
+    let profile = profile(description)?;
+    profile
+        .coil(
+            plane(plane_values, profile.tolerance())?,
+            axis(axis_values)?,
+            angle,
+            pitch,
+        )
+        .map(|inner| NativeCompound { inner })
+        .map_err(js_error)
+}
+
 #[wasm_bindgen(js_name = extrudeUpToFace)]
 pub fn extrude_up_to_face(
     description: JsValue,

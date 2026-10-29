@@ -1,7 +1,7 @@
 //! Revolutions and lofts built from exact profile sections. Display triangles
 //! never enter BREP.
 use super::geometry::de_casteljau_split;
-use super::sew::{cap, publish_with_roles, BrepPatch, BrepPatchLoop, BrepPatchSegment};
+use super::sew::{cap, publish_shells_with_roles, publish_with_roles, BrepPatch, BrepPatchLoop, BrepPatchSegment};
 use super::*;
 use crate::{Point2, Point3, Vec2, Vec3};
 use cgmath::prelude::*;
@@ -10,7 +10,7 @@ use cgmath::Vector4;
 fn range(a: f64, b: f64) -> KernelResult<ParameterRange> {
     ParameterRange::new(a, b)
 }
-fn radial_profile(
+pub(super) fn radial_profile(
     profile: &Profile,
     plane: Plane3,
     axis: Axis3,
@@ -218,6 +218,10 @@ pub(super) fn revolve(
                     chart: if full { Some(if (a == low) == (angle > 0.0) { SurfaceChart::TurnStart } else { SurfaceChart::TurnEnd }) } else { None } });
             }
         }
+    }
+    // A complete turn seals each hole into a cavity.
+    if full && !profile.holes().is_empty() {
+        return publish_shells_with_roles(patches, roles, tolerance);
     }
     publish_with_roles(patches, roles, tolerance)
 }

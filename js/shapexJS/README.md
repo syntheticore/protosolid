@@ -118,8 +118,11 @@ enclosing area. `wire.lifted(plane)` gives a `Wire3`, the spatial counterpart;
 `Wire3.connect(segments)` chains segments given in any order and direction, and
 `extended(candidates)` grows it through tangent continuations. Wires evaluate by
 one parameter running over the concatenated segment spans. `profile.sweep(plane,
-rail)` follows a tangent-continuous `Wire3`; `profile.loft(plane, sections,
+rail)` follows a tangent-continuous `Wire3`, keeping profile holes hollow; `profile.loft(plane, sections,
 align, guides)` bends its sides onto `Wire3` guides crossing every section.
+`profile.coil(plane, axis, angle, pitch)` turns by `angle` about an axis in the
+profile plane while advancing `pitch` along it per full turn; the pitch must
+exceed the profile's extent along the axis once the coil completes a turn.
 `Profile.offset(distance)`
 operates on filled regions: positive distances expand, negative distances erode;
 results can contain several profiles or be empty. `classifyPoint` on wires and

@@ -374,13 +374,31 @@ pub(crate) fn transform_surface(
                     tolerance,
                 )
             };
-            Surface3::Swept(super::SweptSurface3::new(
-                plane(surface.profile_plane())?,
-                surface.profile().clone(),
-                transform_curve(surface.rail().clone(), transform, tolerance)?,
-                surface.rail_range(),
-                tolerance,
-            )?)
+            let profile_plane = plane(surface.profile_plane())?;
+            let rail = transform_curve(surface.rail().clone(), transform, tolerance)?;
+            Surface3::Swept(match (surface.helix_rate(), rail) {
+                (Some(rate), Curve3::Line(rail)) => {
+                    // A mirror reverses the screw's sense about its rail.
+                    let source = surface.profile_plane();
+                    let mirrored = profile_plane.u().cross(profile_plane.v())
+                        .dot(transform.transform_vector(source.u().cross(source.v()))) < 0.0;
+                    super::SweptSurface3::helical(
+                        profile_plane,
+                        surface.profile().clone(),
+                        rail,
+                        surface.rail_range(),
+                        if mirrored { -rate } else { rate },
+                        tolerance,
+                    )?
+                }
+                (_, rail) => super::SweptSurface3::new(
+                    profile_plane,
+                    surface.profile().clone(),
+                    rail,
+                    surface.rail_range(),
+                    tolerance,
+                )?,
+            })
         }
         Surface3::Revolved(surface) => {
             let frame = surface.frame();

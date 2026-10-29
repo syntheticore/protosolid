@@ -9,8 +9,9 @@ use std::sync::Arc;
 /// rail frame, well below every model tolerance.
 const FRAME_STEP_ERROR: f64 = 1.0e-13;
 
-/// How the section turns along the rail. Both variants follow the rail's
-/// rotation-minimizing frame, which never twists the section about the rail.
+/// How the section turns along the rail. The planar and integrated variants
+/// follow the rail's rotation-minimizing frame, which never twists the section
+/// about the rail.
 #[derive(Debug, Clone, PartialEq)]
 enum Orientation {
     /// A planar rail turns the section about the plane's fixed normal by the
@@ -23,6 +24,10 @@ enum Orientation {
         checkpoints: Arc<[Checkpoint]>,
         twist: f64,
     },
+    /// A straight rail screws the section about itself, turning by `rate`
+    /// radians per unit rail parameter from `start`. This is the exact
+    /// helicoidal sweep.
+    Helical { axis: Vec3, rate: f64, start: f64 },
 }
 
 /// A verified rotation of a spatial rail frame, with its rate of change.
@@ -160,6 +165,40 @@ impl SweptSurface3 {
     pub fn rail_range(&self) -> ParameterRange {
         self.rail_range
     }
+    /// Helicoidal sweep of a section screwing about a straight rail, turning
+    /// by `rate` radians per unit rail parameter from the rail start.
+    pub fn helical(
+        profile_plane: Plane3,
+        profile: TrimmedCurve2,
+        rail: Line3,
+        rail_range: ParameterRange,
+        rate: f64,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Self> {
+        tolerance.validate()?;
+        if !rate.is_finite() || rate == 0.0 {
+            return Err(invalid("helical sweep rate must be finite and nonzero"));
+        }
+        let axis = rail.direction().normalize();
+        Ok(Self {
+            profile_plane,
+            profile,
+            rail_origin: rail.evaluate(rail_range.start)?.point,
+            rail: Box::new(rail.into()),
+            rail_range,
+            tolerance,
+            closed_rail: false,
+            rail_tangent: axis,
+            orientation: Orientation::Helical { axis, rate, start: rail_range.start },
+        })
+    }
+    /// The turn per unit rail parameter of a helicoidal sweep.
+    pub fn helix_rate(&self) -> Option<f64> {
+        match self.orientation {
+            Orientation::Helical { rate, .. } => Some(rate),
+            _ => None,
+        }
+    }
     pub(crate) fn extended(&self, padding: [f64; 2]) -> KernelResult<Self> {
         let mut result = self.clone();
         let domains = self.domains();
@@ -174,12 +213,19 @@ impl SweptSurface3 {
             result.profile = TrimmedCurve2::new(self.profile.curve().extended(range)?, range)?;
         }
         if domains[1].period.is_none() {
-            let Orientation::Planar(normal) = self.orientation else {
-                return Err(unsupported("extending a sweep along a spatial rail"));
-            };
             let range = padded(self.rail_range, padding[1])?;
-            if let Curve3::Nurbs(_) | Curve3::SurfaceCurve(_) | Curve3::SurfaceIntersection(_) =
-                *self.rail
+            let normal = match self.orientation {
+                Orientation::Planar(normal) => Some(normal),
+                // A straight rail extends itself; the screw continues from its start.
+                Orientation::Helical { .. } => None,
+                Orientation::Integrated { .. } => {
+                    return Err(unsupported("extending a sweep along a spatial rail"))
+                }
+            };
+            if let (
+                Some(normal),
+                Curve3::Nurbs(_) | Curve3::SurfaceCurve(_) | Curve3::SurfaceIntersection(_),
+            ) = (normal, &*self.rail)
             {
                 let frame = Frame3::from_z(self.rail_origin, normal)?;
                 let plane = Plane3::new(frame.origin(), frame.x(), frame.y(), self.tolerance)?;
@@ -228,6 +274,7 @@ impl SweptSurface3 {
         match &self.orientation {
             Orientation::Planar(normal) => normal * normal.dot(omega),
             Orientation::Integrated { twist, .. } => omega + tangent * *twist,
+            Orientation::Helical { axis, rate, .. } => axis * *rate,
         }
     }
     fn angular_acceleration(&self, tangent: Vec3, acceleration: Vec3, jerk: Vec3) -> Vec3 {
@@ -237,6 +284,7 @@ impl SweptSurface3 {
         match &self.orientation {
             Orientation::Planar(normal) => normal * normal.dot(change),
             Orientation::Integrated { twist, .. } => change + acceleration * *twist,
+            Orientation::Helical { .. } => Vec3::new(0.0, 0.0, 0.0),
         }
     }
     /// The frame's angular velocity and the rail speed at a rail parameter.
@@ -345,6 +393,9 @@ impl SweptSurface3 {
                     .atan2(self.rail_tangent.dot(direction));
                 Matrix3::from_axis_angle(*normal, cgmath::Rad(angle))
             }
+            Orientation::Helical { axis, rate, start } => {
+                Matrix3::from_axis_angle(*axis, cgmath::Rad(rate * (v - start)))
+            }
             Orientation::Integrated { checkpoints, twist } => {
                 let direction = self.rail_range.span().signum();
                 let index = checkpoints.partition_point(|checkpoint| (v - checkpoint.parameter) * direction >= 0.0);
@@ -413,11 +464,18 @@ impl SweptSurface3 {
     pub(crate) fn project(&self, target: Point3) -> KernelResult<Projection2> {
         let ranges = [self.profile.range(), self.rail_range];
         let domains = self.domains();
+        // Seed every turn of a helicoidal sweep alike; its turns lie side by side.
+        let rail_samples = match self.orientation {
+            Orientation::Helical { rate, .. } => {
+                32 * ((ranges[1].span() * rate).abs() / std::f64::consts::TAU).ceil().max(1.0) as usize
+            }
+            _ => 32,
+        };
         let mut best = None;
         for i in 0..=8 {
-            for j in 0..=32 {
+            for j in 0..=rail_samples {
                 let u = ranges[0].start + ranges[0].span() * i as f64 / 8.0;
-                let v = ranges[1].start + ranges[1].span() * j as f64 / 32.0;
+                let v = ranges[1].start + ranges[1].span() * j as f64 / rail_samples as f64;
                 let p = self.first_order(u, v)?.0;
                 let distance = p.distance(target);
                 if best
@@ -533,12 +591,10 @@ impl Profile {
     /// tangentially. The profile retains its initial placement and turns with
     /// the rail's rotation-minimizing frame, leaving each segment in the frame
     /// it reached. An open rail starts at whichever end lies closer to the
-    /// profile plane; a closed one where it passes the profile.
+    /// profile plane; a closed one where it passes the profile. Holes share
+    /// the outer boundary's frame and remain hollow along the whole rail.
     pub fn sweep(&self, plane: Plane3, rail: &Wire3) -> KernelResult<Compound> {
         let tolerance = self.tolerance();
-        if !self.holes().is_empty() {
-            return Err(invalid("sweeps with holes are not supported"));
-        }
         if !rail.is_tangent_continuous()? {
             return Err(invalid("sweep rail segments must join tangentially"));
         }
@@ -618,6 +674,79 @@ impl Profile {
             }
             self.sweep_sides(frame, &parameters, forward, &mut patches, &mut roles)?;
         }
+        // Around a closed rail each hole bounds a sealed cavity.
+        if closed && !self.holes().is_empty() {
+            return super::sew::publish_shells_with_roles(patches, roles, tolerance);
+        }
+        super::sew::publish_with_roles(patches, roles, tolerance)
+    }
+
+    /// Coil about an axis in the profile plane, turning by `angle` radians
+    /// while advancing `pitch` along the axis per full turn. The profile screws
+    /// about the axis, so its sides are exact helicoidal sweeps.
+    pub fn coil(&self, plane: Plane3, axis: Axis3, angle: f64, pitch: f64) -> KernelResult<Compound> {
+        let tolerance = self.tolerance();
+        if !angle.is_finite() || angle.abs() <= tolerance.parameter {
+            return Err(invalid("coil angle must be finite and nonzero"));
+        }
+        if !pitch.is_finite() || pitch.abs() <= tolerance.linear {
+            return Err(invalid("coil pitch must be finite and nonzero"));
+        }
+        let (profile, frame) = super::revolve_loft::radial_profile(self, plane, axis)?;
+        // Radial and axial reach of the profile in its meridian coordinates
+        let mut radial = f64::INFINITY;
+        let mut axial = [f64::INFINITY, f64::NEG_INFINITY];
+        for segment in profile.outer().segments() {
+            let mut reach = |point: Point2| {
+                radial = radial.min(point.x);
+                axial = [axial[0].min(point.y), axial[1].max(point.y)];
+            };
+            match segment.curve() {
+                Curve2::Line(_) => [segment.start()?, segment.end()?].into_iter().for_each(&mut reach),
+                Curve2::Circle(_) => {
+                    [segment.start()?, segment.end()?].into_iter().for_each(&mut reach);
+                    // Arcs reach their extremes at quarter turns
+                    for k in -8..=8 {
+                        let extreme = k as f64 * std::f64::consts::FRAC_PI_2;
+                        if segment.range().contains(extreme, tolerance) {
+                            reach(segment.curve().evaluate(extreme)?.point);
+                        }
+                    }
+                }
+                curve => {
+                    let bounds = super::bounds::curve2(curve, segment.range())?;
+                    reach(Point2::new(bounds.0.x, bounds.0.y));
+                    reach(Point2::new(bounds.1.x, bounds.1.y));
+                }
+            }
+        }
+        if radial <= tolerance.linear {
+            return Err(invalid("coil profile may not touch its axis"));
+        }
+        if angle.abs() >= std::f64::consts::TAU - tolerance.parameter
+            && axial[1] - axial[0] >= pitch.abs() - tolerance.linear
+        {
+            return Err(invalid("coil pitch must exceed the profile's extent along the axis"));
+        }
+        let span = angle.abs();
+        let meridian = Plane3::new(frame.origin(), frame.x(), frame.z(), tolerance)?;
+        let helix = SweptSurface3::helical(
+            meridian,
+            profile.outer().segments()[0].clone(),
+            Line3::new(frame.origin(), frame.z() * (pitch / std::f64::consts::TAU))?,
+            ParameterRange::new(0.0, span)?,
+            // The screw turns about the rail's direction, which follows the pitch.
+            angle.signum() * pitch.signum(),
+            tolerance,
+        )?;
+        // The meridian normal points against a positive turn.
+        let forward = angle < 0.0;
+        let mut patches = vec![
+            super::sew::cap(&profile, meridian, forward)?,
+            super::sew::cap(&profile, helix.section_plane(span)?, !forward)?,
+        ];
+        let mut roles = vec![super::CreationRole::ProfileStart, super::CreationRole::ProfileEnd];
+        profile.sweep_sides(&helix, &[0.0, span], forward, &mut patches, &mut roles)?;
         super::sew::publish_with_roles(patches, roles, tolerance)
     }
 
@@ -633,7 +762,10 @@ impl Profile {
         let tolerance = self.tolerance();
         // Keep each source section edge intact. Periodic charts and display
         // subdivision must not introduce artificial CAD edges into the solid.
-        for (source, section) in self.outer().segments().iter().enumerate() {
+        let rings = std::iter::once(self.outer()).chain(self.holes()).enumerate();
+        for (ring, source, section) in rings.flat_map(|(ring, wire)| {
+            wire.segments().iter().enumerate().map(move |(source, section)| (ring, source, section))
+        }) {
             // Sections share the rail frame, which is integrated only once
             let surface = Surface3::Swept(SweptSurface3 {
                 profile: section.clone(),
@@ -695,7 +827,7 @@ impl Profile {
                     patch.reverse();
                 }
                 patches.push(patch);
-                roles.push(super::CreationRole::ProfileSide { generators: vec![[0, 0, self.generator(0, source)]], chart: None });
+                roles.push(super::CreationRole::ProfileSide { generators: vec![[0, ring, self.generator(ring, source)]], chart: None });
             }
         }
         Ok(())

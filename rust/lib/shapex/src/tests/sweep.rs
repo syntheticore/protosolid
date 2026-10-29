@@ -733,3 +733,137 @@ fn sweep_rail_rejects_corners_and_gaps() {
     assert!(p.sweep(x_normal_plane(0.0), &corner).is_err());
     assert!(Wire3::connect([first, segment(line((11.0, 0.0), (20.0, 0.0)))], t).is_err());
 }
+
+/// A meridian profile in the XZ plane, coiled about the Z axis
+fn coil_plane() -> Plane3 {
+    Plane3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_x(), Vec3::unit_z(), ModelTolerance::default()).unwrap()
+}
+fn z_axis() -> Axis3 {
+    Axis3::new(Point3::new(0.0, 0.0, 0.0), Vec3::unit_z()).unwrap()
+}
+fn ring(center: (f64, f64), radius: f64, hole: Option<f64>) -> Profile {
+    let tolerance = ModelTolerance::default();
+    let center = Point2::new(center.0, center.1);
+    let wire = |radius| Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tolerance).unwrap();
+    Profile::new(wire(radius), hole.map(wire), tolerance).unwrap()
+}
+
+#[test]
+fn full_hollow_revolution_encloses_a_cavity() {
+    let p = ring((4.0, 0.0), 1.0, Some(0.5));
+    let body = p.revolve(coil_plane(), z_axis(), TAU).unwrap();
+    // One solid whose volume excludes the sealed bore
+    verify(&body, p.area() * 4.0 * TAU);
+}
+
+#[test]
+fn hollow_sweeps_retain_their_bore() {
+    let t = ModelTolerance::default();
+    let p = ring((0.0, 0.0), 1.0, Some(0.6));
+    // Straight and circular rails take the extrusion and revolution paths
+    let plane = x_normal_plane(0.0);
+    verify(&p.sweep(plane, &Wire3::connect([segment(line((0.0, 0.0), (10.0, 0.0)))], t).unwrap()).unwrap(),
+        p.area() * 10.0);
+    let quarter = segment(arc((0.0, 5.0), 1.5 * PI, TAU));
+    verify(&p.sweep(plane, &Wire3::connect([quarter], t).unwrap()).unwrap(), p.area() * 5.0 * FRAC_PI_2);
+    // A planar spline rail
+    let spline = xy(&rail());
+    let range = rail().range();
+    let plane = start_plane(&spline, range);
+    verify(&p.sweep(plane, &rail3(&spline, range)).unwrap(), p.area() * curve_length(&spline, range));
+    // A closed spatial spline rail
+    let mut points: Vec<_> = (0..8)
+        .map(|i| {
+            let angle = TAU * i as f64 / 8.0;
+            let radius = 10.0 + 3.0 * angle.cos();
+            Point3::new(radius * angle.cos(), radius * angle.sin(), 4.0 * angle.sin() + 3.0 * (2.0 * angle).sin())
+        })
+        .collect();
+    points.extend(points[..3].to_vec());
+    let closed: Curve3 = NurbsCurve3::new(3, points, vec![1.0; 11], (0..15).map(f64::from).collect()).unwrap().into();
+    let range = ParameterRange::new(3.0, 11.0).unwrap();
+    let plane = start_plane(&closed, range);
+    verify(&p.sweep(plane, &rail3(&closed, range)).unwrap(), p.area() * curve_length(&closed, range));
+    // Open and closed tangent chains
+    let plane = x_normal_plane(0.0);
+    let open = [
+        segment(line((0.0, 0.0), (10.0, 0.0))),
+        segment(arc((10.0, 5.0), 1.5 * PI, TAU)),
+        segment(line((15.0, 5.0), (15.0, 15.0))),
+    ];
+    verify(&p.sweep(plane, &Wire3::connect(open, t).unwrap()).unwrap(), p.area() * (20.0 + 2.5 * PI));
+    let closed = [
+        segment(line((0.0, 0.0), (10.0, 0.0))),
+        segment(arc((10.0, 5.0), 1.5 * PI, TAU)),
+        segment(line((15.0, 5.0), (15.0, 15.0))),
+        segment(arc((10.0, 15.0), 0.0, FRAC_PI_2)),
+        segment(line((10.0, 20.0), (0.0, 20.0))),
+        segment(arc((0.0, 15.0), FRAC_PI_2, PI)),
+        segment(line((-5.0, 15.0), (-5.0, 5.0))),
+        segment(arc((0.0, 5.0), PI, 1.5 * PI)),
+    ];
+    let plane = x_normal_plane(5.0);
+    verify(&p.sweep(plane, &Wire3::connect(closed, t).unwrap()).unwrap(), p.area() * (40.0 + 10.0 * PI));
+}
+
+#[test]
+fn coil_volume_follows_its_centroid() {
+    // Helical motion of a meridian section sweeps its area along the
+    // centroid's circular travel; the axial advance adds no volume.
+    for (angle, pitch) in [(2.5 * TAU, 3.0), (-2.5 * TAU, 3.0), (2.5 * TAU, -3.0), (0.75 * TAU, 0.5)] {
+        let p = ring((4.0, 1.0), 1.0, None);
+        let body = p.coil(coil_plane(), z_axis(), angle, pitch).unwrap();
+        verify(&body, p.area() * 4.0 * angle.abs());
+    }
+}
+
+#[test]
+fn coil_tube_retains_its_bore() {
+    let p = ring((4.0, 0.0), 1.0, Some(0.5));
+    let body = p.coil(coil_plane(), z_axis(), 2.0 * TAU, 2.5).unwrap();
+    verify(&body, p.area() * 4.0 * 2.0 * TAU);
+    // Two caps and one face for each ring, along all turns
+    assert_eq!(body.faces().count(), 4);
+}
+
+#[test]
+fn coil_rejects_overlapping_turns_and_axis_contact() {
+    let p = ring((4.0, 0.0), 1.0, None);
+    assert!(p.coil(coil_plane(), z_axis(), 2.0 * TAU, 2.0).is_err());
+    assert!(p.coil(coil_plane(), z_axis(), 0.9 * TAU, 2.0).is_ok());
+    assert!(ring((1.0, 0.0), 1.0, None).coil(coil_plane(), z_axis(), TAU, 3.0).is_err());
+}
+
+#[test]
+fn coil_cuts_a_thread() {
+    let t = ModelTolerance::default();
+    let core = ring((0.0, 0.0), 4.5, None)
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 10.0))
+        .unwrap();
+    let triangle = Profile::new(
+        Wire2::new(
+            [
+                TrimmedCurve2::line(Point2::new(4.0, 2.0), Point2::new(5.0, 1.5)).unwrap(),
+                TrimmedCurve2::line(Point2::new(5.0, 1.5), Point2::new(5.0, 2.5)).unwrap(),
+                TrimmedCurve2::line(Point2::new(5.0, 2.5), Point2::new(4.0, 2.0)).unwrap(),
+            ],
+            t,
+        )
+        .unwrap(),
+        [],
+        t,
+    )
+    .unwrap();
+    let thread = triangle.coil(coil_plane(), z_axis(), 5.0 * TAU, 1.5).unwrap();
+    let cut = core.difference(&thread).unwrap();
+    assert_eq!(cut.solids().len(), 1);
+    assert!(cut.volume() < core.volume() && cut.volume() > core.volume() - thread.volume());
+    let turned = thread
+        .transformed(RigidTransform3::new(
+            Matrix3::from_angle_x(crate::Rad(FRAC_PI_2)),
+            Vec3::new(1.0, 2.0, 3.0),
+            t,
+        ).unwrap())
+        .unwrap();
+    assert!((turned.volume() - thread.volume()).abs() < thread.volume() * 1e-6);
+}

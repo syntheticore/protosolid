@@ -1164,15 +1164,42 @@ pub(crate) fn publish(patches: &[BrepPatch], tolerance: ModelTolerance) -> Kerne
     super::Compound::from_operation(kernel, committed, [])
 }
 
+/// Publish patches bounding several closed shells. Each connected shell is
+/// sewn on its own and inward shells become cavities of the shells holding them.
+fn publish_shells(patches: Vec<BrepPatch>, tolerance: ModelTolerance) -> KernelResult<super::Compound> {
+    let components = super::boolean::patch_components(patches, tolerance)?;
+    let mut kernel = super::Kernel::new(tolerance)?;
+    let mut transaction = kernel.begin_operation();
+    let bodies = components
+        .iter()
+        .map(|component| transaction.brep_shell(component))
+        .collect::<KernelResult<Vec<_>>>()?;
+    transaction.nest_brep_shells(&bodies)?;
+    let committed = transaction.finish()?;
+    super::Compound::from_operation(kernel, committed, [])
+}
+
 // Attach roles at construction, before welding/unification can merge patches.
 // The tokens identify generators, not positions in the published face array.
-pub(crate) fn publish_with_roles(mut patches: Vec<BrepPatch>, roles: Vec<super::CreationRole>, tolerance: ModelTolerance) -> KernelResult<super::Compound> {
+fn role_roots(patches: &mut [BrepPatch], roles: Vec<super::CreationRole>)
+    -> std::collections::BTreeMap<PersistentId, super::CreationRole> {
     let namespace = super::identity::fresh_uuid();
     let roots = roles.into_iter().enumerate().map(|(index, role)|
         (PersistentId { namespace, local: index as u64 }, role)).collect::<std::collections::BTreeMap<_, _>>();
     for (patch, (name, _)) in patches.iter_mut().zip(&roots) {
         patch.sources.push(*name);
     }
+    roots
+}
+
+pub(crate) fn publish_with_roles(mut patches: Vec<BrepPatch>, roles: Vec<super::CreationRole>, tolerance: ModelTolerance) -> KernelResult<super::Compound> {
+    let roots = role_roots(&mut patches, roles);
     Ok(publish(&patches, tolerance)?.with_patch_roles(&roots))
 }
 
+/// Like `publish_with_roles`, for bodies that can enclose a cavity, such as
+/// a hollow profile swept or revolved all the way around.
+pub(crate) fn publish_shells_with_roles(mut patches: Vec<BrepPatch>, roles: Vec<super::CreationRole>, tolerance: ModelTolerance) -> KernelResult<super::Compound> {
+    let roots = role_roots(&mut patches, roles);
+    Ok(publish_shells(patches, tolerance)?.with_patch_roles(&roots))
+}

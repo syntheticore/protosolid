@@ -41,7 +41,20 @@
       }
     },
 
+    watch: {
+      // Propagate outside changes, such as from gizmos
+      value(value) {
+        if(value === this.emitted) return
+        this.emit(value)
+      },
+    },
+
     methods: {
+      emit(value) {
+        this.emitted = value
+        this.$emit('update:value', value)
+      },
+
       commit(rawValue, noFocus) {
         const value = Number(rawValue)
         if(!Number.isFinite(value) || value < this.min || value > this.max) {
@@ -51,7 +64,7 @@
           return
         }
         this.problem = false
-        this.$emit('update:value', value)
+        this.emit(value)
         this.$refs.input.syncValue()
         if(!noFocus) this.$refs.input.focusInput()
       },
@@ -59,7 +72,7 @@
       change(offset) {
         const value = Math.min(this.max, Math.max(this.min, this.value + offset))
         this.problem = false
-        this.$emit('update:value', Number(value.toFixed(12)))
+        this.emit(Number(value.toFixed(12)))
         this.$refs.input.focusInput()
       },
     },

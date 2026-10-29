@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 
-import { makeTriangles, voxelizeSolid } from './voxel.js'
+import { cellLevel, coarsenCells, makeConjugateGradient, makeMultigrid } from './multigrid.js'
+import { forLatticeNear, makeTriangles, voxelizeSolid } from './voxel.js'
 
 
 const boundaryTypes = { wall: 0, inlet: 1, interior: 2, outlet: 3 }
@@ -11,7 +12,7 @@ const boundaryTypes = { wall: 0, inlet: 1, interior: 2, outlet: 3 }
 // Unpicked boundaries are stationary no-slip walls; outlets fix gauge pressure.
 // Pressure discretization: https://www.cs.ubc.ca/~rbridson/fluidsimulation/fluids_notes.pdf
 export function solveVoxelFlow(solid, inletFaces, outletFaces, settings, onProgress=() => {}) {
-  const { bounds, step, nx, ny, nz, grid, points } = voxelizeSolid(solid, settings.resolution, Infinity, null,
+  const { bounds, step, nx, ny, nz, grid, points, coordinates: cellCoordinates } = voxelizeSolid(solid, settings.resolution, Infinity, null,
     value => onProgress(value * 20))
   onProgress(20)
   if(!points.length) return 'The fluid volume is too thin for this grid'
@@ -32,9 +33,8 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings, onProgr
     indices: new Int32Array(x * y * z).fill(-1),
   }))
   const faces = []
+  const boundaryFaces = []
   const cellFaces = points.map(() => [])
-  let inletCount = 0
-  let outletCount = 0
   fields.forEach((field, axis) => {
     const [sx, sy, sz] = field.dimensions
     const offset = axes[axis]
@@ -46,28 +46,14 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings, onProgr
           if(a < 0 && b < 0) continue
           const coordinates = [i + 0.5, j + 0.5, k + 0.5]
           coordinates[axis] -= 0.5
-          let type = 'interior'
-          let alignment = 1
-          if(a < 0 || b < 0) {
-            const position = new THREE.Vector3(...coordinates).multiplyScalar(step).add(bounds.min)
-            let distance = Infinity
-            type = 'wall'
-            surfaces.forEach(surface => {
-              const dot = Math.abs(surface.normal.getComponent(axis))
-              if(dot < 0.1) return
-              const d = surface.triangle.closestPointToPoint(position, closest).distanceToSquared(position)
-              if(d < distance) {
-                distance = d
-                type = surface.type
-                alignment = dot
-              }
-            })
-            if(type == 'inlet') inletCount++
-            if(type == 'outlet') outletCount++
-          }
           const index = faces.length
-          const sign = a < 0 ? 1 : -1
-          faces.push({ a, b, axis, coordinates, type, inletVelocity: sign * settings.inletSpeed * alignment })
+          const face = { a, b, axis, coordinates, type: 'interior', alignment: 1 }
+          if(a < 0 || b < 0) {
+            face.type = 'wall'
+            face.position = new THREE.Vector3(...coordinates).multiplyScalar(step).add(bounds.min)
+            boundaryFaces.push(index)
+          }
+          faces.push(face)
           field.indices[i + sx * (j + sy * k)] = index
           if(a >= 0) cellFaces[a].push({ index, sign: 1, other: b })
           if(b >= 0) cellFaces[b].push({ index, sign: -1, other: a })
@@ -75,7 +61,37 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings, onProgr
       }
     }
   })
-  if(!inletCount || !outletCount) return 'The inlet or outlet is too small for this grid; increase grid cells'
+
+  // Boundary faces take the type of the nearest surface facing their axis.
+  // That surface crosses between the two cell centers and so lies within one step;
+  // only faces without such a candidate fall back to testing every surface.
+  const distances = new Float64Array(faces.length).fill(Infinity)
+  const classify = (index, surface) => {
+    const face = faces[index]
+    const dot = Math.abs(surface.normal.getComponent(face.axis))
+    if(dot < 0.1) return
+    const d = surface.triangle.closestPointToPoint(face.position, closest).distanceToSquared(face.position)
+    if(d >= distances[index]) return
+    distances[index] = d
+    face.type = surface.type
+    face.alignment = dot
+  }
+  surfaces.forEach(surface => fields.forEach((field, axis) => {
+    const [sx, sy] = field.dimensions
+    const origin = bounds.min.toArray().map((value, d) => value + (d == axis ? 0 : step / 2))
+    forLatticeNear(surface.triangle, step, origin, [step, step, step], field.dimensions, (i, j, k) => {
+      const index = field.indices[i + sx * (j + sy * k)]
+      if(index >= 0 && faces[index].position) classify(index, surface)
+    })
+  }))
+  boundaryFaces.forEach(index => {
+    if(distances[index] <= step * step) return
+    distances[index] = Infinity
+    surfaces.forEach(surface => classify(index, surface))
+  })
+  if(!faces.some(face => face.type == 'inlet') || !faces.some(face => face.type == 'outlet')) {
+    return 'The inlet or outlet is too small for this grid; increase grid cells'
+  }
 
   // Each connected region needs a pressure outlet to anchor its Poisson solve.
   const reached = new Set()
@@ -107,7 +123,7 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings, onProgr
   }
   faces.forEach((face, index) => {
     faceTypes[index] = boundaryTypes[face.type]
-    inletVelocities[index] = face.inletVelocity
+    inletVelocities[index] = (face.a < 0 ? 1 : -1) * settings.inletSpeed * face.alignment
     const base = face.coordinates.map((value, axis) => value - (axis == face.axis ? 0 : 0.5))
     axes.forEach((offset, axis) => {
       const minus = base.map((value, d) => value - offset[d])
@@ -149,19 +165,19 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings, onProgr
     })
   })
   pressureOffsets[points.length] = pressureNeighbors.length
-  const neighbors = new Int32Array(pressureNeighbors)
-  const applyPressure = (input, output) => {
-    for(let node = 0; node < points.length; node++) {
-      let value = diagonal[node] * input[node]
-      for(let slot = pressureOffsets[node]; slot < pressureOffsets[node + 1]; slot++) value -= input[neighbors[slot]]
-      output[node] = value
-    }
-  }
-  const pressureSolver = makePressureSolver(applyPressure, diagonal)
+  const pressureLevel = cellLevel({
+    diagonal,
+    offsets: pressureOffsets,
+    columns: Int32Array.from(pressureNeighbors),
+    values: new Float64Array(pressureNeighbors.length).fill(-1),
+    coordinates: cellCoordinates,
+  })
+  const pressureSolver = makeConjugateGradient(pressureLevel.apply, makeMultigrid(pressureLevel, coarsenCells), points.length)
   let velocity = new Float64Array(faces.length + 1)
   let next = new Float64Array(faces.length + 1)
   const right = new Float64Array(points.length)
-  let pressure
+  // Pressure changes little between timesteps, so each solve starts from the last one.
+  const pressure = new Float64Array(points.length)
 
   let time = 0
   let converged = false
@@ -205,7 +221,7 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings, onProgr
       }
       right[node] = -settings.density * h / dt * divergence
     }
-    pressure = pressureSolver(right)
+    pressureSolver(right, pressure, 1e-6, 200)
     for(let index = 0; index < faces.length; index++) {
       const face = faces[index]
       if(faceTypes[index] == boundaryTypes.interior) next[index] -= dt / (settings.density * h) * (pressure[face.b] - pressure[face.a])
@@ -259,44 +275,4 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings, onProgr
     inletPositions,
     maxSpeed, inletFlow, outletFlow, time, iterations, converged, relativeChange, continuityError,
   }
-}
-
-
-function makePressureSolver(apply, diagonal) {
-  // Reuse PCG workspace across all pressure projections in this solve.
-  const solution = new Float64Array(diagonal.length)
-  const residual = new Float64Array(diagonal.length)
-  const preconditioned = new Float64Array(diagonal.length)
-  const direction = new Float64Array(diagonal.length)
-  const applied = new Float64Array(diagonal.length)
-  return right => {
-    solution.fill(0)
-    residual.set(right)
-    for(let i = 0; i < right.length; i++) {
-      preconditioned[i] = residual[i] / diagonal[i]
-      direction[i] = preconditioned[i]
-    }
-    let product = dot(residual, preconditioned)
-    const target = dot(right, right) * 1e-12
-    for(let iteration = 0; iteration < 200 && dot(residual, residual) > target; iteration++) {
-      apply(direction, applied)
-      const alpha = product / dot(direction, applied)
-      for(let i = 0; i < right.length; i++) {
-        solution[i] += alpha * direction[i]
-        residual[i] -= alpha * applied[i]
-        preconditioned[i] = residual[i] / diagonal[i]
-      }
-      const nextProduct = dot(residual, preconditioned)
-      const beta = nextProduct / product
-      for(let i = 0; i < right.length; i++) direction[i] = preconditioned[i] + beta * direction[i]
-      product = nextProduct
-    }
-    return solution
-  }
-}
-
-function dot(a, b) {
-  let value = 0
-  for(let i = 0; i < a.length; i++) value += a[i] * b[i]
-  return value
 }

@@ -22,25 +22,60 @@ export function voxelizeSolid(solid, resolution=14, maxCells=Infinity, targetSte
   const nz = Math.max(1, Math.ceil(size.z / steps[2]))
   const grid = new Int32Array(nx * ny * nz).fill(-1)
   const points = []
+  const coordinates = []
+
+  // Cast one +x ray per (j, k) column of cell centers and fill between
+  // sorted surface crossings instead of ray casting every cell.
+  const columns = Array.from({ length: ny * nz }, () => [])
+  for(const { a, b, c } of triangles) {
+    const normal = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a))
+    if(!normal.x) continue
+    const positive = normal.x > 0
+    const [jLow, jHigh] = latticeRange(Math.min(a.y, b.y, c.y), Math.max(a.y, b.y, c.y), bounds.min.y + steps[1] / 2, steps[1], ny)
+    const [kLow, kHigh] = latticeRange(Math.min(a.z, b.z, c.z), Math.max(a.z, b.z, c.z), bounds.min.z + steps[2] / 2, steps[2], nz)
+    for(let k = kLow; k <= kHigh; k++) {
+      const z = bounds.min.z + (k + 0.5) * steps[2]
+      for(let j = jLow; j <= jHigh; j++) {
+        const y = bounds.min.y + (j + 0.5) * steps[1]
+        if(edgeSide(a, b, y, z) != positive || edgeSide(b, c, y, z) != positive || edgeSide(c, a, y, z) != positive) continue
+        columns[j + ny * k].push(a.x - (normal.y * (y - a.y) + normal.z * (z - a.z)) / normal.x)
+      }
+    }
+  }
 
   for(let k = 0; k < nz; k++) {
     onProgress(k / nz)
     for(let j = 0; j < ny; j++) {
+      const crossings = columns[j + ny * k].sort((a, b) => a - b)
+      let crossed = 0
       for(let i = 0; i < nx; i++) {
-        const point = new THREE.Vector3(
-          bounds.min.x + (i + 0.5) * steps[0],
-          bounds.min.y + (j + 0.5) * steps[1],
-          bounds.min.z + (k + 0.5) * steps[2],
-        )
-        if(!isInside(point, triangles)) continue
+        const x = bounds.min.x + (i + 0.5) * steps[0]
+        while(crossed < crossings.length && crossings[crossed] < x) crossed++
+        if(crossed % 2 == 0) continue
         grid[i + nx * (j + ny * k)] = points.length
-        points.push(point)
+        points.push(new THREE.Vector3(x, bounds.min.y + (j + 0.5) * steps[1], bounds.min.z + (k + 0.5) * steps[2]))
+        coordinates.push(i, j, k)
       }
     }
   }
 
   onProgress(1)
-  return { bounds, size, step, steps, nx, ny, nz, grid, points }
+  return { bounds, size, step, steps, nx, ny, nz, grid, points, coordinates: Int32Array.from(coordinates) }
+}
+
+
+// Fixes every node whose connected component holds no fixed node, so floating
+// voxel islands keep their initial value instead of leaving the solve singular.
+export function fixFloatingNodes(fixed, connect) {
+  const parents = Int32Array.from(fixed, (_, node) => node)
+  const find = node => {
+    while(parents[node] != node) node = parents[node] = parents[parents[node]]
+    return node
+  }
+  connect((a, b) => parents[find(a)] = find(b))
+  const anchored = new Uint8Array(fixed.length)
+  fixed.forEach((value, node) => { if(value) anchored[find(node)] = 1 })
+  fixed.forEach((_, node) => { if(!anchored[find(node)]) fixed[node] = 1 })
 }
 
 
@@ -80,40 +115,34 @@ export function makeTriangles(faces) {
 }
 
 
-function isInside(point, triangles) {
-  let intersections = 0
-  triangles.forEach(triangle => {
-    if(rayIntersectsTriangle(point, triangle)) intersections++
+// Visits lattice points origin + index * steps within distance of the
+// triangle's bounding box, so callers only test nearby candidates.
+export function forLatticeNear(triangle, distance, origin, steps, dimensions, visit) {
+  const ranges = [0, 1, 2].map(axis => {
+    const values = [triangle.a, triangle.b, triangle.c].map(point => point.getComponent(axis))
+    return latticeRange(Math.min(...values) - distance, Math.max(...values) + distance, origin[axis], steps[axis], dimensions[axis])
   })
-  return intersections % 2 == 1
+  for(let k = ranges[2][0]; k <= ranges[2][1]; k++) {
+    for(let j = ranges[1][0]; j <= ranges[1][1]; j++) {
+      for(let i = ranges[0][0]; i <= ranges[0][1]; i++) visit(i, j, k)
+    }
+  }
 }
 
 
-function rayIntersectsTriangle(origin, triangle) {
-  const dx = 1
-  const dy = 0.371390676
-  const dz = 0.557086014
-  const e1x = triangle.b.x - triangle.a.x
-  const e1y = triangle.b.y - triangle.a.y
-  const e1z = triangle.b.z - triangle.a.z
-  const e2x = triangle.c.x - triangle.a.x
-  const e2y = triangle.c.y - triangle.a.y
-  const e2z = triangle.c.z - triangle.a.z
-  const px = dy * e2z - dz * e2y
-  const py = dz * e2x - dx * e2z
-  const pz = dx * e2y - dy * e2x
-  const det = e1x * px + e1y * py + e1z * pz
-  if(Math.abs(det) < 1e-10) return false
-  const inverse = 1 / det
-  const tx = origin.x - triangle.a.x
-  const ty = origin.y - triangle.a.y
-  const tz = origin.z - triangle.a.z
-  const u = (tx * px + ty * py + tz * pz) * inverse
-  if(u < 0 || u > 1) return false
-  const qx = ty * e1z - tz * e1y
-  const qy = tz * e1x - tx * e1z
-  const qz = tx * e1y - ty * e1x
-  const v = (dx * qx + dy * qy + dz * qz) * inverse
-  if(v < 0 || u + v > 1) return false
-  return (e2x * qx + e2y * qy + e2z * qz) * inverse > 1e-8
+function latticeRange(low, high, origin, step, count) {
+  return [
+    Math.max(0, Math.ceil((low - origin) / step)),
+    Math.min(count - 1, Math.floor((high - origin) / step)),
+  ]
+}
+
+
+// Side of a projected (y, z) point relative to edge pq. Evaluating every edge in
+// one canonical direction gives neighbors sharing an edge exactly opposite answers,
+// so a ray through a shared edge counts exactly one of the two triangles.
+function edgeSide(p, q, y, z) {
+  const flip = p.y > q.y || (p.y == q.y && p.z > q.z)
+  if(flip) [p, q] = [q, p]
+  return ((q.y - p.y) * (z - p.z) - (q.z - p.z) * (y - p.y) >= 0) != flip
 }

@@ -293,6 +293,17 @@ function dimensionPosition(line, offset, center) {
   return midpoint.addScaledVector(normal, offset)
 }
 
+// A label above or below the measured span gives its horizontal distance,
+// one beside it the vertical distance, any other position the aligned one.
+function linearDimensionOrientation(points, position) {
+  if(!points) return
+  const [a, b] = points
+  if(Math.abs(a.x - b.x) <= EPSILON || Math.abs(a.y - b.y) <= EPSILON) return
+  const within = axis => position[axis] > Math.min(a[axis], b[axis]) && position[axis] < Math.max(a[axis], b[axis])
+  if(within('x') && !within('y')) return 'horizontal'
+  if(within('y') && !within('x')) return 'vertical'
+}
+
 function addInferredTangentConstraint(sketch, line, snap, endpointIndex=1) {
   const target = snap && (snap.curve || (snap.elem instanceof Arc && snap.index > 0 && snap.elem))
   if(!(target instanceof Circle || target instanceof Arc)) return
@@ -2869,8 +2880,10 @@ export class DimensionTool extends HighlightTool {
   acceptsInput(item) {
     const isPoint = item instanceof ElemRef && item.index !== undefined
     const first = this.items[0]
-    if(first instanceof ElemRef) return isPoint || item instanceof Circle
-    if(first instanceof Line) return item instanceof Line
+    if(first instanceof ElemRef) {
+      return isPoint || item instanceof Circle || (item instanceof Line && item != first.curve())
+    }
+    if(first instanceof Line) return item instanceof Line || (isPoint && item.curve() != first)
     if(first instanceof Circle) {
       return item instanceof Circle || item instanceof Arc || (isPoint && item.curve() != first)
     }
@@ -2895,17 +2908,9 @@ export class DimensionTool extends HighlightTool {
       this.items.push(curve)
       if(this.canPlaceDimension()) this.updatePreview(vec)
 
-    } else if(this.items.length == 1 && this.items[0] instanceof Line) {
-      const curve = await this.getObject(coords)
-      if(curve instanceof Line && curve != this.items[0]) {
-        this.items.push(curve)
-        this.updatePreview(vec)
-      } else {
-        this.placeDimension(vec)
-      }
-
-    } else if(this.items.length == 1 && (this.items[0] instanceof Circle || this.items[0] instanceof Arc)) {
-      // A second circle or arc dimensions the radial offset between them
+    } else if(this.items.length == 1 && !(this.items[0] instanceof ElemRef)) {
+      // A second element after a line, circle or arc dimensions the distance
+      // or radial offset between them
       const curve = await this.getObject(coords)
       if(curve && curve != this.items[0]) {
         this.items.push(curve)
@@ -2943,9 +2948,14 @@ export class DimensionTool extends HighlightTool {
     )
   }
 
-  placeDimension(position) {
+  makeDimension(position) {
     const toSketch = this.sketch.workplane.clone().invert()
     const constraint = new Dimension(this.items, position.clone().applyMatrix4(toSketch))
+    return constraint.orient(linearDimensionOrientation(constraint.measuredPoints(), constraint.position))
+  }
+
+  placeDimension(position) {
+    const constraint = this.makeDimension(position)
     constraint.active = true
     this.sketch.addConstraint(constraint)
     this.viewport.updateRegions(true)
@@ -2954,8 +2964,7 @@ export class DimensionTool extends HighlightTool {
   }
 
   updatePreview(position) {
-    const toSketch = this.sketch.workplane.clone().invert()
-    const constraint = new Dimension(this.items, position.clone().applyMatrix4(toSketch))
+    const constraint = this.makeDimension(position)
     constraint.sketch = this.sketch
     this.viewport.dimensionPreview = constraint
     this.viewport.renderer.render()

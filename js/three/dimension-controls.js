@@ -33,6 +33,18 @@ export default class DimensionControls extends THREE.Object3D {
       const [start, end] = constraint.dimensionPoints()
       makeOffsetDimension(this, renderer, start, end, constraint.position)
 
+    // Horizontal or vertical distance
+    } else if(constraint.orientation) {
+      const [start, end] = constraint.measuredPoints().map(point => point.clone())
+      const axis = constraint.orientation == 'horizontal' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)
+      makeLinearDimension(this, renderer, start, end, constraint.position, axis)
+
+    // Point to line distance
+    } else if(constraint.isPointLineDistance()) {
+      const [point, line] = constraint.pointAndLine()
+      const lineEnd = line.endpoints().minMaxBy(Math.min, handle => handle.distanceTo(constraint.position))
+      makeParallelDimension(this, renderer, lineEnd.clone(), point.clone(), line.direction().normalize(), constraint.position)
+
     } else if(isCircleOffset) {
       const circles = constraint.items.map(item => item.curve())
       const center = circles[0].center()
@@ -71,46 +83,7 @@ export default class DimensionControls extends THREE.Object3D {
       const [posL, posR] = constraint.items.map(item =>
         item.curve().endpoints().minMaxBy(Math.min, handle => handle.distanceTo(constraint.position) ).clone()
       )
-
-      const dirL = itemL.curve().direction().normalize()
-      const dirR = itemR.curve().direction().normalize()
-
-      const projL = constraint.position.clone().sub(posL).projectOnVector(dirL)
-      const projR = constraint.position.clone().sub(posR).projectOnVector(dirR)
-
-      let posLT = posL.clone().add(projL)
-      let posRT = posR.clone().add(projR)
-
-      const lineL = renderer.convertLine([posL.toArray(), posLT.clone().add(projL.normalize()).toArray()], materials.wire)
-      const lineR = renderer.convertLine([posR.toArray(), posRT.clone().add(projR.normalize()).toArray()], materials.wire)
-
-      const cross = posRT.clone().sub(posLT)
-      const contraintRel = constraint.position.clone().sub(posLT)
-
-      const helperDir = cross.clone().normalize()
-
-      const arrowHelperL = makeArrow(posLT, helperDir.clone().negate())
-      const arrowHelperR = makeArrow(posRT, helperDir)
-
-      this.add(arrowHelperL)
-      this.add(arrowHelperR)
-
-      if(cross.dot(contraintRel) > 0.0) {
-        if(contraintRel.length() > cross.length()) {
-          posRT = constraint.position
-        }
-      } else {
-        posLT = constraint.position
-      }
-
-      const lineTop = renderer.convertLine([
-        posLT.toArray(),
-        posRT.toArray(),
-      ], materials.wire)
-
-      this.add(lineL)
-      this.add(lineR)
-      this.add(lineTop)
+      makeParallelDimension(this, renderer, posL, posR, itemL.curve().direction().normalize(), constraint.position)
     }
 
     this.applyMatrix4(
@@ -260,28 +233,67 @@ function makeOffsetDimension(controls, renderer, start, end, position) {
   controls.add(makeArrow(end, direction))
 }
 
-function makeLinearDimension(controls, renderer, start, end, position) {
-  const direction = end.clone().sub(start).normalize()
+// Measures along the given axis, or along the connection of both points.
+function makeLinearDimension(controls, renderer, start, end, position, axis) {
+  const direction = axis ?
+    axis.clone().multiplyScalar(Math.sign(end.clone().sub(start).dot(axis)) || 1) :
+    end.clone().sub(start).normalize()
   const normal = new THREE.Vector3(-direction.y, direction.x, 0)
-  const offset = position.clone().sub(start).dot(normal)
-  const offsetDirection = normal.clone().multiplyScalar(Math.sign(offset) || 1)
+  const [startOffset, endOffset] = [start, end].map(point => position.clone().sub(point).dot(normal))
 
-  const dimStart = start.clone().add(normal.clone().multiplyScalar(offset))
-  const dimEnd = end.clone().add(normal.clone().multiplyScalar(offset))
-  const extension = offsetDirection.multiplyScalar(1)
+  const dimStart = start.clone().addScaledVector(normal, startOffset)
+  const dimEnd = end.clone().addScaledVector(normal, endOffset)
 
   const lineStart = dimStart.clone()
   const lineEnd = dimEnd.clone()
   const labelOffset = position.clone().sub(dimStart).dot(direction)
-  const lineLength = start.distanceTo(end)
+  const lineLength = dimStart.distanceTo(dimEnd)
   if(labelOffset < 0) lineStart.copy(position)
   if(labelOffset > lineLength) lineEnd.copy(position)
 
-  controls.add(renderer.convertLine([start.toArray(), dimStart.clone().add(extension).toArray()], materials.wire))
-  controls.add(renderer.convertLine([end.toArray(), dimEnd.clone().add(extension).toArray()], materials.wire))
+  controls.add(renderer.convertLine([start.toArray(), dimStart.clone().addScaledVector(normal, Math.sign(startOffset) || 1).toArray()], materials.wire))
+  controls.add(renderer.convertLine([end.toArray(), dimEnd.clone().addScaledVector(normal, Math.sign(endOffset) || 1).toArray()], materials.wire))
   controls.add(renderer.convertLine([lineStart.toArray(), lineEnd.toArray()], materials.wire))
   controls.add(makeArrow(dimStart, direction.clone().negate()))
   controls.add(makeArrow(dimEnd, direction))
+}
+
+// Distance across the given direction, with extension lines along it from
+// both reference points to the label.
+function makeParallelDimension(controls, renderer, posL, posR, direction, position) {
+  const projL = position.clone().sub(posL).projectOnVector(direction)
+  const projR = position.clone().sub(posR).projectOnVector(direction)
+
+  let posLT = posL.clone().add(projL)
+  let posRT = posR.clone().add(projR)
+
+  const lineL = renderer.convertLine([posL.toArray(), posLT.clone().add(projL.normalize()).toArray()], materials.wire)
+  const lineR = renderer.convertLine([posR.toArray(), posRT.clone().add(projR.normalize()).toArray()], materials.wire)
+
+  const cross = posRT.clone().sub(posLT)
+  const contraintRel = position.clone().sub(posLT)
+
+  const helperDir = cross.clone().normalize()
+
+  controls.add(makeArrow(posLT, helperDir.clone().negate()))
+  controls.add(makeArrow(posRT, helperDir))
+
+  if(cross.dot(contraintRel) > 0.0) {
+    if(contraintRel.length() > cross.length()) {
+      posRT = position
+    }
+  } else {
+    posLT = position
+  }
+
+  const lineTop = renderer.convertLine([
+    posLT.toArray(),
+    posRT.toArray(),
+  ], materials.wire)
+
+  controls.add(lineL)
+  controls.add(lineR)
+  controls.add(lineTop)
 }
 
 function makeAngularDimension(controls, renderer, constraint) {

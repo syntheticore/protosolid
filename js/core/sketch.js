@@ -1014,7 +1014,14 @@ export class Sketch {
           })) : []),
         ]
       } else if(c instanceof Dimension) {
-        if(c.isCircleOffset()) {
+        if(c.orientation) {
+          // Horizontal or vertical component of a point distance or line length
+          const [p1, p2] = c.items.length == 1 ? idMap[c.items[0].curve().id].slice(0, 2) :
+            c.items.map(item => item.curve() instanceof Circle ? idMap[item.curve().id][0] : pointPrimitive(item))
+          const prop = c.orientation == 'horizontal' ? 'x' : 'y'
+          return { id: `${id++}`, type: 'difference', param1: { o_id: p1.id, prop }, param2: { o_id: p2.id, prop }, difference: c.axisSign * c.distance, temporary: c.temporary }
+
+        } else if(c.isCircleOffset()) {
           const [left, right] = c.items.map(item => idMap[item.curve().id].slice(-1)[0])
           const centersCoincident = this.coincidentPointsConnected(
             c.items[0].curve(), 0, c.items[1].curve(), 0
@@ -1031,6 +1038,12 @@ export class Sketch {
           const [p1, p2] = c.items.map(item => item.curve() instanceof Circle ?
             idMap[item.curve().id][0] : pointPrimitive(item))
           return { id: `${id++}`, type: 'p2p_distance', p1_id: p1.id, p2_id: p2.id, distance: c.distance, temporary: c.temporary }
+
+        } else if(c.isPointLineDistance()) {
+          const point = c.items.find(item => item.index !== undefined)
+          const line = c.items.find(item => item.index === undefined)
+          const linePrim = idMap[line.curve().id].slice(-1)[0]
+          return { id: `${id++}`, type: 'p2l_distance', p_id: pointPrimitive(point).id, l_id: linePrim.id, distance: c.distance, temporary: c.temporary }
 
         } else if(c.items[0].curve() instanceof Circle) {
           // Circle diameter
@@ -1732,9 +1745,13 @@ export class Dimension extends Constraint {
       this.radiusDifferenceSign = Math.sign(left.radius - right.radius) || 1
 
     } else if(this.isPointDistance()) {
-      const point = item => item.curve() instanceof Circle ? item.curve().center() : item.curve().handles()[item.index]
-      const [a, b] = this.items.map(point)
+      const [a, b] = this.measuredPoints()
       this.distance = a.distanceTo(b)
+
+    } else if(this.isPointLineDistance()) {
+      const [point, line] = this.pointAndLine()
+      const offset = point.clone().sub(line.handles()[0])
+      this.distance = offset.clone().projectOnVector(line.direction()).distanceTo(offset)
 
     } else if(items[0] instanceof Circle) {
       this.distance = items[0].radius * 2.0
@@ -1772,8 +1789,39 @@ export class Dimension extends Constraint {
     )
   }
 
+  isPointLineDistance() {
+    return this.items.length == 2 &&
+      this.items.some(item => item.index !== undefined) &&
+      this.items.some(item => item.index === undefined && item.curve() instanceof Line)
+  }
+
+  pointAndLine() {
+    const point = this.items.find(item => item.index !== undefined)
+    const line = this.items.find(item => item.index === undefined)
+    return [point.curve().handles()[point.index], line.curve()]
+  }
+
+  // End points of a point to point distance or a line length
+  measuredPoints() {
+    if(this.isPointDistance() && !this.isCircleOffset()) return this.items.map(item =>
+      item.curve() instanceof Circle ? item.curve().center() : item.curve().handles()[item.index])
+    if(this.items.length == 1 && this.items[0].curve() instanceof Line) return this.items[0].curve().handles()
+  }
+
+  // Restrict a linear dimension to its horizontal or vertical component
+  orient(orientation) {
+    this.orientation = orientation
+    if(!orientation) return this
+    const axis = orientation == 'horizontal' ? 'x' : 'y'
+    const [a, b] = this.measuredPoints()
+    const delta = b[axis] - a[axis]
+    this.distance = Math.abs(delta)
+    this.axisSign = Math.sign(delta) || 1
+    return this
+  }
+
   isAngular() {
-    if(this.items.length != 2 || this.isPointDistance()) return false
+    if(this.items.length != 2 || this.isPointDistance() || this.isPointLineDistance()) return false
     const curves = this.items.map(item => item.curve())
     if(!curves.every(curve => curve instanceof Line)) return false
     return curves[0].direction().normalize().cross(curves[1].direction().normalize()).lengthSq() >= 1e-8
@@ -1792,6 +1840,8 @@ export class Dimension extends Constraint {
       angleSign: this.angleSign,
       angleOffset: this.angleOffset,
       radiusDifferenceSign: this.radiusDifferenceSign,
+      orientation: this.orientation,
+      axisSign: this.axisSign,
       expression: this.expression,
     }
   }

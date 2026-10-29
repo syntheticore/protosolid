@@ -10,7 +10,7 @@ import { PlaneHelper } from './helpers.js'
 import { normalFromMatrix, parseHsl, rad, rotationFromNormal } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
-import { checkedOutData, parseDocument } from './document-format.js'
+import { checkedOutData, parseDocument, decodeFile } from './document-format.js'
 import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame, faceGizmoFrame } from '../three/gizmos.js'
 import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
@@ -1727,8 +1727,8 @@ Serialize.register(PlaneFeature, 'PlaneFeature')
 async function readNewerRevision(feature, filetype, normalize = data => data) {
   if(!feature.filePath || !feature.cachedData || !window.ipc) return null
   try {
-    const file = await loadFile(filetype, 'text', feature.filePath)
-    const data = normalize(file.data)
+    const file = await loadFile(filetype, 'binary', feature.filePath)
+    const data = normalize(await decodeFile(file.data))
     return data == feature.cachedData ? null : data
   } catch(error) {
     console.warn(`Referenced file ${feature.filePath} could not be read`, error)
@@ -1807,7 +1807,8 @@ export class PlaceFeature extends Feature {
 
   async chooseFile() {
     const linkCheck = ++this.linkCheck
-    const file = await loadFile(placeFiletype, 'text')
+    const file = await loadFile(placeFiletype, 'binary')
+    file.data = await decodeFile(file.data)
     if(linkCheck == this.linkCheck) this.useFile(file)
   }
 

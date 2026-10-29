@@ -8,13 +8,14 @@ import { Selection } from '../selection.js'
 import { SectionView } from './component.js'
 import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
-import { readDocumentFile } from './document-format.js'
+import { readDocumentFile, formatDocument, gzip, decodeFile } from './document-format.js'
 import { Repository } from './repository.js'
 import { MergeSession } from './merge-session.js'
 import { showDialog } from '../dialogs.js'
 import { makeID, lastId, setLastId } from './id.js'
 import Expression from './expression.js'
 import preferences from '../preferences.js'
+import { topologyDescriptions } from './topological-naming.js'
 import { autoExportComponents, exportConfigured } from './export.js'
 
 function escapeRegExp(value) {
@@ -821,6 +822,18 @@ export default class Document extends Emitter {
     return JSON.parse(JSON.stringify(Serialize.serialize(dump)))
   }
 
+  // Debug files also explain every topology ID, see topological-naming.md
+  debugSnapshot() {
+    const snapshot = this.snapshot()
+    this.timeline.features.forEach((feature, i) => {
+      const descriptions = [...topologyDescriptions(feature)]
+      if(!descriptions.length) return
+      snapshot.timeline.features[i].topologyDescriptions = Object.fromEntries(
+        descriptions.map(([id, description]) => [id, JSON.parse(description)]))
+    })
+    return snapshot
+  }
+
   async save(as) {
     if(this.activeMerge || (!as && !this.canSave)) return
     await this.cancelFeature()
@@ -845,9 +858,9 @@ export default class Document extends Emitter {
         }
         data = repository.stringify()
       } else {
-        data = JSON.stringify(this.snapshot(), null, 2)
+        data = preferences.saveDebugInfo ? formatDocument(this.debugSnapshot()) : JSON.stringify(this.snapshot())
       }
-      this.filePath = await saveFile(data, 'cad', as ? null : this.filePath)
+      this.filePath = await saveFile(await encodeFile(data), 'cad', as ? null : this.filePath)
       if(window.ipc) window.ipc.send('add-recent-file', this.filePath)
       this.repository = repository ? markRaw(repository) : null
       this.repositoryVersion++
@@ -903,7 +916,7 @@ export default class Document extends Emitter {
     this.repositoryVersion++
     this.hasRepositoryChanges = true
     if(!window.ipc || !this.filePath) return
-    await saveFile(this.repository.stringify(), 'cad', this.filePath)
+    await saveFile(await encodeFile(this.repository.stringify()), 'cad', this.filePath)
     this.hasRepositoryChanges = false
   }
 
@@ -975,8 +988,8 @@ export default class Document extends Emitter {
     let repository
     const materials = []
     try {
-      file = await loadFile('.cad', 'text', path)
-      const contents = readDocumentFile(file.data)
+      file = await loadFile('.cad', 'binary', path)
+      const contents = readDocumentFile(await decodeFile(file.data))
       repository = contents.repository
       dump = Serialize.deserialize(contents.content, { document: this, sketches: {}, materials })
     } catch(error) {
@@ -1046,6 +1059,9 @@ export default class Document extends Emitter {
 }
 
 const bigIntMax = (...args) => args.reduce((m, e) => e > m ? e : m)
+
+// Debug files stay readable JSON, others are compressed
+const encodeFile = text => preferences.saveDebugInfo ? text : gzip(text)
 
 function historyDefinitions(timeline) {
   return new Map([

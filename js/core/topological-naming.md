@@ -7,11 +7,14 @@ history into that model. The shared layer has no kernel types or geometric proxi
 
 ## Construction and history
 
-Each feature executes inside `withTopologyNaming`. Its serialized
-`topologyNames` manifest binds construction descriptions to persistent IDs.
+Each feature executes inside `withTopologyNaming`. A persistent ID is the
+owning feature's ID plus a hash of the construction description, so every
+rebuild reproduces it without a stored lookup table.
 A description consists of the entity kind, semantic construction role, source
 identities, and owning feature. Source sets are canonicalized. Native output
 indices, feature positions in the timeline, and allocation order are absent.
+Debug saves write the descriptions next to each feature's `topologyNames` as
+`topologyDescriptions`; loading ignores them.
 
 Primitive faces use their generator's actual correspondence: a named sketch
 curve produces a side; the generator identifies its start and end caps. Sweep
@@ -62,11 +65,13 @@ Projected sketch curves use the persistent projection ID.
 A face, edge, or body reference stores a component ID and a selection descriptor:
 
 ```js
-{ version: 1, kind, identity, policy: 'single', context: [...] }
+{ version: 1, kind, identity, policy: 'single' }
 ```
 
 Picking a cell records a recipe in its producing feature's manifest and attaches
-a persistent selection name to that cell. Recipes use logical anchors and named
+a persistent selection name to that cell. The selection identity is derived from
+the recipe, which also supplies the incidence context when a later split leaves
+several candidates. Recipes use logical anchors and named
 incidence paths. Explicit branch roles are required anchors, not optional boundary
 hints. For operations without semantic branch roles, a recipe also records the
 full distinguishing boundary evidence; losing that evidence fails resolution.

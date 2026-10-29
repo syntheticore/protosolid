@@ -31,6 +31,12 @@
               small Versioned documents keep every save as a version with a message, and support branching and merging. Existing history is only dropped by an explicit Save As.
             ComboBox(v-model="preferences.documentFormat" label="Document format" :options="[{ value: 'plain', label: 'Unversioned' }, { value: 'versioned', label: 'Versioned' }]")
 
+          label
+            span.setting-label
+              strong Save debug info
+              small Save documents as readable, uncompressed JSON. Unversioned documents also explain how each face and edge was constructed.
+            ToggleSwitch(v-model="preferences.saveDebugInfo")
+
       section(v-else-if="activeSection === 'units'")
         header
           h1 Units

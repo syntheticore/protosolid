@@ -1,10 +1,17 @@
-import { makeID } from './id.js'
+import { makeID, hash } from './id.js'
 
 // This module owns document identities. Shapex supplies correspondence
 // and incidence, never array positions or geometric proximity.
 let activeFeature = null
 
+// Descriptions behind each feature's identities, kept only for debug output
+const descriptions = new WeakMap()
+// Incidence context of every selection identity. An identity is derived from
+// its recipe, so this never goes stale, and references need not store it.
+const selectionContexts = new Map()
+
 const unique = values => [...new Set(values)].sort()
+const shortHash = text => hash(text).slice(0, 12)
 const ancestry = sources => unique(sources.flatMap(source =>
   [source.topology.identity, ...source.topology.ancestors]))
 
@@ -18,21 +25,37 @@ export function topologyIncludesFeature(topology, feature) {
 export function withTopologyNaming(feature, evaluate) {
   const previous = activeFeature
   activeFeature = feature
-  feature.topologyNames ||= { version: 1, bindings: [] }
+  feature.topologyNames ||= { version: 2 }
   try { return evaluate() }
   finally { activeFeature = previous }
 }
 
+// An identity is a pure function of its description, so every rebuild
+// reproduces it without a stored lookup table.
+export function topologyID(featureId, description) {
+  return `${featureId}/topology/${shortHash(description)}`
+}
+
+export function topologyDescription(kind, role, sources, owner) {
+  return JSON.stringify([kind, role, unique(sources), owner])
+}
+
+export function selectionSource(recipe) {
+  return shortHash(JSON.stringify(recipe))
+}
+
 export function topologyIdentity(kind, role, sources = [], owner) {
-  const description = JSON.stringify([kind, role, unique(sources), owner || activeFeature?.id])
+  const description = topologyDescription(kind, role, sources, owner || activeFeature?.id)
   if(!activeFeature) return JSON.stringify([owner || 'transient', description])
-  const bindings = activeFeature.topologyNames.bindings
-  let binding = bindings.find(binding => binding.description == description)
-  if(!binding) {
-    binding = { description, id: `${activeFeature.id}/topology/${makeID()}` }
-    bindings.push(binding)
-  }
-  return binding.id
+  const id = topologyID(activeFeature.id, description)
+  topologyDescriptions(activeFeature).set(id, description)
+  return id
+}
+
+// Map of identity to description JSON for the identities a feature produced
+export function topologyDescriptions(feature) {
+  if(!descriptions.has(feature)) descriptions.set(feature, new Map())
+  return descriptions.get(feature)
 }
 
 export function nameTopology(item, kind, role, sources = [], owner) {
@@ -133,19 +156,19 @@ function incidencePaths(item, neighbors, depth = 2, visited = new Set()) {
   for(const neighbor of neighbors(item).filter(neighbor => !nextVisited.has(neighbor))) {
     const names = neighbor.topology.anchors
     const descendants = depth > 1 && names.length ?
-      incidencePaths(neighbor, neighbors, depth - 1, nextVisited).map(path => JSON.parse(path)) : []
+      incidencePaths(neighbor, neighbors, depth - 1, nextVisited) : []
     for(const name of names) {
       paths.push([name])
       for(const path of descendants) paths.push([name, ...path])
     }
   }
-  return unique(paths.map(path => JSON.stringify(path)))
+  return unique(paths.map(path => JSON.stringify(path))).map(path => JSON.parse(path))
 }
 
 // Resolution needs membership in named paths, not every combination of a
 // merged cell's aliases. Follow only the requested names through incidence.
 function incidenceContexts(neighbors) {
-  const contexts = new Map(), paths = new Map(), adjacent = new Map(), namesByCell = new Map()
+  const contexts = new Map(), adjacent = new Map(), namesByCell = new Map()
   const cells = cell => {
     if(!adjacent.has(cell)) adjacent.set(cell, neighbors(cell))
     return adjacent.get(cell)
@@ -165,9 +188,9 @@ function incidenceContexts(neighbors) {
       const results = new Map()
       contexts.set(item, {
         has(path) {
-          if(!paths.has(path)) paths.set(path, JSON.parse(path))
-          if(!results.has(path)) results.set(path, contains(item, paths.get(path)))
-          return results.get(path)
+          const key = JSON.stringify(path)
+          if(!results.has(key)) results.set(key, contains(item, path))
+          return results.get(key)
         },
       })
     }
@@ -207,8 +230,10 @@ export function topologySelection(item, neighbors, policy = 'single') {
   }
 }
 
+// References store only the selection identity; its recipe holds the context
 export function resolveTopology(items, selection, neighbors) {
-  return resolveTopologyWithContexts(items, selection, incidenceContexts(neighbors))
+  const context = selection.context || selectionContexts.get(selection.identity)
+  return resolveTopologyWithContexts(items, { ...selection, context }, incidenceContexts(neighbors))
 }
 
 function resolveTopologyWithContexts(items, selection, contextFor) {
@@ -339,13 +364,14 @@ export function captureTopologySelection(item, policy = 'single') {
   const recipe = origin.selectable ? origin.recipe : origin.pickRecipe()
   if(!feature) throw new Error('Display-only topology cannot be referenced')
   return withTopologyNaming(feature, () => {
-    const identity = topologyIdentity(recipe.kind, 'selection', [JSON.stringify(recipe)])
+    const identity = topologyIdentity(recipe.kind, 'selection', [selectionSource(recipe)])
     feature.topologyNames.selections ||= []
     if(!feature.topologyNames.selections.some(binding => binding.identity == identity)) {
       feature.topologyNames.selections.push({ identity, recipe })
     }
+    selectionContexts.set(identity, recipe.context)
     addName(item, identity)
-    return { version: 1, kind: recipe.kind, identity, policy, context: recipe.context }
+    return { version: 1, kind: recipe.kind, identity, policy }
   })
 }
 
@@ -365,6 +391,7 @@ function resolveRecipe(items, recipe, neighbors, sides = () => [], contextFor = 
 export function restoreTopologySelections(feature, items, neighbors, sides) {
   const failures = new Map()
   for(const binding of feature.topologyNames.selections || []) {
+    selectionContexts.set(binding.identity, binding.recipe.context)
     const result = resolveRecipe(items, binding.recipe, neighbors, sides)
     if(result.status == 'resolved') addName(result.items[0], binding.identity)
     else failures.set(binding.identity, result.status)

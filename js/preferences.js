@@ -5,6 +5,7 @@ const emitter = createNanoEvents()
 const preferences = {
   preferredUnit: 'mm',
   documentFormat: 'plain',
+  saveDebugInfo: false,
   angleUnit: 'degrees',
   densityUnit: 'g/cm3',
   theme: 'system',

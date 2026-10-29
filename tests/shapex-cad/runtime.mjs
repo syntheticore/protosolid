@@ -3,7 +3,7 @@ import { init_planegcs_module } from '@salusoft89/planegcs'
 import { initializeSketchSolver } from '../../js/core/sketch-solver.js'
 import { initializeShapex } from '../../js/core/shapex.js'
 import { Timeline } from '../../js/core/timeline.js'
-import Serialize from '../../js/core/serialize.js'
+import { parseDocument } from '../../js/core/document-format.js'
 
 // Load the app's exact sketch geometry and solver implementation without Nuxt.
 export async function initialize() {
@@ -28,7 +28,7 @@ export function newDocument() {
 
 export function loadDocument(source) {
   const document = newDocument()
-  const dump = Serialize.parse(source, { document, sketches: {} })
+  const dump = parseDocument(source, { document, sketches: {} })
   document.timeline = dump.timeline
   // The same feature execution, reference resolution, repair and face meshing
   // as opening a .cad in the app, using the synchronous timeline entry point.

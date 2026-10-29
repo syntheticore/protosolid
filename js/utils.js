@@ -90,6 +90,8 @@ function loadFileWeb(filetype, datatype) {
               height: img.naturalHeight,
             })
           img.src = e.target.result
+        } else if(datatype == 'binary') {
+          resolve({ data: new Uint8Array(e.target.result), path: file.name })
         } else {
           resolve({ data: e.target.result, path: file.name })
         }
@@ -97,6 +99,7 @@ function loadFileWeb(filetype, datatype) {
       const read = {
         text: reader.readAsText.bind(reader),
         dataUrl: reader.readAsDataURL.bind(reader),
+        binary: reader.readAsArrayBuffer.bind(reader),
       }[datatype]
       read(file)
     }, false)

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { nameTopology, propagateTopology, resolveTopology, topologySelection, withTopologyNaming,
-  initializeTopologyOrigins, captureTopologySelection, restoreTopologySelections, namespaceTopology } from '../js/core/topological-naming.js'
+  initializeTopologyOrigins, captureTopologySelection, restoreTopologySelections, namespaceTopology, topologyDescriptions } from '../js/core/topological-naming.js'
 
 const entity = kind => ({ topologyKind: kind, neighbors: [] })
 const neighbors = item => item.neighbors
@@ -91,7 +91,7 @@ test('construction bindings survive serialization and reordered creation with a 
   withTopologyNaming(restored, () => { name(nextB, 'end'); name(nextA, 'start') })
   assert.equal(nextA.topology.identity, a.topology.identity)
   assert.equal(nextB.topology.identity, b.topology.identity)
-  assert.equal(restored.topologyNames.bindings.length, 2)
+  assert.equal(topologyDescriptions(restored).size, 2)
 })
 
 test('a feature captures picks on its final geometry instead of its intermediate cutter', () => {

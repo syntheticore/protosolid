@@ -21,8 +21,7 @@
         },
         "expressions": {},
         "topologyNames": {
-          "version": 1,
-          "bindings": []
+          "version": 2
         },
         "sketch": {
           "$class": "Sketch",
@@ -33,11 +32,7 @@
               "id": "id-3",
               "_center": {
                 "$class": "Vector3",
-                "elements": [
-                  0,
-                  0,
-                  0
-                ]
+                "elements": [0,0,0]
               },
               "radius": 10,
               "isReference": false
@@ -66,32 +61,14 @@
           "rotationY": 0,
           "rotationTransform": {
             "$class": "Matrix4",
-            "elements": [
-              1,
-              0,
-              0,
-              0,
-              0,
-              1,
-              0,
-              0,
-              0,
-              0,
-              1,
-              0,
-              0,
-              0,
-              0,
-              1
-            ]
+            "elements": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]
           },
           "rotationAppliedX": 0,
           "rotationAppliedY": 0
         },
         "expressions": {},
         "topologyNames": {
-          "version": 1,
-          "bindings": []
+          "version": 2
         },
         "planeId": "id-7"
       },
@@ -112,8 +89,7 @@
         },
         "expressions": {},
         "topologyNames": {
-          "version": 1,
-          "bindings": []
+          "version": 2
         },
         "sketch": {
           "$class": "Sketch",
@@ -124,11 +100,7 @@
               "id": "id-10",
               "_center": {
                 "$class": "Vector3",
-                "elements": [
-                  4,
-                  0,
-                  0
-                ]
+                "elements": [4,0,0]
               },
               "radius": 6,
               "isReference": false
@@ -150,9 +122,7 @@
               "id": "id-5",
               "sketchId": "id-2",
               "rings": [
-                [
-                  "id-3"
-                ]
+                ["id-3"]
               ]
             },
             {
@@ -160,9 +130,7 @@
               "id": "id-12",
               "sketchId": "id-9",
               "rings": [
-                [
-                  "id-10"
-                ]
+                ["id-10"]
               ]
             }
           ],
@@ -171,127 +139,58 @@
         },
         "expressions": {},
         "topologyNames": {
-          "version": 1,
-          "bindings": [
-            {
-              "description": "[\"face\",\"profile-start\",[\"id-10\",\"id-3\"],\"id-13\"]",
-              "id": "id-13/topology/id-64"
-            },
-            {
-              "description": "[\"face\",\"profile-start\",[\"id-3\"],\"id-13\"]",
-              "id": "id-13/topology/id-65"
-            },
-            {
-              "description": "[\"face\",\"profile-start\",[\"id-10\"],\"id-13\"]",
-              "id": "id-13/topology/id-66"
-            },
-            {
-              "description": "[\"face\",\"profile-end\",[\"id-10\",\"id-3\"],\"id-13\"]",
-              "id": "id-13/topology/id-67"
-            },
-            {
-              "description": "[\"face\",\"profile-end\",[\"id-3\"],\"id-13\"]",
-              "id": "id-13/topology/id-68"
-            },
-            {
-              "description": "[\"face\",\"profile-end\",[\"id-10\"],\"id-13\"]",
-              "id": "id-13/topology/id-69"
-            },
-            {
-              "description": "[\"face\",\"profile-side\",[\"id-10\",\"id-3\"],\"id-13\"]",
-              "id": "id-13/topology/id-70"
-            },
-            {
-              "description": "[\"face\",\"profile-side\",[\"id-3\"],\"id-13\"]",
-              "id": "id-13/topology/id-71"
-            },
-            {
-              "description": "[\"face\",\"profile-side\",[\"id-10\"],\"id-13\"]",
-              "id": "id-13/topology/id-72"
-            },
-            {
-              "description": "[\"edge\",\"profile/boundary\",[\"id-13/topology/id-65\",\"id-13/topology/id-66\",\"id-13/topology/id-71\",\"id-13/topology/id-72\"],\"id-13\"]",
-              "id": "id-13/topology/id-76"
-            },
-            {
-              "description": "[\"edge\",\"profile/boundary\",[\"id-13/topology/id-65\"],\"id-13\"]",
-              "id": "id-13/topology/id-77"
-            },
-            {
-              "description": "[\"edge\",\"profile/boundary\",[\"id-13/topology/id-66\"],\"id-13\"]",
-              "id": "id-13/topology/id-78"
-            },
-            {
-              "description": "[\"edge\",\"profile/boundary\",[\"id-13/topology/id-71\"],\"id-13\"]",
-              "id": "id-13/topology/id-79"
-            },
-            {
-              "description": "[\"edge\",\"profile/boundary\",[\"id-13/topology/id-72\"],\"id-13\"]",
-              "id": "id-13/topology/id-80"
-            },
-            {
-              "description": "[\"edge\",\"profile/boundary\",[\"id-13/topology/id-68\",\"id-13/topology/id-69\",\"id-13/topology/id-71\",\"id-13/topology/id-72\"],\"id-13\"]",
-              "id": "id-13/topology/id-81"
-            },
-            {
-              "description": "[\"edge\",\"profile/boundary\",[\"id-13/topology/id-68\"],\"id-13\"]",
-              "id": "id-13/topology/id-82"
-            },
-            {
-              "description": "[\"edge\",\"profile/boundary\",[\"id-13/topology/id-69\"],\"id-13\"]",
-              "id": "id-13/topology/id-83"
-            },
-            {
-              "description": "[\"edge\",\"profile/boundary\",[\"id-13/topology/id-71\",\"id-13/topology/id-72\"],\"id-13\"]",
-              "id": "id-13/topology/id-84"
-            },
-            {
-              "description": "[\"body\",\"profile/body\",[\"id-10\",\"id-3\"],\"id-13\"]",
-              "id": "id-13/topology/id-85"
-            },
-            {
-              "description": "[\"body\",\"profile/body\",[\"id-3\"],\"id-13\"]",
-              "id": "id-13/topology/id-86"
-            },
-            {
-              "description": "[\"body\",\"profile/body\",[\"id-10\"],\"id-13\"]",
-              "id": "id-13/topology/id-87"
-            },
-            {
-              "description": "[\"face\",\"selection\",[\"{\\\"version\\\":1,\\\"kind\\\":\\\"face\\\",\\\"identity\\\":\\\"id-13/topology/id-67\\\",\\\"anchors\\\":[\\\"id-13/topology/id-68\\\",\\\"id-13/topology/id-69\\\"],\\\"policy\\\":\\\"single\\\",\\\"context\\\":[\\\"[\\\\\\\"id-13/topology/id-79\\\\\\\",\\\\\\\"id-13/topology/id-71\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-79\\\\\\\",\\\\\\\"id-13/topology/id-72\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-79\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-80\\\\\\\",\\\\\\\"id-13/topology/id-71\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-80\\\\\\\",\\\\\\\"id-13/topology/id-72\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-80\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-82\\\\\\\",\\\\\\\"id-13/topology/id-71\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-82\\\\\\\",\\\\\\\"id-13/topology/id-72\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-82\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-83\\\\\\\",\\\\\\\"id-13/topology/id-71\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-83\\\\\\\",\\\\\\\"id-13/topology/id-72\\\\\\\"]\\\",\\\"[\\\\\\\"id-13/topology/id-83\\\\\\\"]\\\"],\\\"branch\\\":[]}\"],\"id-13\"]",
-              "id": "id-13/topology/id-88"
-            }
-          ],
+          "version": 2,
           "selections": [
             {
-              "identity": "id-13/topology/id-88",
+              "identity": "id-13/topology/4d2667a7d8e9",
               "recipe": {
                 "version": 1,
                 "kind": "face",
-                "identity": "id-13/topology/id-67",
-                "anchors": [
-                  "id-13/topology/id-68",
-                  "id-13/topology/id-69"
-                ],
+                "identity": "id-13/topology/d69e224eb293",
+                "anchors": ["id-13/topology/ed5c64931062","id-13/topology/05a587ca144d"],
                 "policy": "single",
                 "context": [
-                  "[\"id-13/topology/id-79\",\"id-13/topology/id-71\"]",
-                  "[\"id-13/topology/id-79\",\"id-13/topology/id-72\"]",
-                  "[\"id-13/topology/id-79\"]",
-                  "[\"id-13/topology/id-80\",\"id-13/topology/id-71\"]",
-                  "[\"id-13/topology/id-80\",\"id-13/topology/id-72\"]",
-                  "[\"id-13/topology/id-80\"]",
-                  "[\"id-13/topology/id-82\",\"id-13/topology/id-71\"]",
-                  "[\"id-13/topology/id-82\",\"id-13/topology/id-72\"]",
-                  "[\"id-13/topology/id-82\"]",
-                  "[\"id-13/topology/id-83\",\"id-13/topology/id-71\"]",
-                  "[\"id-13/topology/id-83\",\"id-13/topology/id-72\"]",
-                  "[\"id-13/topology/id-83\"]"
+                  ["id-13/topology/bc1b38aefaf7","id-13/topology/3448320dbaac"],
+                  ["id-13/topology/bc1b38aefaf7","id-13/topology/12eee98537f3"],
+                  ["id-13/topology/bc1b38aefaf7"],
+                  ["id-13/topology/11fc21c554d7","id-13/topology/3448320dbaac"],
+                  ["id-13/topology/11fc21c554d7","id-13/topology/12eee98537f3"],
+                  ["id-13/topology/11fc21c554d7"],
+                  ["id-13/topology/e78624b7abfe","id-13/topology/3448320dbaac"],
+                  ["id-13/topology/e78624b7abfe","id-13/topology/12eee98537f3"],
+                  ["id-13/topology/e78624b7abfe"],
+                  ["id-13/topology/b01ad1f5528a","id-13/topology/3448320dbaac"],
+                  ["id-13/topology/b01ad1f5528a","id-13/topology/12eee98537f3"],
+                  ["id-13/topology/b01ad1f5528a"]
                 ],
                 "branch": []
               }
             }
           ]
+        },
+        "topologyDescriptions": {
+          "id-13/topology/9abbfed479c0": ["face","profile-start",["id-10","id-3"],"id-13"],
+          "id-13/topology/9e1510e09c20": ["face","profile-start",["id-3"],"id-13"],
+          "id-13/topology/0520cb4ea93e": ["face","profile-start",["id-10"],"id-13"],
+          "id-13/topology/d69e224eb293": ["face","profile-end",["id-10","id-3"],"id-13"],
+          "id-13/topology/ed5c64931062": ["face","profile-end",["id-3"],"id-13"],
+          "id-13/topology/05a587ca144d": ["face","profile-end",["id-10"],"id-13"],
+          "id-13/topology/fe20ed8f31a3": ["face","profile-side",["id-10","id-3"],"id-13"],
+          "id-13/topology/3448320dbaac": ["face","profile-side",["id-3"],"id-13"],
+          "id-13/topology/12eee98537f3": ["face","profile-side",["id-10"],"id-13"],
+          "id-13/topology/c5911740705f": ["edge","profile/boundary",["id-13/topology/0520cb4ea93e","id-13/topology/12eee98537f3","id-13/topology/3448320dbaac","id-13/topology/9e1510e09c20"],"id-13"],
+          "id-13/topology/e89035eb8c9e": ["edge","profile/boundary",["id-13/topology/9e1510e09c20"],"id-13"],
+          "id-13/topology/3bb9f4e25568": ["edge","profile/boundary",["id-13/topology/0520cb4ea93e"],"id-13"],
+          "id-13/topology/bc1b38aefaf7": ["edge","profile/boundary",["id-13/topology/3448320dbaac"],"id-13"],
+          "id-13/topology/11fc21c554d7": ["edge","profile/boundary",["id-13/topology/12eee98537f3"],"id-13"],
+          "id-13/topology/1dd38a254e4f": ["edge","profile/boundary",["id-13/topology/05a587ca144d","id-13/topology/12eee98537f3","id-13/topology/3448320dbaac","id-13/topology/ed5c64931062"],"id-13"],
+          "id-13/topology/e78624b7abfe": ["edge","profile/boundary",["id-13/topology/ed5c64931062"],"id-13"],
+          "id-13/topology/b01ad1f5528a": ["edge","profile/boundary",["id-13/topology/05a587ca144d"],"id-13"],
+          "id-13/topology/13cd15c9080a": ["edge","profile/boundary",["id-13/topology/12eee98537f3","id-13/topology/3448320dbaac"],"id-13"],
+          "id-13/topology/bda2fdd0d6da": ["body","profile/body",["id-10","id-3"],"id-13"],
+          "id-13/topology/b58e509fedd0": ["body","profile/body",["id-3"],"id-13"],
+          "id-13/topology/4ecea55280a8": ["body","profile/body",["id-10"],"id-13"],
+          "id-13/topology/4d2667a7d8e9": ["face","selection",["a242ccd1356f"],"id-13"]
         }
       },
       {
@@ -307,22 +206,8 @@
               "selection": {
                 "version": 1,
                 "kind": "face",
-                "identity": "id-13/topology/id-88",
-                "policy": "single",
-                "context": [
-                  "[\"id-13/topology/id-79\",\"id-13/topology/id-71\"]",
-                  "[\"id-13/topology/id-79\",\"id-13/topology/id-72\"]",
-                  "[\"id-13/topology/id-79\"]",
-                  "[\"id-13/topology/id-80\",\"id-13/topology/id-71\"]",
-                  "[\"id-13/topology/id-80\",\"id-13/topology/id-72\"]",
-                  "[\"id-13/topology/id-80\"]",
-                  "[\"id-13/topology/id-82\",\"id-13/topology/id-71\"]",
-                  "[\"id-13/topology/id-82\",\"id-13/topology/id-72\"]",
-                  "[\"id-13/topology/id-82\"]",
-                  "[\"id-13/topology/id-83\",\"id-13/topology/id-71\"]",
-                  "[\"id-13/topology/id-83\",\"id-13/topology/id-72\"]",
-                  "[\"id-13/topology/id-83\"]"
-                ]
+                "identity": "id-13/topology/4d2667a7d8e9",
+                "policy": "single"
               }
             }
           ],
@@ -332,81 +217,27 @@
         },
         "expressions": {},
         "topologyNames": {
-          "version": 1,
-          "bindings": [
-            {
-              "description": "[\"face\",\"shell/offset-skin/generated\",[\"id-13/topology/id-65\",\"id-13/topology/id-66\"],\"id-38\"]",
-              "id": "id-38/topology/id-100"
-            },
-            {
-              "description": "[\"face\",\"shell/offset-skin/generated\",[\"id-13/topology/id-65\"],\"id-38\"]",
-              "id": "id-38/topology/id-101"
-            },
-            {
-              "description": "[\"face\",\"shell/offset-skin/generated\",[\"id-13/topology/id-66\"],\"id-38\"]",
-              "id": "id-38/topology/id-102"
-            },
-            {
-              "description": "[\"face\",\"shell/offset-skin/generated\",[\"id-13/topology/id-71\",\"id-13/topology/id-72\"],\"id-38\"]",
-              "id": "id-38/topology/id-103"
-            },
-            {
-              "description": "[\"face\",\"shell/offset-skin/generated\",[\"id-13/topology/id-71\"],\"id-38\"]",
-              "id": "id-38/topology/id-104"
-            },
-            {
-              "description": "[\"face\",\"shell/offset-skin/generated\",[\"id-13/topology/id-72\"],\"id-38\"]",
-              "id": "id-38/topology/id-105"
-            },
-            {
-              "description": "[\"face\",\"shell/opening-rim/generated\",[\"id-13/topology/id-68\",\"id-13/topology/id-69\"],\"id-38\"]",
-              "id": "id-38/topology/id-106"
-            },
-            {
-              "description": "[\"face\",\"shell/opening-rim/generated\",[\"id-13/topology/id-68\"],\"id-38\"]",
-              "id": "id-38/topology/id-107"
-            },
-            {
-              "description": "[\"face\",\"shell/opening-rim/generated\",[\"id-13/topology/id-69\"],\"id-38\"]",
-              "id": "id-38/topology/id-108"
-            },
-            {
-              "description": "[\"edge\",\"shell/generated\",[\"id-13/topology/id-77\",\"id-13/topology/id-78\",\"id-13/topology/id-79\",\"id-13/topology/id-80\"],\"id-38\"]",
-              "id": "id-38/topology/id-109"
-            },
-            {
-              "description": "[\"edge\",\"shell/generated\",[\"id-13/topology/id-77\"],\"id-38\"]",
-              "id": "id-38/topology/id-110"
-            },
-            {
-              "description": "[\"edge\",\"shell/generated\",[\"id-13/topology/id-78\"],\"id-38\"]",
-              "id": "id-38/topology/id-111"
-            },
-            {
-              "description": "[\"edge\",\"shell/generated\",[\"id-13/topology/id-79\"],\"id-38\"]",
-              "id": "id-38/topology/id-112"
-            },
-            {
-              "description": "[\"edge\",\"shell/generated\",[\"id-13/topology/id-80\"],\"id-38\"]",
-              "id": "id-38/topology/id-113"
-            },
-            {
-              "description": "[\"edge\",\"shell/generated\",[\"id-13/topology/id-79\",\"id-13/topology/id-80\"],\"id-38\"]",
-              "id": "id-38/topology/id-114"
-            },
-            {
-              "description": "[\"edge\",\"shell/generated\",[\"id-13/topology/id-79\",\"id-13/topology/id-80\",\"id-13/topology/id-82\",\"id-13/topology/id-83\"],\"id-38\"]",
-              "id": "id-38/topology/id-115"
-            },
-            {
-              "description": "[\"edge\",\"shell/generated\",[\"id-13/topology/id-82\"],\"id-38\"]",
-              "id": "id-38/topology/id-116"
-            },
-            {
-              "description": "[\"edge\",\"shell/generated\",[\"id-13/topology/id-83\"],\"id-38\"]",
-              "id": "id-38/topology/id-117"
-            }
-          ]
+          "version": 2
+        },
+        "topologyDescriptions": {
+          "id-38/topology/362cd55ce8a3": ["face","shell/offset-skin/generated",["id-13/topology/0520cb4ea93e","id-13/topology/9e1510e09c20"],"id-38"],
+          "id-38/topology/93fed8553c30": ["face","shell/offset-skin/generated",["id-13/topology/9e1510e09c20"],"id-38"],
+          "id-38/topology/00d6cbc816c9": ["face","shell/offset-skin/generated",["id-13/topology/0520cb4ea93e"],"id-38"],
+          "id-38/topology/f214671e3e9d": ["face","shell/offset-skin/generated",["id-13/topology/12eee98537f3","id-13/topology/3448320dbaac"],"id-38"],
+          "id-38/topology/32936ae06b1f": ["face","shell/offset-skin/generated",["id-13/topology/3448320dbaac"],"id-38"],
+          "id-38/topology/8fb157b4f2ca": ["face","shell/offset-skin/generated",["id-13/topology/12eee98537f3"],"id-38"],
+          "id-38/topology/52b97439e310": ["face","shell/opening-rim/generated",["id-13/topology/05a587ca144d","id-13/topology/ed5c64931062"],"id-38"],
+          "id-38/topology/38443a4c89e1": ["face","shell/opening-rim/generated",["id-13/topology/ed5c64931062"],"id-38"],
+          "id-38/topology/a73fe9977444": ["face","shell/opening-rim/generated",["id-13/topology/05a587ca144d"],"id-38"],
+          "id-38/topology/595e76ef7818": ["edge","shell/generated",["id-13/topology/11fc21c554d7","id-13/topology/3bb9f4e25568","id-13/topology/bc1b38aefaf7","id-13/topology/e89035eb8c9e"],"id-38"],
+          "id-38/topology/32658a0df1ea": ["edge","shell/generated",["id-13/topology/e89035eb8c9e"],"id-38"],
+          "id-38/topology/d5dfb9baeb76": ["edge","shell/generated",["id-13/topology/3bb9f4e25568"],"id-38"],
+          "id-38/topology/75e487c1950b": ["edge","shell/generated",["id-13/topology/bc1b38aefaf7"],"id-38"],
+          "id-38/topology/606c17aa540f": ["edge","shell/generated",["id-13/topology/11fc21c554d7"],"id-38"],
+          "id-38/topology/3a0b8d43536e": ["edge","shell/generated",["id-13/topology/11fc21c554d7","id-13/topology/bc1b38aefaf7"],"id-38"],
+          "id-38/topology/69273990e3cc": ["edge","shell/generated",["id-13/topology/11fc21c554d7","id-13/topology/b01ad1f5528a","id-13/topology/bc1b38aefaf7","id-13/topology/e78624b7abfe"],"id-38"],
+          "id-38/topology/1b29dd139924": ["edge","shell/generated",["id-13/topology/e78624b7abfe"],"id-38"],
+          "id-38/topology/264245eec7d2": ["edge","shell/generated",["id-13/topology/b01ad1f5528a"],"id-38"]
         }
       }
     ],
@@ -436,19 +267,11 @@
       "system": true,
       "position": {
         "$class": "Vector3",
-        "elements": [
-          70,
-          70,
-          70
-        ]
+        "elements": [70,70,70]
       },
       "target": {
         "$class": "Vector3",
-        "elements": [
-          0,
-          0,
-          10
-        ]
+        "elements": [0,0,10]
       }
     }
   ]

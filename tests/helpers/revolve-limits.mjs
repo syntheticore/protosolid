@@ -6,7 +6,7 @@ import { initializeShapex } from '../../js/core/shapex.js'
 import { Profile, Wire } from '../../js/core/geom3d.js'
 import { Line, Circle, Spline } from '../../js/core/geom2d.js'
 import { rotationFromNormal } from '../../js/core/utils.js'
-import { withTopologyNaming } from '../../js/core/topological-naming.js'
+import { withTopologyNaming, topologyDescriptions } from '../../js/core/topological-naming.js'
 
 let namingFeature
 export const test = (name, evaluate) => nodeTest(name, () => {
@@ -20,7 +20,7 @@ await initializeShapex({ wasm: await readFile(new URL('../../js/shapexJS/pkg/sha
 // their authored construction roles, rather than the former display names.
 export function construction(item, owner, role, source) {
   return item.topology.anchors.some(anchor => {
-    const [kind, actualRole, sources, feature] = JSON.parse(namingFeature.topologyNames.bindings.find(binding => binding.id == anchor).description)
+    const [kind, actualRole, sources, feature] = JSON.parse(topologyDescriptions(namingFeature).get(anchor))
     return kind == 'face' && feature == owner && (!role || actualRole == role) && (!source || sources.includes(source))
   })
 }

@@ -562,6 +562,7 @@ ipcMain.handle('save-file', (e, path, data, encoding) => {
   return fs.writeFile(path, data, encoding || 'utf-8')
 })
 
+// Without an encoding, the file is read as raw bytes
 ipcMain.handle('load-file', (e, path, encoding) => {
-  return fs.readFile(path, encoding || 'utf-8')
+  return fs.readFile(path, encoding)
 })

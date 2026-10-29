@@ -6,8 +6,8 @@
     :value="value"
     :problem="problem"
     @commit="commit"
-    @increase="change(step)"
-    @decrease="change(-step)"
+    @increase="change(step * $event)"
+    @decrease="change(-step * $event)"
   )
 
 </template>

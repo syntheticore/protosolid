@@ -93,16 +93,16 @@
         if(!noFocus) this.$refs.input.focusInput()
       },
 
-      increase() {
+      increase(factor) {
         const number = this.inner.parse()
-        this.inner.set(truncate(number.value + this.step) + number.unit)
+        this.inner.set(truncate(number.value + this.step * factor) + number.unit)
         this.$emit('expression', this.inner.expression)
         this.update()
       },
 
-      decrease() {
+      decrease(factor) {
         const number = this.inner.parse()
-        const newValue = number.value - this.step
+        const newValue = number.value - this.step * factor
         if(this.allowNegative || newValue >= 0) {
           this.inner.set(truncate(newValue) + number.unit)
           this.$emit('expression', this.inner.expression)

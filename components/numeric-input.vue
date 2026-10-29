@@ -22,10 +22,10 @@
 
     .spinner
 
-      button.button(type="button" tabindex="-1" @mousedown.prevent @click="$emit('increase')")
+      button.button(type="button" tabindex="-1" @mousedown.prevent @click="$emit('increase', stepFactor($event))")
         Icon(icon="caret-up")
 
-      button.button(type="button" tabindex="-1" @mousedown.prevent @click="$emit('decrease')")
+      button.button(type="button" tabindex="-1" @mousedown.prevent @click="$emit('decrease', stepFactor($event))")
         Icon(icon="caret-down")
 
 </template>
@@ -173,7 +173,20 @@
         this.$nextTick(() => input.value = this.value)
       },
 
+      // Alt steps finer, Shift coarser
+      stepFactor(e) {
+        if(e.altKey) return 0.1
+        if(e.shiftKey) return 10
+        return 1
+      },
+
       keydown(e) {
+        if((e.key == 'ArrowUp' || e.key == 'ArrowDown') && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault()
+          e.stopPropagation()
+          this.$emit(e.key == 'ArrowUp' ? 'increase' : 'decrease', this.stepFactor(e))
+          return
+        }
         const allowPropagation =
           e.keyCode == 27 ||
           e.altKey ||

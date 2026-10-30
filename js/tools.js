@@ -744,6 +744,7 @@ export class ManipulationTool extends HighlightTool {
     // as though its first handle were being dragged would create surprising
     // endpoint/center constraints on release.
     this.snapToPoints = !this.curveDrag && !this.viewport.activeDimension
+    this.snapToGuides = this.snapToPoints
     this.cursor = 'grabbing'
   }
 
@@ -753,6 +754,7 @@ export class ManipulationTool extends HighlightTool {
     const boxSelecting = boxDrag && coords.distanceTo(boxDrag.start) > dragThreshold
     super.mouseUp(vec, coords)
     this.snapToPoints = false
+    this.snapToGuides = false
     this.cursor = 'auto'
     delete this.object
     delete this.dragPoint
@@ -788,6 +790,7 @@ export class ManipulationTool extends HighlightTool {
     this.selectionClickPending = false
     this.doubleClickPending = false
     this.snapToPoints = false
+    this.snapToGuides = false
     this.cursor = 'auto'
     delete this.object
     delete this.dragPoint

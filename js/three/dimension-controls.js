@@ -7,6 +7,7 @@ import { setRaycasterFromCamera } from './dual-camera.js'
 const LEADER_LENGTH_PX = 50
 const ARC_EXTENSION_STEPS = 32
 const ARROW_LENGTH_PX = 12
+const LIMITER_OVERSHOOT_PX = 10
 
 
 export default class DimensionControls extends THREE.Object3D {
@@ -17,6 +18,7 @@ export default class DimensionControls extends THREE.Object3D {
     this.alcObject = constraint
     this.renderer = renderer
     this.layout = () => {}
+    this.limiters = []
 
     const itemL = constraint.items[0]
     const itemR = constraint.items[1]
@@ -91,31 +93,52 @@ export default class DimensionControls extends THREE.Object3D {
     )
   }
 
+  // Keep arrow heads and extension line overshoots at a constant on-screen
+  // size regardless of zoom.
   updateLayout() {
     this.layout()
-    this.scaleArrows()
+    this.updateWorldMatrix(true, false)
+    const unitsPerPixel = this.unitsPerPixel()
+    for(const arrow of this.children) {
+      if(!(arrow instanceof THREE.ArrowHelper)) continue
+      arrow.scale.setScalar(ARROW_LENGTH_PX * unitsPerPixel(arrow.position))
+      arrow.updateMatrixWorld(true)
+    }
+    for(const limiter of this.limiters) {
+      const overshoot = LIMITER_OVERSHOOT_PX * unitsPerPixel(limiter.end)
+      if(overshoot === limiter.overshoot) continue
+      limiter.overshoot = overshoot
+      const positions = limiter.line.geometry.attributes.instanceStart.data
+      positions.array.set(limiter.end.clone().addScaledVector(limiter.direction, overshoot).toArray(), 3)
+      positions.needsUpdate = true
+      limiter.line.geometry.computeBoundingSphere()
+    }
   }
 
-  // Keep arrow heads at a constant on-screen size regardless of zoom.
-  scaleArrows() {
+  // World length of one screen pixel at a local point on the sketch plane.
+  unitsPerPixel() {
     const camera = this.renderer.activeCamera
     const canvas = this.renderer.renderer.domElement
     const width = canvas.width / this.renderer.getPixelRatio()
     const height = canvas.height / this.renderer.getPixelRatio()
-    this.updateWorldMatrix(true, false)
     const project = point => point.applyMatrix4(this.matrixWorld).project(camera)
-    for(const arrow of this.children) {
-      if(!(arrow instanceof THREE.ArrowHelper)) continue
-      const origin = project(arrow.position.clone())
+    return position => {
+      const origin = project(position.clone())
       const projectedLength = offset => {
-        const point = project(arrow.position.clone().add(offset))
+        const point = project(position.clone().add(offset))
         return Math.hypot((point.x - origin.x) * width * 0.5, (point.y - origin.y) * height * 0.5)
       }
-      const pixelsPerUnit = (projectedLength(new THREE.Vector3(1, 0, 0)) + projectedLength(new THREE.Vector3(0, 1, 0))) * 0.5
-      arrow.scale.setScalar(ARROW_LENGTH_PX / pixelsPerUnit)
-      arrow.updateMatrixWorld(true)
+      return 2 / (projectedLength(new THREE.Vector3(1, 0, 0)) + projectedLength(new THREE.Vector3(0, 1, 0)))
     }
   }
+}
+
+// Extension line from a reference point to the dimension line, overshooting
+// it along direction by a zoom dependent amount.
+function makeLimiter(controls, renderer, start, end, direction) {
+  const line = renderer.convertLine([start.toArray(), end.toArray()], materials.wire)
+  controls.add(line)
+  controls.limiters.push({ line, end, direction })
 }
 
 function makeArrow(pos, dir) {
@@ -251,8 +274,8 @@ function makeLinearDimension(controls, renderer, start, end, position, axis) {
   if(labelOffset < 0) lineStart.copy(position)
   if(labelOffset > lineLength) lineEnd.copy(position)
 
-  controls.add(renderer.convertLine([start.toArray(), dimStart.clone().addScaledVector(normal, Math.sign(startOffset) || 1).toArray()], materials.wire))
-  controls.add(renderer.convertLine([end.toArray(), dimEnd.clone().addScaledVector(normal, Math.sign(endOffset) || 1).toArray()], materials.wire))
+  makeLimiter(controls, renderer, start, dimStart, normal.clone().multiplyScalar(Math.sign(startOffset) || 1))
+  makeLimiter(controls, renderer, end, dimEnd, normal.clone().multiplyScalar(Math.sign(endOffset) || 1))
   controls.add(renderer.convertLine([lineStart.toArray(), lineEnd.toArray()], materials.wire))
   controls.add(makeArrow(dimStart, direction.clone().negate()))
   controls.add(makeArrow(dimEnd, direction))
@@ -267,8 +290,8 @@ function makeParallelDimension(controls, renderer, posL, posR, direction, positi
   let posLT = posL.clone().add(projL)
   let posRT = posR.clone().add(projR)
 
-  const lineL = renderer.convertLine([posL.toArray(), posLT.clone().add(projL.normalize()).toArray()], materials.wire)
-  const lineR = renderer.convertLine([posR.toArray(), posRT.clone().add(projR.normalize()).toArray()], materials.wire)
+  makeLimiter(controls, renderer, posL, posLT.clone(), projL.clone().normalize())
+  makeLimiter(controls, renderer, posR, posRT.clone(), projR.clone().normalize())
 
   const cross = posRT.clone().sub(posLT)
   const contraintRel = position.clone().sub(posLT)
@@ -291,8 +314,6 @@ function makeParallelDimension(controls, renderer, posL, posR, direction, positi
     posRT.toArray(),
   ], materials.wire)
 
-  controls.add(lineL)
-  controls.add(lineR)
   controls.add(lineTop)
 }
 
@@ -331,10 +352,8 @@ function makeAngularDimension(controls, renderer, constraint) {
   const arrowStart = pointAt(0)
   const arrowEnd = pointAt(angle)
 
-  const ray1 = center.clone().add(sector.start.clone().multiplyScalar(radius + 1))
-  const ray2 = center.clone().add(sector.end.clone().multiplyScalar(radius + 1))
-  controls.add(renderer.convertLine([center.toArray(), ray1.toArray()], materials.wire))
-  controls.add(renderer.convertLine([center.toArray(), ray2.toArray()], materials.wire))
+  makeLimiter(controls, renderer, center, center.clone().addScaledVector(sector.start, radius), sector.start)
+  makeLimiter(controls, renderer, center, center.clone().addScaledVector(sector.end, radius), sector.end)
   controls.add(renderer.convertLine(arc, materials.wire))
   controls.add(makeArrow(new THREE.Vector3().fromArray(arrowStart), sector.start.clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), sector.sign * Math.PI / 2).negate()))
   controls.add(makeArrow(new THREE.Vector3().fromArray(arrowEnd), sector.end.clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), -sector.sign * Math.PI / 2).negate()))

@@ -44,7 +44,10 @@ class Materials {
     this.referenceLine = this.line.clone()
     this.referenceLine.color.set('#8eca53')
     this.referenceLine.dashed = true
-    this.referenceLine.dashScale = 0.5
+    // Distances are converted to screen pixels by Renderer before drawing.
+    this.referenceLine.dashScale = 1
+    this.referenceLine.dashSize = 8
+    this.referenceLine.gapSize = 8
     this.referenceLine.linewidth = 2
 
     this.referenceSelectionLine = this.referenceLine.clone()

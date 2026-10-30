@@ -91,9 +91,9 @@ export default class Renderer {
     // Sketch Plane
     this.sketchPlane = new SketchPlane()
     this.traceables.add(this.sketchPlane)
-    this.splineDashOrigin = new THREE.Vector3()
-    this.splineDashX = new THREE.Vector3()
-    this.splineDashY = new THREE.Vector3()
+    this.dashOrigin = new THREE.Vector3()
+    this.dashX = new THREE.Vector3()
+    this.dashY = new THREE.Vector3()
 
     // Ground Shadow
     if(preferences.shadowMaps) {
@@ -389,26 +389,45 @@ export default class Renderer {
     this.render()
   }
 
-  updateSplineDashScale() {
-    if(!this.sketchPlane.visible) return
-
-    this.sketchPlane.updateWorldMatrix(true, false)
-    const transform = this.sketchPlane.matrixWorld
+  // Keep dash patterns at a constant on-screen size, measured on the sketch
+  // plane while sketching, and at the orbit target otherwise.
+  updateDashScale() {
     const camera = this.activeCamera
     const canvas = this.renderer.domElement
     const width = canvas.width / this.getPixelRatio()
     const height = canvas.height / this.getPixelRatio()
 
-    const origin = this.splineDashOrigin.set(0, 0, 0).applyMatrix4(transform).project(camera)
-    const x = this.splineDashX.set(1, 0, 0).applyMatrix4(transform).project(camera)
-    const y = this.splineDashY.set(0, 1, 0).applyMatrix4(transform).project(camera)
+    const origin = this.dashOrigin
+    const x = this.dashX
+    const y = this.dashY
+    if(this.sketchPlane.visible) {
+      this.sketchPlane.updateWorldMatrix(true, false)
+      const transform = this.sketchPlane.matrixWorld
+      origin.set(0, 0, 0).applyMatrix4(transform)
+      x.set(1, 0, 0).applyMatrix4(transform)
+      y.set(0, 1, 0).applyMatrix4(transform)
+    } else {
+      origin.copy(this.viewControls.target)
+      x.setFromMatrixColumn(camera.matrixWorld, 0).normalize().add(origin)
+      y.setFromMatrixColumn(camera.matrixWorld, 1).normalize().add(origin)
+    }
+    origin.project(camera)
+    x.project(camera)
+    y.project(camera)
     const projectedLength = point => Math.hypot(
       (point.x - origin.x) * width * 0.5,
       (point.y - origin.y) * height * 0.5,
     )
     const pixelsPerUnit = (projectedLength(x) + projectedLength(y)) * 0.5
     if(Number.isFinite(pixelsPerUnit) && pixelsPerUnit > 0) {
-      materials.splineControlLine.dashScale = pixelsPerUnit
+      for(const material of [
+        materials.splineControlLine,
+        materials.referenceLine,
+        materials.referenceSelectionLine,
+        materials.referenceHighlightLine,
+        materials.constrainedReferenceLine,
+        materials.brokenReferenceLine,
+      ]) material.dashScale = pixelsPerUnit
     }
   }
 
@@ -425,7 +444,7 @@ export default class Renderer {
       if(object instanceof DimensionControls) object.updateLayout()
     })
     this.sketchPlane.update(this.activeCamera, this.viewControls.target)
-    this.updateSplineDashScale()
+    this.updateDashScale()
     const pathTraced = this.displayMode == 'pathTraced' &&
       this.pathTracingViewport.render(this.scene, this.activeCamera)
     if(!pathTraced) {

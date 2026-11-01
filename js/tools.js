@@ -145,6 +145,11 @@ function isConstrainablePoint(elem, index) {
   return false
 }
 
+function isFixedDimensionItem(item) {
+  const elem = item instanceof ElemRef ? item.curve() : item
+  return !!elem.projection || elem instanceof SketchOrigin
+}
+
 function isTouchPoint(elem, index) {
   return isConstrainablePoint(elem, index) && !(elem instanceof Arc && index == 0)
 }
@@ -2883,6 +2888,9 @@ export class DimensionTool extends HighlightTool {
   acceptsInput(item) {
     const isPoint = item instanceof ElemRef && item.index !== undefined
     const first = this.items[0]
+    // Projected elements may only be referenced by dimensions that also
+    // constrain a native element
+    if(first && isFixedDimensionItem(first) && isFixedDimensionItem(item)) return false
     if(first instanceof ElemRef) {
       return isPoint || item instanceof Circle || (item instanceof Line && item != first.curve())
     }
@@ -2904,8 +2912,7 @@ export class DimensionTool extends HighlightTool {
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
 
-    if(this.items.length == 0 ||
-      (!this.isReadyToPlace() && !(this.items.length == 1 && this.items[0] instanceof Circle))) {
+    if(!this.canPlaceDimension()) {
       const curve = await this.getObject(coords)
       if(!curve) return
       this.items.push(curve)
@@ -2939,6 +2946,7 @@ export class DimensionTool extends HighlightTool {
   }
 
   canPlaceDimension() {
+    if(this.items.length == 1 && isFixedDimensionItem(this.items[0])) return false
     return this.isReadyToPlace() ||
       (this.items.length == 1 && this.items[0] instanceof Circle)
   }

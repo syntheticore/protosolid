@@ -1,0 +1,161 @@
+{
+  "lastId": "1023n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 3,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-1003",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-1004",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-1001",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [7,0,0]
+              },
+              "radius": 3
+            },
+            {
+              "$class": "Line",
+              "id": "id-1002",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [0,-50,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [0,50,0]
+                }
+              ],
+              "isReference": true
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "RevolveFeature",
+        "id": "id-1007",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "angle",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-1006",
+              "sketchId": "id-1004",
+              "rings": [
+                ["id-1001"]
+              ]
+            }
+          ],
+          "axis": {
+            "$class": "AxialReference",
+            "item": {
+              "$class": "CurveReference",
+              "componentId": "id-0",
+              "sketchId": "id-1004",
+              "isProjection": false,
+              "itemId": "id-1002",
+              "outputIndex": 0
+            }
+          },
+          "angle": 360,
+          "offset": 0,
+          "fromFace": null,
+          "limitFace": null,
+          "side": true,
+          "operation": "join"
+        },
+        "expressions": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "topologyDescriptions": {
+          "id-1007/topology/8cc7177657ea": ["face","profile-side/section-positive",["id-1001"],"id-1007"],
+          "id-1007/topology/d22ed1b3db71": ["face","profile-side/section-negative",["id-1001"],"id-1007"],
+          "id-1007/topology/35c67e4e3959": ["edge","profile/boundary",["id-1007/topology/8cc7177657ea","id-1007/topology/d22ed1b3db71"],"id-1007"],
+          "id-1007/topology/5c53db6a6843": ["edge","profile/boundary",["id-1007/topology/8cc7177657ea"],"id-1007"],
+          "id-1007/topology/1ff48256269c": ["edge","profile/boundary",["id-1007/topology/d22ed1b3db71"],"id-1007"],
+          "id-1007/topology/cb93baaff6ae": ["vertex","profile/boundary",["id-1007/topology/1ff48256269c","id-1007/topology/5c53db6a6843"],"id-1007"],
+          "id-1007/topology/4ef2e7c3c0f1": ["vertex","profile/boundary",["id-1007/topology/1ff48256269c"],"id-1007"],
+          "id-1007/topology/ec07962b11b6": ["vertex","profile/boundary",["id-1007/topology/5c53db6a6843"],"id-1007"],
+          "id-1007/topology/8a99294df6c4": ["body","profile/body",["id-1001"],"id-1007"]
+        }
+      },
+      {
+        "$class": "ShellFeature",
+        "id": "id-1023",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "faces": null,
+          "thickness": 8,
+          "side": true,
+          "joinType": "rounded"
+        },
+        "expressions": {},
+        "topologyNames": {
+          "version": 2
+        }
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "Main Assembly",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-1004": true
+      },
+      "itemNames": {},
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [50,50,40]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [0,0,5]
+      }
+    }
+  ]
+}

@@ -32,6 +32,7 @@ import { ScreenPointObject } from './three/helper-objects.js'
 import {
   CoincidentConstraint,
   TouchConstraint,
+  IntersectionConstraint,
   MidpointConstraint,
   PerpendicularConstraint,
   HorVertConstraint,
@@ -2017,29 +2018,55 @@ export class CircleTool extends SketchTool {
 
 export class RectangleTool extends SketchTool {
   static icon = 'sketch-rectangle'
+  static hasOptions = true
 
   constructor(component, viewport, sketch) {
     super(component, viewport, sketch)
+    this.mode = 'corner'
     this.lines = []
+    this.settings = {
+      mode: {
+        title: 'Mode',
+        type: 'select',
+        options: {
+          corner: { title: 'Two corners', icon: 'sketch-rectangle' },
+          center: { title: 'Center and corner', icon: 'sketch-rectangle-center' },
+        },
+      },
+    }
+  }
+
+  setOption(key, value) {
+    if(key != 'mode' || !this.settings.mode.options[value] || value == this.mode) return
+    this.dispose()
+    this.resetInput()
+    this.mode = value
+    this.viewport.elementChanged()
   }
 
   snapExclusions() { return this.lines }
 
+  // The anchor is the first clicked corner, or the center in center mode,
+  // where the pointer only spans half the rectangle.
+  sizeScale() { return this.mode == 'center' ? 2.0 : 1.0 }
+
   inputFields() {
-    if(!this.corner) return []
-    const point = this.constrained(this.pointer || this.corner)
+    if(!this.anchor) return []
+    const point = this.constrained(this.pointer || this.anchor)
+    const scale = this.sizeScale()
     return [
-      { key: 'width', label: 'W', dimension: 'length', value: Math.abs(point.x - this.corner.x) },
-      { key: 'height', label: 'H', dimension: 'length', value: Math.abs(point.y - this.corner.y) },
+      { key: 'width', label: 'W', dimension: 'length', value: Math.abs(point.x - this.anchor.x) * scale },
+      { key: 'height', label: 'H', dimension: 'length', value: Math.abs(point.y - this.anchor.y) * scale },
     ]
   }
 
   constrained(vec) {
-    if(!this.corner) return vec
+    if(!this.anchor) return vec
     const point = vec.clone()
+    const scale = this.sizeScale()
     const { width, height } = this.locks
-    if(width !== undefined) point.x = this.corner.x + (Math.sign(vec.x - this.corner.x) || 1) * width
-    if(height !== undefined) point.y = this.corner.y + (Math.sign(vec.y - this.corner.y) || 1) * height
+    if(width !== undefined) point.x = this.anchor.x + (Math.sign(vec.x - this.anchor.x) || 1) * width / scale
+    if(height !== undefined) point.y = this.anchor.y + (Math.sign(vec.y - this.anchor.y) || 1) * height / scale
     return point
   }
 
@@ -2048,20 +2075,19 @@ export class RectangleTool extends SketchTool {
     vec = this.constrained(vec)
     const snap = this.pointerSnap()
 
-    if(!this.corner) {
-      this.corner = vec.clone()
+    if(!this.anchor) {
+      this.anchor = vec.clone()
       this.startSnap = snap
-      this.lines.push(
-        new Line(this.corner.clone(), this.corner.clone()),
-        new Line(this.corner.clone(), this.corner.clone()),
-        new Line(this.corner.clone(), this.corner.clone()),
-        new Line(this.corner.clone(), this.corner.clone()),
-      )
+      const count = this.mode == 'center' ? 6 : 4
+      for(let i = 0; i < count; i++) {
+        this.lines.push(new Line(this.anchor.clone(), this.anchor.clone()))
+      }
+      this.lines.slice(4).forEach(diagonal => diagonal.isReference = true)
       this.lines.forEach(line => this.sketch.add(line))
     } else {
       this.mouseMove(vec)
       this.commit(snap)
-      this.corner = null
+      this.anchor = null
       this.startSnap = null
       this.lines.length = 0
     }
@@ -2071,25 +2097,29 @@ export class RectangleTool extends SketchTool {
 
   mouseMove(vec) {
     this.pointer = vec
-    if(!this.corner) return
+    if(!this.anchor) return
 
     vec = this.constrained(vec)
-    const [x, y] = [vec.x, vec.y]
-    const [cornerX, cornerY] = [this.corner.x, this.corner.y]
+    const start = this.mode == 'center'
+      ? new THREE.Vector3(2.0 * this.anchor.x - vec.x, 2.0 * this.anchor.y - vec.y, vec.z)
+      : this.anchor
     const points = [
-      this.corner,
-      new THREE.Vector3(x, cornerY, vec.z),
+      start,
+      new THREE.Vector3(vec.x, start.y, vec.z),
       vec,
-      new THREE.Vector3(cornerX, y, vec.z),
+      new THREE.Vector3(start.x, vec.y, vec.z),
     ]
-    this.lines.forEach((line, index) => {
+    const [bottom, right, top, left, rising, falling] = this.lines
+    ;[bottom, right, top, left].forEach((line, index) => {
       line.setHandles([points[index], points[(index + 1) % points.length]])
     })
+    rising?.setHandles([points[0], points[2]])
+    falling?.setHandles([points[1], points[3]])
     this.viewport.elementChanged()
   }
 
   commit(endSnap) {
-    const [bottom, right, top, left] = this.lines
+    const [bottom, right, top, left, rising, falling] = this.lines
 
     // Keep the four corners topologically connected even though each side is
     // represented by an ordinary line element.
@@ -2107,14 +2137,27 @@ export class RectangleTool extends SketchTool {
     this.addLockedDimension('width', [bottom], dimensionPosition(bottom, offset, center))
     this.addLockedDimension('height', [right], dimensionPosition(right, offset, center))
 
-    this.constrainPoint(bottom, 0, this.startSnap)
+    if(rising) {
+      ;[[rising, 0, bottom, 0], [rising, 1, top, 0],
+        [falling, 0, right, 0], [falling, 1, left, 0]].forEach(([diagonal, diagonalIndex, side, sideIndex]) => {
+        this.sketch.addConstraint(new CoincidentConstraint(
+          new ElemRef(diagonal, diagonalIndex), new ElemRef(side, sideIndex)
+        ))
+      })
+      const centerPoint = new SketchPoint(this.anchor.clone())
+      this.sketch.add(centerPoint)
+      this.sketch.addConstraint(new IntersectionConstraint(new ElemRef(centerPoint, 0), rising, falling))
+      this.constrainPoint(centerPoint, 0, this.startSnap)
+    } else {
+      this.constrainPoint(bottom, 0, this.startSnap)
+    }
     this.constrainPoint(top, 0, endSnap)
   }
 
   dispose() {
     this.lines.forEach(line => line.remove())
     this.lines.length = 0
-    this.corner = null
+    this.anchor = null
   }
 }
 

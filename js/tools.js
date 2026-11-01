@@ -917,6 +917,7 @@ export class ProjectionTool extends HighlightTool {
     this.sketch = sketch
     this.localSpace = true
     this.includeInactive = true
+    this.showsUnsectioned = true
     this.cursor = 'copy'
   }
 
@@ -1384,6 +1385,8 @@ class PickTool extends HighlightTool {
     this.localSpace = false
     this.probesSurface = true
     this.chooseAmongItems = false
+    // Picked model topology must exist in the real model, not only in a section
+    this.showsUnsectioned = selectors.some(selector => !['curve', 'profile', 'joint'].includes(selector))
   }
 
   async mouseDown(vec, coords) {

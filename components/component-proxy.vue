@@ -156,6 +156,8 @@
   const compound = computed(() => {
     // Slice model using all visible saved sections and, while sketching,
     // the active sketch plane expressed in this component's local space.
+    // Tools picking model topology reference the real model, so they see it unsectioned.
+    if(props.activeTool?.showsUnsectioned) return props.component.compound
     const sections = getSections(props.component).filter(sec => !sec.hidden )
     if(props.sectionPlane) {
       sections.push({

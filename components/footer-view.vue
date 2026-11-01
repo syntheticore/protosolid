@@ -125,6 +125,7 @@
 
   import pluralize from 'pluralize'
   import { shapex as sx } from '../js/core/shapex.js'
+  import { selectionType } from '../js/core/geom3d.js'
 
   function groupBy(xs, key) {
     return xs.reduce(function(rv, x) {
@@ -170,7 +171,7 @@
       description: function() {
         const selection = [...this.document.selection.items]
         const uniqueNames = selection.map(item => item.typename() ).filter((value, index, self) => self.indexOf(value) === index )
-        const groups = groupBy(selection, this.selectionType)
+        const groups = groupBy(selection, selectionType)
         const numGroups = Object.keys(groups).length
         const propsPerItem = selection.map(item => this.produceProperties(item) ).filter(Boolean)
         const topologySelection = uniqueNames.every(type => type == 'Face' || type == 'Edge')
@@ -203,30 +204,6 @@
     },
 
     methods: {
-      selectionType: function(item) {
-        if(item.typename() == 'Face') {
-          const names = {
-            plane: 'Planar',
-            cylinder: 'Cylindrical',
-            sphere: 'Spherical',
-            cone: 'Conical',
-            torus: 'Toroidal',
-            revolved: 'Revolved',
-            swept: 'Swept',
-            nurbs: 'Spline',
-            offset: 'Offset',
-            'rolling-ball': 'Fillet',
-            ruled: 'Ruled',
-          }
-          return `${names[item.geom().surface().kind] || 'Curved'} Face`
-        }
-        if(item.typename() != 'Edge') return item.typename()
-        const curve = item.geom().curve()
-        if(curve instanceof sx.Line3) return 'Straight Edge'
-        if(curve instanceof sx.Circle3) return 'Circular Edge'
-        return 'Curved Edge'
-      },
-
       produceProperties: function(item) {
         const type = item.typename().split(' ')[0]
         if(type == 'Solid') {

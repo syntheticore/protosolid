@@ -63,7 +63,7 @@
   const input = ref(null)
 
   function canRename(event) {
-    return !props.disabled && !bus.componentPickerActive &&
+    return !props.disabled && !bus.componentPickerActive && !bus.solidPickerActive &&
       !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey
   }
 

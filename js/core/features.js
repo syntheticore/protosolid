@@ -14,6 +14,7 @@ import { checkedOutData, parseDocument, decodeFile } from './document-format.js'
 import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame, faceGizmoFrame } from '../three/gizmos.js'
 import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
+import { measureIds, measureValue } from './measures.js'
 import { withTopologyNaming } from './topological-naming.js'
 import { fail, featureError } from './errors.js'
 import {
@@ -40,6 +41,8 @@ export class Feature {
     this.settings = settings
     this.error = null
     this.expressions = {}
+    // Picked geometry measured in expressions, as { [id]: { reference, property } }
+    this.measures = {}
     this.componentId = this.document.activeComponent.sourceId()
     this.componentOccurrenceId = this.document.activeComponent.id
     this.id = makeID()
@@ -86,17 +89,8 @@ export class Feature {
 
     if(this.error && this.error.type == 'error') return
 
-    const component = tree.findChild(this.componentId)
-    try {
-      Object.entries(this.expressions).forEach(([key, expression]) => {
-        const value = new Expression(expression, component.getParameters(), this.settings[key].type).getBase()
-        if(!Number.isFinite(value)) fail('Parameter expression must be finite')
-        this[key] = value
-      })
-    } catch(err) {
-      this.error = { type: 'error', msg: 'Invalid parameter expression' }
-      return
-    }
+    this.updateExpressions(tree)
+    if(this.error?.type == 'error') return
 
     withTopologyNaming(this, () => {
       this.updateGeometry(tree, references)
@@ -104,6 +98,24 @@ export class Feature {
       const components = new Set(this.modifiedComponents().flatMap(id => tree.findChild(id).getChildren()))
       for(const component of components) component.compound.restoreTopologySelections(this)
     })
+  }
+
+  updateExpressions(tree) {
+    const component = tree.findChild(this.componentId)
+    const { values: measures, error } = this.measureValues(tree)
+    if(error) {
+      this.error = error
+      return
+    }
+    try {
+      Object.entries(this.expressions).forEach(([key, expression]) => {
+        const value = new Expression(expression, component.getParameters(), this.settings[key].type, measures).getBase()
+        if(!Number.isFinite(value)) fail('Parameter expression must be finite')
+        this[key] = value
+      })
+    } catch(err) {
+      this.error = { type: 'error', msg: 'Invalid parameter expression' }
+    }
   }
 
   updateGeometry(tree, references) {
@@ -271,6 +283,54 @@ export class Feature {
     return Object.keys(this.settings)
       .filter(key => this[key] && this.needsPicker(key, true))
       .flatMap(key => [this[key]()].flat().flatMap(ref => ref.referencedItems()))
+      .concat(this.usedMeasureIds().flatMap(id => this.resolveMeasure(id).reference.referencedItems()))
+  }
+
+  usedMeasureIds() {
+    return [...new Set(Object.values(this.expressions).flatMap(measureIds))]
+      .filter(id => this.measures[id])
+  }
+
+  nextMeasureId() {
+    return String(Math.max(0, ...Object.keys(this.measures).map(Number)) + 1)
+  }
+
+  addMeasure(reference, property) {
+    const id = this.nextMeasureId()
+    this.measures[id] = { reference, property }
+    return id
+  }
+
+  // Measures are replaced rather than modified, so snapshots stay intact
+  setMeasureProperty(id, property) {
+    this.measures[id] = { ...this.measures[id], property }
+  }
+
+  // Resolves a measure against the model before this feature, like an input.
+  // Returns { reference, item, value, error }.
+  resolveMeasure(id, tree = this.document.top(this.document.timeline.features.indexOf(this))) {
+    const { reference, property } = this.measures[id]
+    const clone = reference.clone()
+    const result = clone.update(tree)
+    const item = clone.getItem()
+    if(result?.type == 'error' || !item) {
+      return { reference: clone, error: { type: 'error', msg: result?.msg || 'Measured geometry was lost' } }
+    }
+    const value = measureValue(item, property)
+    if(!Number.isFinite(value)) {
+      return { reference: clone, item, error: { type: 'error', msg: 'Measurement is not available for this geometry' } }
+    }
+    return { reference: clone, item, value, error: result }
+  }
+
+  measureValues(tree) {
+    const values = {}
+    for(const id of this.usedMeasureIds()) {
+      const result = this.resolveMeasure(id, tree)
+      if(result.error?.type == 'error') return { values, error: result.error }
+      values[id] = result.value
+    }
+    return { values }
   }
 
   getValues() {
@@ -310,6 +370,7 @@ export class Feature {
       componentOccurrenceId: this.componentOccurrenceId,
       values: this.getValues(),
       expressions: this.expressions,
+      measures: Object.fromEntries(this.usedMeasureIds().map(id => [id, this.measures[id]])),
       visibilities: this.visibilities,
       topologyNames: this.topologyNames,
     }
@@ -326,6 +387,7 @@ export class Feature {
     feature.expressions = Object.fromEntries(
       Object.entries(dump.expressions || {}).filter(([key]) => feature.settings[key])
     )
+    feature.measures = dump.measures || {}
     return feature
   }
 }
@@ -896,6 +958,8 @@ export class JointFeature extends Feature {
     this.error = null
     const references = this.updateReferences(tree)
     if(this.error && this.error.type == 'error') return
+    this.updateExpressions(tree)
+    if(this.error?.type == 'error') return
     this.updateFeature(tree, references)
   }
 
@@ -1045,10 +1109,12 @@ export class MotionLinkFeature extends Feature {
   }
 
   execute(tree) {
-    if(this.suppressUpdate || !this.isComplete()) return
+    if(this.suppressUpdate || !super.isComplete() || !this.motionA || !this.motionB) return
     this.error = null
     const references = this.updateReferences(tree)
     if(this.error && this.error.type == 'error') return
+    this.updateExpressions(tree)
+    if(this.error?.type == 'error') return
     const jointA = references.jointA
     const jointB = references.jointB
     if(!jointA || !jointB || jointA.id == jointB.id) {

@@ -3,11 +3,13 @@ import preferences from '../preferences.js'
 const dimensions = {
   length: {
     conversions: { mm: 1.0, cm: 10.0, m: 1000.0, inch: 25.4 },
+    base: 'mm',
     preferred: () => preferences.preferredUnit,
     units: '(inch\\b|mm\\b|cm\\b|m\\b)',
   },
   angle: {
     conversions: { '°': 1.0, deg: 1.0, rad: 180.0 / Math.PI },
+    base: '°',
     preferred: () => '°',
     units: '(°|deg\\b|rad\\b)',
   },
@@ -18,8 +20,10 @@ function fixDecimals(number) {
 }
 
 export default class Expression {
-  constructor(input, parameters, dimension = 'length') {
+  // Measures map the ids of `{id}` tokens to values in base units
+  constructor(input, parameters, dimension = 'length', measures = {}) {
     this.parameters = parameters || []
+    this.measures = measures
     this.dimension = dimensions[dimension]
     if(!this.dimension) throw new Error(`Unknown expression dimension: ${dimension}`)
     this.set(input)
@@ -111,6 +115,12 @@ export default class Expression {
   }
 
   parseNumber(expr) {
+    const measure = /^\{(\d+)\}$/.exec(expr.trim())
+    if(measure) {
+      const value = this.measures[measure[1]]
+      if(!Number.isFinite(value)) throw 'Unknown measure "' + expr + '"'
+      return { value, unit: this.dimension.base }
+    }
     const match = new RegExp('(\\d*\\.?\\d*)\\s*' + this.dimension.units + '?').exec(expr)
     if(!match || match[1] === '' || match[0].trim() != expr.trim()) {
       // Probably a parameter

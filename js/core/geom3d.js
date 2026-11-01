@@ -385,9 +385,12 @@ export class Face {
     if(surface.kind != 'sphere') return
     return new THREE.Matrix4().setPosition(threeVector(surface.center))
   }
-  connectedFaces() {
+  boundaryEdges() {
     const edgeIds = new Set(consumeEntityIds(this.geom().boundaryEdges()))
-    return this.solid.edges().filter(edge => edgeIds.has(edge.kernelId)).flatMap(edge => edge.connectedFaces()).filter((face, index, faces) => face && face != this && faces.indexOf(face) == index)
+    return this.solid.edges().filter(edge => edgeIds.has(edge.kernelId))
+  }
+  connectedFaces() {
+    return this.boundaryEdges().flatMap(edge => edge.connectedFaces()).filter((face, index, faces) => face && face != this && faces.indexOf(face) == index)
   }
   tesselate() {
     if (this.cachedTesselation) return this.cachedTesselation
@@ -474,6 +477,30 @@ export class Edge {
     return this.cachedTesselation
 
   }
+}
+
+const surfaceNames = {
+  plane: 'Planar',
+  cylinder: 'Cylindrical',
+  sphere: 'Spherical',
+  cone: 'Conical',
+  torus: 'Toroidal',
+  revolved: 'Revolved',
+  swept: 'Swept',
+  nurbs: 'Spline',
+  offset: 'Offset',
+  'rolling-ball': 'Fillet',
+  ruled: 'Ruled',
+}
+
+// Type of an item as shown to the user, naming the geometry of faces and edges
+export function selectionType(item) {
+  if(item instanceof Face) return `${surfaceNames[item.geom().surface().kind] || 'Curved'} Face`
+  if(!(item instanceof Edge)) return item.typename()
+  const curve = item.geom().curve()
+  if(curve instanceof sx.Line3) return 'Straight Edge'
+  if(curve instanceof sx.Circle3) return 'Circular Edge'
+  return 'Curved Edge'
 }
 
 export class Vertex {

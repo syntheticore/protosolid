@@ -303,6 +303,7 @@
     ComponentPickTool,
     JointPickTool,
     PatternInputPickTool,
+    MeasurePickTool,
     LineTool,
     SplineTool,
     CircleTool,
@@ -542,6 +543,7 @@
           point: PointPickTool,
           componentRef: ComponentPickTool,
           joint: JointPickTool,
+          measure: MeasurePickTool,
         }[type], acceptsInput, references)
       })
 

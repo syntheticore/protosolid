@@ -1484,6 +1484,19 @@ export class JointPickTool extends PickTool {
   pick(joint) { if(!this.disposed) this.callback(joint) }
 }
 
+// Picks geometry to measure in expressions. Points and curves are thin
+// targets, so they win over the faces behind them.
+export class MeasurePickTool extends PickTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, ['point', 'edge', 'curve', 'face'], callback)
+  }
+
+  orderItems(items) {
+    const rank = item => item instanceof Face ? 2 : item instanceof Edge || item.sketch && !item.point ? 1 : 0
+    return [...items].sort((a, b) => rank(a) - rank(b))
+  }
+}
+
 export class PatternInputPickTool extends PickTool {
   constructor(component, viewport, callback) {
     super(component, viewport, ['solid', 'component'], callback)

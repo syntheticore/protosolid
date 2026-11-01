@@ -10,7 +10,7 @@
 
     .main
 
-      .settings
+      .settings(@input="onInput")
 
         .setting(
           v-for="(setting, key) in orderedSettings"
@@ -30,14 +30,19 @@
 
           NumberInput(
             v-if="setting.type == 'length' || setting.type == 'angle'"
+            :ref="'number-' + key"
             :component="document.top()"
             :dimension="setting.type"
             :allow-negative="setting.allowNegative"
             v-model:value="activeFeature[key]"
             :expression="activeFeature.expressions[key]"
+            :measures="measureInfo"
+            :measuring="activePicker == measureKey(key) ? measuringColor : null"
             :auto-focus="key === autoFocusSetting"
             @update:value="update"
             @expression="activeFeature.setExpression(key, $event)"
+            @measure="pick(measureKey(key))"
+            @measure-property="setMeasureProperty"
             @error="error = $event"
           )
 
@@ -318,8 +323,21 @@
   import { CreateSketchFeature } from './../js/core/features.js'
   import { CurveReference, JointReference, PatternInputReference, AxialReference } from './../js/core/references.js'
   import { SketchElement } from './../js/core/geom2d.js'
+  import { ProjectedPoint } from './../js/core/sketch.js'
+  import { selectionType } from './../js/core/geom3d.js'
+  import { acceptsMeasure, measureReference, measureOptions, measureValue } from './../js/core/measures.js'
   import { referenceComponentId, worldTransform } from './../js/core/assembly.js'
   import PickerSession from './../js/picker-session.js'
+
+  // Measure pills and their picker lines share these colors
+  const measureColors = ['#e8a317', '#17b3a3', '#d6409f', '#6c7bff', '#6fbf3a', '#ff7b54']
+
+  function measureColor(id) {
+    return measureColors[(Number(id) - 1) % measureColors.length]
+  }
+
+  // Picking measures for a setting uses picker keys like `measure:distance`
+  const measurePrefix = 'measure:'
 
   export default {
     name: 'FeatureBox',
@@ -340,6 +358,9 @@
         focusedSetting: null,
         status: null,
         pendingUpdates: 0,
+        // Pills by measure id, see ExpressionEditor
+        measureInfo: {},
+        measuringColor: null,
       }
     },
 
@@ -386,7 +407,7 @@
       this.bus.on('keydown', this.onKeydown)
       this.pickerSession = new PickerSession(this.bus, {
         canReactivate: () => !this.isSketchFeature,
-        available: key => !this.destroyed && this.activeFeature.needsPicker(key, true),
+        available: key => !this.destroyed && this.pickerAvailable(key),
         defaultKey: () => Object.keys(this.orderedSettings).find(key =>
           this.activeFeature.needsPicker(key, true)
         ),
@@ -396,7 +417,7 @@
         complete: async (key, changed, current) => {
           await this.update()
           if(!current() || this.destroyed) return
-          if(changed && this.activeFeature.settings[key].autoConfirm) this.confirm()
+          if(changed && this.activeFeature.settings[key]?.autoConfirm) this.confirm()
         },
       })
       this.document.on('deactivate-feature', this.deactivateFeature)
@@ -404,6 +425,7 @@
       this.document.on('feature-visibility-changed', this.refreshVisibility)
       this.startValues = this.activeFeature.getValues()
       this.startExpressions = { ...this.activeFeature.expressions }
+      this.startMeasures = { ...this.activeFeature.measures }
       this.startVisibilities = this.activeFeature.visibilities
       this.activateBaseTool()
       setTimeout(async () => {
@@ -499,7 +521,69 @@
         this.update()
       },
 
+      // Edits move measure pills along with their text
+      onInput(e) {
+        if(e.target.isContentEditable) this.updatePaths()
+      },
+
+      measureKey(key) {
+        return measurePrefix + key
+      },
+
+      measuredSetting(key) {
+        return key.startsWith(measurePrefix) && key.slice(measurePrefix.length)
+      },
+
+      pickerAvailable(key) {
+        const measured = this.measuredSetting(key)
+        return measured ? this.activeFeature.isSettingVisible(this.activeFeature.settings[measured]) :
+          this.activeFeature.needsPicker(key, true)
+      },
+
+      setMeasureProperty(id, property) {
+        this.activeFeature.setMeasureProperty(id, property)
+        this.update()
+      },
+
+      // Resolves all measures for their pills, returns the results by id
+      refreshMeasures(tree) {
+        const results = Object.fromEntries(Object.keys(this.activeFeature.measures).map(id =>
+          [id, this.activeFeature.resolveMeasure(id, tree)]
+        ))
+        this.measureInfo = Object.fromEntries(Object.entries(results).map(([id, { item, value }]) => [id, {
+          value,
+          property: this.activeFeature.measures[id].property,
+          color: measureColor(id),
+          options: item ? this.measureMenu(item) : [],
+        }]))
+        return results
+      },
+
+      // Menu options of the measures of an item, grouped options in submenus,
+      // headed by the type of the item. Sketch handles resolve to their transform.
+      measureMenu(item) {
+        const menu = [{ heading: item instanceof THREE.Matrix4 ? 'Point' : selectionType(item) }]
+        for(const { key, title, group } of measureOptions(item)) {
+          const option = { value: key, label: title, detail: String(Number(measureValue(item, key).toFixed(2))) }
+          if(!group) {
+            menu.push(option)
+            continue
+          }
+          let parent = menu.find(entry => entry.children && entry.label == group)
+          if(!parent) menu.push(parent = { label: group, children: [] })
+          parent.children.push(option)
+        }
+        return menu
+      },
+
       selectPickedItem: function(key, item) {
+        const measured = this.measuredSetting(key)
+        if(measured) {
+          const id = this.activeFeature.addMeasure(measureReference(item), measureOptions(item)[0].key)
+          this.$refs['number-' + measured][0].insertMeasure(id)
+          this.updatePaths()
+          return
+        }
         const setting = this.activeFeature.settings[key]
         const type = setting.type
         // Build reference of requested type from item
@@ -533,7 +617,8 @@
       },
 
       activatePicker: function(key) {
-        const type = this.activeFeature.settings[key].type
+        const measured = this.measuredSetting(key)
+        const type = measured ? 'measure' : this.activeFeature.settings[key].type
         // Show old model state while picker is active
         this.activeFeature.suppressUpdate = true
         if(this.activeFeature.isComplete()) this.update() // Don't regenerate for fresh features
@@ -542,7 +627,15 @@
         this.bus.featurePickerActive = type == 'patternInput'
         this.bus.componentPickerActive = type == 'componentRef' || type == 'patternInput'
         this.bus.jointPickerActive = type == 'joint'
+        this.bus.solidPickerActive = type == 'measure'
         this.updatePicker = () => {
+          if(measured) {
+            this.measuringColor = measureColor(this.activeFeature.nextMeasureId())
+            const references = this.activeFeature.usedMeasureIds().map(id => this.activeFeature.resolveMeasure(id).reference)
+            const pickerPos = this.$refs['number-' + measured][0].tapeCenter()
+            this.bus.emit('pick', type, pickerPos, this.measuringColor, acceptsMeasure, references)
+            return
+          }
           const { pickerPos, color } = this.getPickerInfo(key)
           const { references } = this.activeFeature.resolveInputReferences(key)
           this.bus.emit('pick', type, pickerPos, color, item => this.activeFeature.acceptsInput(item), references)
@@ -556,11 +649,13 @@
 
       deactivatePicker: function() {
         this.activePicker = null
+        this.measuringColor = null
         this.updatePicker = null
         this.activeFeature.suppressUpdate = false
         this.bus.featurePickerActive = false
         this.bus.componentPickerActive = false
         this.bus.jointPickerActive = false
+        this.bus.solidPickerActive = false
         this.activateBaseTool()
       },
 
@@ -593,6 +688,15 @@
               })
             }
           }
+          // Picker lines of measures start at their pills
+          const measures = this.refreshMeasures(tree)
+          for(const pill of this.$el.querySelectorAll('[data-measure]')) {
+            const { reference, item } = measures[pill.dataset.measure] || {}
+            const rect = pill.getBoundingClientRect()
+            if(!item || !rect.width) continue
+            const pillPos = { x: rect.left + rect.width / 2, y: rect.bottom }
+            this.bus.emit('show-picker', pillPos, this.getCenter(item, reference), measureColor(pill.dataset.measure))
+          }
           if(this.updatePicker) this.updatePicker()
         })
       },
@@ -608,7 +712,7 @@
           return component
             ? new THREE.Vector3().setFromMatrixPosition(worldTransform(component).multiply(item.frameA))
             : new THREE.Vector3()
-        } else if(item instanceof SketchElement) {
+        } else if(item instanceof SketchElement || item instanceof ProjectedPoint) {
           center = item.center().clone().applyMatrix4(item.sketch.workplane)
         } else {
           center = item.center()
@@ -657,7 +761,7 @@
         const pickersChanged = !shallowEqual(previousPickers, pickerKeys())
         // Options may change the visible fields, so focus the first one again
         this.focusedSetting = null
-        if(this.activePicker && !this.activeFeature.needsPicker(this.activePicker, true)) {
+        if(this.activePicker && !this.pickerAvailable(this.activePicker)) {
           this.cancelPick()
         }
         await this.update()
@@ -712,10 +816,12 @@
           !this.isSketchFeature && // Never reset sketches
           (!shallowEqual(this.activeFeature.getValues(), this.startValues) ||
             !shallowEqual(this.activeFeature.expressions, this.startExpressions) ||
+            !shallowEqual(this.activeFeature.measures, this.startMeasures) ||
             this.activeFeature.visibilities !== this.startVisibilities) // Only if feature actually changed
         ) {
           this.activeFeature.setValues(this.startValues)
           this.activeFeature.expressions = { ...this.startExpressions }
+          this.activeFeature.measures = { ...this.startMeasures }
           this.activeFeature.visibilities = this.startVisibilities
           this.update()
         }

@@ -12,7 +12,7 @@
         :model-value="component.itemTitle(solid.id, `Solid ${index + 1}`)"
         :selected="document.selection.hasId(solid.id)"
         :disabled="component.readOnly"
-        @click="document.selection.handle(solid, bus.isCtrlPressed)"
+        @click="select"
         @rename="document.renameTreeItem(component, solid.id, $event)"
       )
 
@@ -56,6 +56,11 @@
   const isDescendantSelected = computed(() =>
     props.document.selection.items.some(item => item.solid?.id == props.solid.id)
   )
+
+  function select() {
+    if(bus.solidPickerActive) bus.emit('picked', props.solid)
+    else props.document.selection.handle(props.solid, bus.isCtrlPressed)
+  }
 
   function toggleVisibility() {
     props.component.creator.itemsHidden[props.component.sourceItemId(props.solid.id)] = !isHidden.value

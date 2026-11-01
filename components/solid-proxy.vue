@@ -30,7 +30,7 @@
   )
 
   VertexProxy(
-    v-if="projectPoints || (parentActive && pickerType == 'point')"
+    v-if="projectPoints || (parentActive && ['point', 'measure'].includes(pickerType))"
     v-for="vertex in solid.cornerVertices()"
     :key="vertex.tessId"
     :vertex="vertex"

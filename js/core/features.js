@@ -465,9 +465,7 @@ export class PatternFeature extends SolidFeature {
     this.vCount = 1
     this.radialStep = 45
     this.radialCount = 8
-
-    const selected = doc.selection.items.map(item => PatternInputReference.fromItem(item)).filter(Boolean)
-    this.inputs = selected.length ? () => selected : null
+    this.inputs = null
   }
 
   isComplete() {
@@ -663,13 +661,8 @@ export class MirrorFeature extends SolidFeature {
       },
     })
 
+    this.inputs = null
     this.plane = null
-
-    const selected = doc.selection.items
-      .filter(item => this.acceptsInput(item))
-      .map(item => PatternInputReference.fromItem(item))
-      .filter(Boolean)
-    this.inputs = selected.length ? () => selected : null
   }
 
   // Component placements are rigid, so mirrored instances cannot be expressed
@@ -1105,12 +1098,7 @@ export class GroupFeature extends Feature {
     })
     // Assembly relationships belong to an occurrence, not to its shared definition.
     this.componentId = doc.activeComponent.id
-
-    const selected = doc.selection.items
-      .filter(item => item?.typename?.() == 'Component' && this.acceptsInput(item))
-      .filter((item, index, items) => items.findIndex(other => other.id == item.id) == index)
-      .map(component => component.componentReference())
-    this.components = selected.length ? () => selected : null
+    this.components = null
   }
 
   isComplete() {
@@ -2010,7 +1998,6 @@ export class PlaceFeature extends Feature {
 
       const sourceDocument = {
         timeline: dump.timeline,
-        selection: { items: [] },
         top(at) { return this.timeline.tree(at) },
       }
       sourceDocument.activeComponent = dump.timeline.tree(0)

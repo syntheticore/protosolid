@@ -382,7 +382,7 @@ class BoxFeature extends Feature {
 Serialize.register(BoxFeature, 'NamingBoxFixture')
 
 function documentFixture() {
-  const document = { timeline: new Timeline(), selection: { items: [] } }
+  const document = { timeline: new Timeline() }
   document.top = at => document.timeline.tree(at)
   document.activeComponent = document.top()
   return document

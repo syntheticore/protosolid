@@ -268,7 +268,6 @@ test('component pattern inputs create component instances instead of fused bodie
   owner.children.push(source)
   const document = {
     activeComponent: owner,
-    selection: { items: [] },
     timeline: { features: [] },
   }
   const pattern = new PatternFeature(document)

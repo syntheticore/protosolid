@@ -9,6 +9,14 @@ export async function loadFile(filetype, datatype, path) {
   }
 }
 
+export async function loadFiles(filetype, datatype) {
+  if(window.ipc) {
+    return loadFilesElectron(filetype, datatype)
+  } else {
+    return loadFilesWeb(filetype, datatype)
+  }
+}
+
 export async function saveFile(data, filetype, path, title) {
   if(window.ipc) {
     return saveFileElectron(data, filetype, path)
@@ -50,6 +58,12 @@ async function loadFileElectron(filetype, datatype, path) {
   return {data, path}
 }
 
+async function loadFilesElectron(filetype, datatype) {
+  const paths = await window.ipc.invoke('get-load-path', filetype, true)
+  if(!paths.length) throw 'canceled'
+  return Promise.all(paths.map(path => loadFileElectron(filetype, datatype, path)))
+}
+
 function loadImageDimensions(src) {
   return new Promise((resolve, reject) => {
     const img = document.createElement('img')
@@ -71,39 +85,49 @@ async function saveFileElectron(data, filetype, path) {
 
 // Web
 function loadFileWeb(filetype, datatype) {
+  return loadFilesWeb(filetype, datatype, false).then(files => files[0])
+}
+
+function loadFilesWeb(filetype, datatype, multiple = true) {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = filetype
+    input.multiple = multiple
     document.body.appendChild(input)
     input.addEventListener('change', (event) => {
       document.body.removeChild(input)
-      const file = event.target.files[0]
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        if(datatype == 'dataUrl') {
-          const img = document.createElement('img')
-          img.onload = () => resolve({
-              data: e.target.result,
-              path: file.name,
-              width: img.naturalWidth,
-              height: img.naturalHeight,
-            })
-          img.src = e.target.result
-        } else if(datatype == 'binary') {
-          resolve({ data: new Uint8Array(e.target.result), path: file.name })
-        } else {
-          resolve({ data: e.target.result, path: file.name })
-        }
-      }
-      const read = {
-        text: reader.readAsText.bind(reader),
-        dataUrl: reader.readAsDataURL.bind(reader),
-        binary: reader.readAsArrayBuffer.bind(reader),
-      }[datatype]
-      read(file)
+      resolve(Promise.all([...event.target.files].map(file => readFileWeb(file, datatype))))
     }, false)
     input.click()
+  })
+}
+
+function readFileWeb(file, datatype) {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      if(datatype == 'dataUrl') {
+        const img = document.createElement('img')
+        img.onload = () => resolve({
+            data: e.target.result,
+            path: file.name,
+            width: img.naturalWidth,
+            height: img.naturalHeight,
+          })
+        img.src = e.target.result
+      } else if(datatype == 'binary') {
+        resolve({ data: new Uint8Array(e.target.result), path: file.name })
+      } else {
+        resolve({ data: e.target.result, path: file.name })
+      }
+    }
+    const read = {
+      text: reader.readAsText.bind(reader),
+      dataUrl: reader.readAsDataURL.bind(reader),
+      binary: reader.readAsArrayBuffer.bind(reader),
+    }[datatype]
+    read(file)
   })
 }
 

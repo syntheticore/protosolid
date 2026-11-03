@@ -83,7 +83,7 @@
   } from './js/preferences.js'
   import Document from './js/core/document.js'
   import { stepFiletype } from './js/core/features.js'
-  import { loadFile } from './js/utils.js'
+  import { loadFile, loadFiles } from './js/utils.js'
   import Emitter from './js/emitter.js'
   import { ManipulationTool } from './js/tools.js'
 
@@ -275,21 +275,37 @@
     await activateDocument(doc)
   }
 
-  // Without a path, the user chooses a file
-  function loadDocument(path) {
+  // Without a path, the user chooses one or more files, each opening in its own tab
+  async function loadDocument(path) {
     if(documentBusy.value) return
-    const openDocument = path && documents.value.find(doc => doc.filePath == path)
-    if(openDocument) return activateDocument(openDocument)
+    if(path) return openDocument(path)
+    let files
+    try {
+      files = await loadFiles('.cad', 'binary')
+    } catch(error) {
+      if(error == 'canceled') return
+      throw error
+    }
+    for(const file of files) await openDocument(file.path, file)
+  }
+
+  async function openDocument(path, file) {
+    const openedDocument = documents.value.find(doc => doc.filePath == path)
+    if(openedDocument) return activateDocument(openedDocument)
     const doc = new Document(bus)
-    doc.load(path).then(async () => {
-      // Close untouched documents on load
-      const previousDocument = activeDocument.value
-      documents.value.push(doc)
-      await activateDocument(doc)
-      if(previousDocument.isFresh) deleteDocument(previousDocument)
-      doc.treeletsExpandedByDefault = true
-      bus.emit('zoom-all')
-    })
+    // Load failures are reported by the document, remaining files still open
+    try {
+      await doc.load(path, file)
+    } catch(error) {
+      return
+    }
+    // Close untouched documents on load
+    const previousDocument = activeDocument.value
+    documents.value.push(doc)
+    await activateDocument(doc)
+    if(previousDocument.isFresh) deleteDocument(previousDocument)
+    doc.treeletsExpandedByDefault = true
+    bus.emit('zoom-all')
   }
 
   function saveDocument() {

@@ -982,13 +982,13 @@ export default class Document extends Emitter {
     }
   }
 
-  async load(path) {
-    let file
+  // An already loaded file skips reading from path
+  async load(path, file) {
     let dump
     let repository
     const materials = []
     try {
-      file = await loadFile('.cad', 'binary', path)
+      file = file || await loadFile('.cad', 'binary', path)
       const contents = readDocumentFile(await decodeFile(file.data))
       repository = contents.repository
       dump = Serialize.deserialize(contents.content, { document: this, sketches: {}, materials })

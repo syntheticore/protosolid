@@ -543,19 +543,20 @@ ipcMain.handle('get-save-path', (e, format, title) => {
 })
 
 // All extensions open as one file type, named after the first.
-ipcMain.handle('get-load-path', (e, format) => {
+// With multiple, all chosen paths are returned as an array.
+ipcMain.handle('get-load-path', (e, format, multiple) => {
   const isImage = format.toLowerCase() == 'image/*'
   const name = isImage ? 'Image Files' : formatName(formatExtensions(format)[0])
   const extensions = isImage
     ? ['avif', 'bmp', 'gif', 'ico', 'jpeg', 'jpg', 'png', 'svg', 'webp']
     : formatExtensions(format)
   return dialog.showOpenDialog({
-    properties: ['openFile'],
+    properties: multiple ? ['openFile', 'multiSelections'] : ['openFile'],
     filters: [
       { name, extensions },
       { name: 'All Files', extensions: ['*'] },
     ]
-  }).then(e => e.filePaths[0] )
+  }).then(e => multiple ? e.filePaths : e.filePaths[0] )
 })
 
 ipcMain.handle('save-file', (e, path, data, encoding) => {

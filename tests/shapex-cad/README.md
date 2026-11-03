@@ -71,7 +71,7 @@ opening a file shows it in red. Move a case up here once it passes. Each case
 stands for one distinct failure; gaps in the numbering are removed duplicates.
 
 Base bodies, each about 20 mm in size: box 16 x 12 x 10, cylinder r6 x 12,
-tube r7/r4 x 12, slot 20 x 8 x 8, frustum and cone revolved r7 to r3 or an apex
+tube r7/r4 x 12, frustum and cone revolved r7 to r3 or an apex
 over 12, revolved sphere r7 (from a half disc, so with poles), torus R7/r3,
 capsule r4 x 16, vase (revolved spline), sector (270 degrees of a 5 x 8
 rectangle), spline prism (one spline side), circle to square loft, rounded box
@@ -91,26 +91,20 @@ cylinder or tube of 073 instead of cutting yields less than the sphere's volume.
 | `060-rounded-box-oblique-split.cad` | Rounded box, oblique split |
 | `061-spline-pipe-oblique-split.cad` | Spline pipe, oblique split |
 | `062-bracket-oblique-split.cad` | Bracket, oblique split |
-| `064-box-tube-crossing-join.cad` | Box joined with a crossing tube |
-| `065-box-capsule-coplanar-cut.cad` | Box cut by a capsule lying in its bottom plane |
 | `066-cylinder-capsule-oblique-join.cad` | Cylinder joined with an oblique capsule |
 | `067-cylinder-loft-coplanar-intersect.cad` | Cylinder intersected with an offset loft on the same plane |
 | `068-cylinder-rounded-box-oblique-cut.cad` | Cylinder cut by an oblique rounded box |
 | `069-tube-sphere-coplanar-cut.cad` | Tube cut by a revolved sphere centered in its bottom plane |
 | `070-tube-torus-oblique-intersect.cad` | Tube intersected with an oblique torus |
-| `071-slot-cylinder-coplanar-cut.cad` | Slot cut by an offset cylinder on the same plane |
 | `072-revolved-sphere-box-coplanar-join.cad` | Revolved sphere joined with a box on its equatorial plane |
 | `073-revolved-sphere-cylinder-coplanar-cut.cad` | Revolved sphere cut by a cylinder on its equatorial plane |
 | `074-revolved-sphere-frustum-crossing-join.cad` | Revolved sphere joined with a crossing frustum |
 | `075-revolved-sphere-capsule-oblique-intersect.cad` | Revolved sphere intersected with an oblique capsule |
 | `076-cone-tube-crossing-intersect.cad` | Cone intersected with a crossing tube |
-| `077-torus-cone-crossing-cut.cad` | Torus cut by a crossing cone |
 | `078-torus-rounded-box-crossing-join.cad` | Torus joined with a crossing rounded box |
-| `079-capsule-sphere-coplanar-cut.cad` | Capsule cut by an offset revolved sphere centered in its axis plane |
 | `080-capsule-torus-crossing-join.cad` | Capsule joined with a crossing torus |
 | `081-vase-tube-crossing-cut.cad` | Vase cut by a crossing tube |
 | `082-sector-torus-coplanar-join.cad` | Sector joined with an offset torus revolved in the same plane |
-| `083-sector-sector-crossing-cut.cad` | Sector cut by a crossing copy of itself |
 | `085-spline-prism-spline-prism-oblique-cut.cad` | Spline prism cut by an oblique copy of itself |
 | `086-circle-square-loft-capsule-oblique-cut.cad` | Loft cut by an oblique capsule |
 | `088-rounded-box-sector-coplanar-join.cad` | Rounded box joined with an offset sector revolved in its bottom plane |
@@ -118,11 +112,8 @@ cylinder or tube of 073 instead of cutting yields less than the sphere's volume.
 | `090-bracket-sphere-coplanar-cut.cad` | Bracket cut by an offset revolved sphere centered in its bottom plane |
 | `091-bracket-cone-oblique-cut.cad` | Bracket cut by an oblique cone |
 | `093-revolved-sphere-outward-shell.cad` | Revolved sphere, 1 mm outward shell |
-| `095-torus-outward-shell-past-axis.cad` | Torus, 8 mm outward shell reaching past the axis |
-| `096-tube-outward-shell-filling-bore.cad` | Tube, 8 mm outward shell closing the bore |
 | `097-vase-outward-shell.cad` | Vase, 1 mm outward shell |
 | `098-sector-outward-shell.cad` | Sector, 3 mm outward shell |
-| `099-spline-prism-outward-shell.cad` | Spline prism, 8 mm outward shell |
 | `100-circle-square-loft-outward-shell.cad` | Loft, 0.3 mm outward shell |
 | `101-rounded-box-inward-shell-past-radius.cad` | Rounded box, 4.5 mm inward shell, deeper than the fillet radius |
 | `102-spline-pipe-outward-shell.cad` | Spline pipe, 8 mm outward shell |

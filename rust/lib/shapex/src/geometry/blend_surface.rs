@@ -257,6 +257,22 @@ impl EdgeBlendSurface3 {
         self.center_range
     }
 
+    pub(super) fn quintic_section(&self, line: &Line2, range: ParameterRange) -> KernelResult<Option<NurbsCurve3>> {
+        if !self.curvature_continuous || line.direction().x != 0.0 {
+            return Ok(None);
+        }
+        let u = self.center_parameter(line.origin().x);
+        let controls = self.section(u)?.curvature.unwrap();
+        let a = range.start.min(range.end);
+        let b = range.start.max(range.end);
+        let v = |t| line.origin().y + line.direction().y * t;
+        let homogeneous = controls.map(|point| Vec4::new(point.x, point.y, point.z, 1.0));
+        let controls = super::nurbs::bezier_controls_on_interval(&homogeneous, v(a), v(b));
+        let knots = [vec![a; 6], vec![b; 6]].concat();
+        Ok(Some(NurbsCurve3::new(5, controls.iter().map(|point| Point3::from_vec(point.truncate()))
+            .collect(), vec![1.0; 6], knots)?))
+    }
+
     pub fn radius(&self) -> f64 {
         self.radius
     }

@@ -409,6 +409,56 @@ impl Transaction<'_> {
         let midpoint = sample.point;
         let BlendSide { concave, cusp_inward, support_normals } =
             self.blend_side(&edge, uses, faces, &parent_surfaces, sample)?;
+        if let (true, [Surface3::Cylinder(first), Surface3::Cylinder(second)],
+            Some(settings), Curve3::SurfaceIntersection(intersection)) =
+            (edge.vertices[0] == edge.vertices[1], &parent_surfaces, chamfer, &edge.curve)
+        {
+            let same_order = intersection.first_surface() == &parent_surfaces[0]
+                && intersection.second_surface() == &parent_surfaces[1];
+            let opposite_order = intersection.first_surface() == &parent_surfaces[1]
+                && intersection.second_surface() == &parent_surfaces[0];
+            if let ChamferMode::TwoDistances(second_distance) = settings.mode {
+                if same_order || opposite_order {
+                    let reference = settings.reference_faces.get(&edge.name)
+                        .ok_or_else(|| invalid("chamfer edge has no reference face"))?;
+                    let distances = if self.working.face(faces[0])?.name == *reference {
+                        [size, second_distance]
+                    } else if self.working.face(faces[1])?.name == *reference {
+                        [second_distance, size]
+                    } else {
+                        return Err(invalid("chamfer reference face must border its edge"));
+                    };
+                    let mut pcurves = intersection.exact_pcurves();
+                    if opposite_order { pcurves.swap(0, 1); }
+                    let [first_pcurve, second_pcurve] = pcurves;
+                    let source = SurfaceSurfaceCurve {
+                        curve: edge.curve.clone(),
+                        first_pcurve,
+                        second_pcurve,
+                        achieved_error: intersection.achieved_error(),
+                    };
+                    let mut center = closed_blend_chart(&source, &edge, tolerance)?;
+                    let rail = |side: usize, base: Curve2, cylinder: &crate::Cylinder3| {
+                        let coedge = self.working.coedge(uses[side])?;
+                        let sign = if coedge.forward { 1.0 } else { -1.0 };
+                        let scale = Vec2::new(cylinder.radius(), cylinder.axis().magnitude());
+                        let distance = distances[side] * sign * self.working.face(faces[side])?.orientation.sign();
+                        crate::OffsetCurve2::with_scale(base, distance, scale).map(Into::into)
+                    };
+                    // Constant setbacks on cylindrical faces are parallel
+                    // curves on their exact developed charts.
+                    center.first_pcurve = rail(0, center.first_pcurve, first)?;
+                    center.second_pcurve = rail(1, center.second_pcurve, second)?;
+                    return Ok(BlendSpine {
+                        edge_id, edge, uses, faces, parent_surfaces, concave,
+                        offset: size.max(second_distance), offsets: distances, center,
+                        endpoint_seeds: [0.0, 1.0],
+                        provisional_range: ParameterRange::new(-1.0, 2.0)?,
+                        shared_seam: None, local_guide: true,
+                    });
+                }
+            }
+        }
         // Equal setbacks on planar supports correspond to r = d cot(theta/2),
         // where theta is the angle between outward normals. Perpendicular rims
         // retain r = d, including plane/cylinder tangent chains.

@@ -632,6 +632,17 @@ export function importedCompound(componentId, geometry, owner) {
   return seedImportTopology(new Compound(componentId, geometry), owner)
 }
 
+export function chamferReferenceFaces(edges, flipSides) {
+  const pairs = edges.map(edge => edge.connectedFaces().sort((a, b) => a.id.localeCompare(b.id)))
+  const firstPair = pairs[0]
+  // A rim can pass through many wall faces. Keep the setback on its
+  // continuous carrier face consistent across the whole selection.
+  const carrier = firstPair?.find(face => pairs.every(pair => pair.some(other => other.id === face.id)))
+  if (!carrier) return pairs.map(pair => pair[flipSides ? 1 : 0])
+  const useCarrier = firstPair[flipSides ? 1 : 0].id === carrier.id
+  return pairs.map(pair => pair.find(face => (face.id === carrier.id) === useCarrier))
+}
+
 export class Compound extends Volumetric {
   constructor(componentId, geometry) {
     super()
@@ -747,7 +758,7 @@ export class Compound extends Volumetric {
     flipSides = false,
     followTangentEdges = true
   } = {}) {
-    const referenceFaces = type == 'equal' ? [] : edges.map(edge => edge.connectedFaces().sort((a, b) => a.id.localeCompare(b.id))[flipSides ? 1 : 0].geom())
+    const referenceFaces = type == 'equal' ? [] : chamferReferenceFaces(edges, flipSides).map(face => face.geom())
     const geometry = this.geom().chamfer(edges.map(edge => edge.geom()), distance, followTangentEdges, {
       type,
       referenceFaces,

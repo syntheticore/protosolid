@@ -638,22 +638,38 @@ impl Transaction<'_> {
                                 )?;
                                 let start = guide.evaluate(0.0)?.point;
                                 let direction = (guide.evaluate(1.0)?.point - start) / unit.span();
-                                let guide =
+                                let guide: Curve2 =
                                     Line2::new(start - direction * unit.start, direction)?.into();
-                                let projected: Curve2 = SurfaceProjectionPcurve2::new(
-                                    retained.curve.clone(),
-                                    patch.blend_surface.clone(),
-                                    guide,
-                                    unit,
-                                    tolerance,
-                                )?
-                                .into();
-                                super::super::features::exact_pcurve(
-                                    &retained.curve,
-                                    &patch.blend_surface,
-                                    &projected,
-                                    tolerance,
-                                )?
+                                let exact_section = if let (Surface3::Blend(_), Curve3::Nurbs(retained_curve)) =
+                                    (&patch.blend_surface, &retained.curve)
+                                {
+                                    // Matching Bernstein polygons certify the
+                                    // isoparametric seam on both blend charts.
+                                    matches!(patch.blend_surface.boundary_curve(guide.clone(), unit, tolerance)?,
+                                        Curve3::Nurbs(candidate)
+                                            if candidate.degree() == retained_curve.degree()
+                                                && candidate.knots() == retained_curve.knots()
+                                                && candidate.weights() == retained_curve.weights()
+                                                && candidate.control_points().iter().zip(retained_curve.control_points())
+                                                    .all(|(a, b)| a.distance(*b) <= tolerance.linear * 0.5))
+                                } else { false };
+                                if exact_section {
+                                    guide
+                                } else {
+                                    let projected: Curve2 = SurfaceProjectionPcurve2::new(
+                                        retained.curve.clone(),
+                                        patch.blend_surface.clone(),
+                                        guide,
+                                        unit,
+                                        tolerance,
+                                    )?.into();
+                                    super::super::features::exact_pcurve(
+                                        &retained.curve,
+                                        &patch.blend_surface,
+                                        &projected,
+                                        tolerance,
+                                    )?
+                                }
                             };
                             (edge, same_direction, pcurve)
                         } else {

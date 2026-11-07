@@ -3,7 +3,7 @@ import { markRaw, toRaw } from 'vue'
 
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
-import { Compound, importedCompound } from './geom3d.js'
+import { Compound, chamferReferenceFaces, importedCompound } from './geom3d.js'
 import { shapex, modelTolerance, matrixFromTransform } from './shapex.js'
 import { PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
@@ -3146,10 +3146,11 @@ export class ChamferFeature extends SolidFeature {
   }
 
   getGizmo() {
-    const edge = this.inputItems('edges').at(-1)
+    const edges = this.inputItems('edges')
+    const edge = edges.at(-1)
     if(!edge) return {}
     const faces = edge.connectedFaces().sort((a, b) => a.id.localeCompare(b.id))
-    if(this.chamferType != 'equal' && this.flipSides) faces.reverse()
+    if(this.chamferType != 'equal' && faces[0].id !== chamferReferenceFaces(edges, this.flipSides).at(-1).id) faces.reverse()
     const points = edge.tesselate().map(point => point.toArray())
     const { center, directions: [first, second] } = edgeGizmoFrame(points, faces.map(face => face.tesselate()))
     const distance = (key, direction) => ({

@@ -384,6 +384,7 @@ impl Curve2 {
 
     pub(crate) fn first_order(&self, parameter: f64) -> KernelResult<(Point2, Vec2)> {
         match self {
+            Self::Offset(curve) => curve.first_order(parameter),
             Self::SurfaceProjection(curve) => curve.first_order(parameter),
             _ => self
                 .evaluate(parameter)
@@ -1054,6 +1055,11 @@ impl Surface3 {
             let origin = line.origin();
             let direction = line.direction();
             match self {
+                Self::Blend(surface) => {
+                    if let Some(section) = surface.quintic_section(line, range)? {
+                        return Ok(section.into());
+                    }
+                }
                 Self::Nurbs(surface) if direction.x == 0.0 || direction.y == 0.0 => {
                     let (axis, constant, origin, rate) = if direction.x == 0.0 {
                         (0, origin.x, origin.y, direction.y)

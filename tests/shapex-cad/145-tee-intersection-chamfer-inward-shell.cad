@@ -1,8 +1,8 @@
 {
-  "lastId": "1050n",
+  "lastId": "1070n",
   "timeline": {
     "$class": "Timeline",
-    "marker": 5,
+    "marker": 6,
     "features": [
       {
         "$class": "CreateSketchFeature",
@@ -225,12 +225,43 @@
               }
             }
           ],
-          "chamferType": "two-distances",
+          "chamferType": "equal",
           "distance": 0.64,
           "distance2": 0.384,
           "angle": 45,
           "flipSides": false,
           "propagation": "tangent"
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "topologyDescriptions": {
+          "id-1050/topology/02316306058f": ["face","chamfer/generated",["id-1006/topology/bdd6824735d7","id-1023/topology/0d7a2d13f4e3","id-1023/topology/524a23759d21","id-1023/topology/d531d806c690"],"id-1050"],
+          "id-1050/topology/eae3a320a4d5": ["face","chamfer/generated",["id-1006/topology/bdd6824735d7"],"id-1050"],
+          "id-1050/topology/5989d872a26a": ["face","chamfer/generated",["id-1023/topology/d531d806c690"],"id-1050"],
+          "id-1050/topology/60b932f14640": ["face","chamfer/generated",["id-1023/topology/0d7a2d13f4e3"],"id-1050"],
+          "id-1050/topology/d17ceb361e2c": ["face","chamfer/generated",["id-1023/topology/524a23759d21"],"id-1050"],
+          "id-1050/topology/e9e77e90df36": ["edge","chamfer/generated",["id-1006/topology/bdd6824735d7","id-1023/topology/0d7a2d13f4e3","id-1023/topology/524a23759d21"],"id-1050"],
+          "id-1050/topology/062aab38c014": ["edge","chamfer/generated",["id-1006/topology/bdd6824735d7"],"id-1050"],
+          "id-1050/topology/aeb4036c629b": ["edge","chamfer/generated",["id-1023/topology/0d7a2d13f4e3"],"id-1050"],
+          "id-1050/topology/a75fa1bff8d9": ["edge","chamfer/generated",["id-1023/topology/524a23759d21"],"id-1050"],
+          "id-1050/topology/8011ce8532ad": ["edge","chamfer/generated",["id-1023/topology/0d7a2d13f4e3","id-1023/topology/524a23759d21","id-1023/topology/d531d806c690"],"id-1050"],
+          "id-1050/topology/bb03a140f56e": ["edge","chamfer/generated",["id-1023/topology/d531d806c690"],"id-1050"],
+          "id-1050/topology/4189869191df": ["edge","chamfer/generated",["id-1023/topology/0d7a2d13f4e3","id-1023/topology/524a23759d21"],"id-1050"]
+        }
+      },
+      {
+        "$class": "ShellFeature",
+        "id": "id-1070",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "faces": null,
+          "thickness": 0.256,
+          "side": false,
+          "joinType": "rounded"
         },
         "expressions": {},
         "measures": {},

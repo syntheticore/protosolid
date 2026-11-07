@@ -581,6 +581,39 @@ impl Transaction<'_> {
     ) -> KernelResult<BlendBoundary> {
         let tolerance = self.kernel.tolerance;
         let unit = ParameterRange::new(0.0, 1.0)?;
+        if let (Surface3::Blend(blend), Surface3::Plane(plane)) = (blend_surface, &terminating_surface) {
+            let u = blend.center_range().middle();
+            if let Some((controls, direction)) = blend.translating_quintic(u)? {
+                let speed = plane.normal().dot(direction);
+                if speed.abs() > tolerance.angular * direction.magnitude() {
+                    // Project the section along its translation direction.
+                    // This affine map takes the entire Bernstein polygon into
+                    // the plane and supplies exact charts on both supports.
+                    let reversed = blend_pcurve.first_order(unit.start)?.0.y
+                        > blend_pcurve.first_order(unit.end)?.0.y;
+                    let section = std::array::from_fn::<_, 6, _>(|index| {
+                        let i = if reversed { 5 - index } else { index };
+                        let point = controls[i];
+                        let shift = plane.normal().dot(plane.origin() - point) / speed;
+                        (point + direction * shift, Point2::new(u + shift, i as f64 / 5.0))
+                    });
+                    if section.iter().all(|(_, uv)| blend.center_range().contains(uv.x, tolerance))
+                        && [section[0].0, section[5].0].into_iter().zip(contact_points).all(|(point, contact)| {
+                            point.distance(contact) <= tolerance.linear_at_scale(point.to_vec().magnitude())
+                        })
+                    {
+                        let knots = [vec![0.0; 6], vec![1.0; 6]].concat();
+                        let curve: Curve3 = crate::NurbsCurve3::new(5, section.map(|(point, _)| point).to_vec(),
+                            vec![1.0; 6], knots.clone())?.into();
+                        let parent_pcurve = plane.flatten_curve(&curve, tolerance)?
+                            .expect("projected section lies on its terminating plane");
+                        let blend_pcurve = crate::NurbsCurve2::new(5, section.map(|(_, uv)| uv).to_vec(),
+                            vec![1.0; 6], knots)?.into();
+                        return Ok(BlendBoundary { curve, parent_pcurve, blend_pcurve, range: unit });
+                    }
+                }
+            }
+        }
         if let Some(boundary) = planar_quintic_miter(blend_surface, &terminating_surface, contact_points, tolerance)? {
             return Ok(boundary);
         }

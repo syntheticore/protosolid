@@ -51,7 +51,15 @@ pub(crate) fn move_faces(
     for face in source.faces() {
         let id = face.topology_id();
         let original_bounds = face_parameter_bounds(topology, id, tolerance)?;
-        let mut surface = extended_support(face.surface(), original_bounds, displacement, tolerance)?;
+        // Transform the source chart before extending it. A sweep's section
+        // frame is anchored at the source rail start, not the extended start.
+        let transformed = if selected.contains(&face.persistent_id()) {
+            Some(crate::transform::transform_surface(face.surface().clone(), transform, tolerance)?)
+        } else {
+            None
+        };
+        let support = transformed.as_ref().unwrap_or_else(|| face.surface());
+        let mut surface = extended_support(support, original_bounds, displacement, tolerance)?;
         if let Surface3::RollingBall(blend) | Surface3::Blend(blend) | Surface3::Ruled(blend) = &surface {
             // Extend only a spine that is too short: an edited support also
             // rebuilds the blend's boundaries with its unchanged neighbors.
@@ -68,9 +76,6 @@ pub(crate) fn move_faces(
                     surface = extended.into();
                 }
             }
-        }
-        if selected.contains(&face.persistent_id()) {
-            surface = crate::transform::transform_surface(surface, transform, tolerance)?;
         }
         let mut face_bounds = expanded_offset_bounds(&surface, original_bounds, displacement, tolerance)?;
         if matches!(surface, Surface3::RollingBall(_) | Surface3::Blend(_)) {
@@ -191,20 +196,27 @@ pub(super) fn tangent_contact(
     tolerance: crate::ModelTolerance,
 ) -> KernelResult<Vec<(FaceId, Point3, crate::Vec3)>> {
     let edge = topology.edge(edge)?;
+    let mut uses = edge.coedges().iter().map(|id| topology.coedge(*id));
+    let (a, b) = (uses.next().unwrap()?, uses.next().unwrap()?);
+    let (first_use, other_use) = if topology.loop_(a.loop_id())?.face() == first {
+        (a, b)
+    } else {
+        (b, a)
+    };
     let first = topology.face(first)?;
     let other = topology.face(second)?;
     let mut contacts = Vec::new();
     // Sample the contact curve, not just a vertex at which two sharp faces
     // could happen to share a normal. Offset and Move use the same criterion.
     for fraction in [0.05, 0.2, 0.35, 0.5, 0.65, 0.8, 0.95] {
-        let point = edge
-            .curve()
-            .evaluate(edge.range().start + edge.range().span() * fraction)?
-            .point;
-        let n = first.oriented_normal_near(point, tolerance)?;
-        if (n - other.oriented_normal_near(point, tolerance)?).magnitude() > tolerance.angular * 8.0 {
+        let parameter = edge.range().start + edge.range().span() * fraction;
+        let a = first_use.pcurve().first_order(parameter)?.0;
+        let b = other_use.pcurve().first_order(parameter)?.0;
+        let n = first.oriented_normal(a.x, a.y)?;
+        if (n - other.oriented_normal(b.x, b.y)?).magnitude() > tolerance.angular * 8.0 {
             return Ok(Vec::new());
         }
+        let point = edge.curve().first_order(parameter)?.0;
         contacts.push((second, point, n));
     }
     Ok(contacts)

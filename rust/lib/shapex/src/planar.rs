@@ -132,19 +132,29 @@ impl Curve2 {
 pub struct OffsetCurve2 {
     base: Box<Curve2>,
     distance: f64,
+    scale: Vec2,
 }
 
 impl OffsetCurve2 {
     pub fn new(base: Curve2, distance: f64) -> KernelResult<Self> {
+        Self::with_scale(base, distance, Vec2::new(1.0, 1.0))
+    }
+
+    // A cylinder develops to a plane with constant, orthogonal chart scales.
+    pub(crate) fn with_scale(base: Curve2, distance: f64, scale: Vec2) -> KernelResult<Self> {
         if !distance.is_finite() {
             return Err(invalid("offset distance must be finite"));
         }
-        if let Curve2::Offset(offset) = base {
-            return Self::new(*offset.base, distance + offset.distance);
-        }
+        let base = match base {
+            Curve2::Offset(offset) if offset.scale == scale => {
+                return Self::with_scale(*offset.base, distance + offset.distance, scale);
+            }
+            base => base,
+        };
         Ok(Self {
             base: Box::new(base),
             distance,
+            scale,
         })
     }
     pub fn base(&self) -> &Curve2 {
@@ -153,24 +163,68 @@ impl OffsetCurve2 {
     pub fn distance(&self) -> f64 {
         self.distance
     }
-    pub(crate) fn evaluate(&self, parameter: f64) -> KernelResult<Curve2Evaluation> {
+    pub(crate) fn scale(&self) -> Vec2 {
+        self.scale
+    }
+
+    fn difference(&self, parameter: f64, f: impl Fn(f64) -> KernelResult<Vec2>) -> KernelResult<Vec2> {
+        let range = match self.base.as_ref() {
+            Curve2::SurfaceIntersection(curve) => curve.range(),
+            Curve2::SurfaceProjection(curve) => curve.range(),
+            _ => unreachable!("finite differences are used for implicit offset bases"),
+        };
+        let step = range.span().abs() * 1.0e-5;
+        let (mut low, mut high) = (parameter - step, parameter + step);
+        if let crate::DomainBounds::Bounded(domain) = self.base.domain().bounds {
+            low = low.max(domain.start.min(domain.end));
+            high = high.min(domain.start.max(domain.end));
+        }
+        Ok((f(high)? - f(low)?) / (high - low))
+    }
+
+    fn basis(&self, parameter: f64) -> KernelResult<(Point2, Vec2, Vec2)> {
         let value = self.base.evaluate(parameter)?;
-        let v = value.first_derivative;
-        let a = value.second_derivative;
+        let acceleration = if matches!(self.base.as_ref(), Curve2::SurfaceIntersection(_)) {
+            self.difference(parameter, |t| self.base.first_order(t).map(|(_, v)| v))?
+        } else {
+            value.second_derivative
+        };
+        Ok((value.point, value.first_derivative.mul_element_wise(self.scale),
+            acceleration.mul_element_wise(self.scale)))
+    }
+
+    pub(crate) fn first_order(&self, parameter: f64) -> KernelResult<(Point2, Vec2)> {
+        let (point, v, a) = self.basis(parameter)?;
         let speed = v.magnitude();
         if speed == 0.0 {
             return Err(invalid("offset has no normal at a stationary basis point"));
         }
-        let spatial = super::Plane3::xy().lift_curve(&self.base, ModelTolerance::default())?;
-        let third = spatial.third_derivative(parameter)?;
-        let j = Vec2::new(third.x, third.y);
+        let rotate = |v: Vec2| Vec2::new(-v.y, v.x).div_element_wise(self.scale);
+        Ok((point + rotate(v / speed) * self.distance,
+            v.div_element_wise(self.scale)
+                + rotate(a / speed - v * (v.dot(a) / speed.powi(3))) * self.distance))
+    }
+
+    pub(crate) fn evaluate(&self, parameter: f64) -> KernelResult<Curve2Evaluation> {
+        let (point, v, a) = self.basis(parameter)?;
+        let speed = v.magnitude();
+        if speed == 0.0 {
+            return Err(invalid("offset has no normal at a stationary basis point"));
+        }
+        let j = if matches!(self.base.as_ref(), Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_)) {
+            self.difference(parameter, |t| self.basis(t).map(|(_, _, a)| a))?
+        } else {
+            let spatial = super::Plane3::xy().lift_curve(&self.base, ModelTolerance::default())?;
+            let third = spatial.third_derivative(parameter)?;
+            Vec2::new(third.x, third.y).mul_element_wise(self.scale)
+        };
         let alpha = v.dot(a);
         let beta = a.dot(a) + v.dot(j);
-        let rotate = |v: Vec2| Vec2::new(-v.y, v.x);
+        let rotate = |v: Vec2| Vec2::new(-v.y, v.x).div_element_wise(self.scale);
         Ok(Curve2Evaluation {
-            point: value.point + rotate(v / speed) * self.distance,
-            first_derivative: v + rotate(a / speed - v * (alpha / speed.powi(3))) * self.distance,
-            second_derivative: a + rotate(
+            point: point + rotate(v / speed) * self.distance,
+            first_derivative: v.div_element_wise(self.scale) + rotate(a / speed - v * (alpha / speed.powi(3))) * self.distance,
+            second_derivative: a.div_element_wise(self.scale) + rotate(
                 j / speed - a * (2.0 * alpha / speed.powi(3)) - v * (beta / speed.powi(3))
                     + v * (3.0 * alpha * alpha / speed.powi(5)),
             ) * self.distance,

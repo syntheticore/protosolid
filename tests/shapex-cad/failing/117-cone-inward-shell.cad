@@ -1,0 +1,211 @@
+{
+  "lastId": "1042n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 3,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-1005",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-1006",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-1001",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [0,0,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [7,0,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-1002",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [7,0,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [0,12,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-1003",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [0,12,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [0,0,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-1004",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [0,-50,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [0,50,0]
+                }
+              ],
+              "isReference": true
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "RevolveFeature",
+        "id": "id-1014",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "angle",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-1013",
+              "sketchId": "id-1006",
+              "rings": [
+                ["id-1003","id-1001","id-1002"]
+              ]
+            }
+          ],
+          "axis": {
+            "$class": "AxialReference",
+            "item": {
+              "$class": "CurveReference",
+              "componentId": "id-0",
+              "sketchId": "id-1006",
+              "isProjection": false,
+              "itemId": "id-1004",
+              "outputIndex": 0
+            }
+          },
+          "angle": 360,
+          "offset": 0,
+          "fromFace": null,
+          "limitFace": null,
+          "side": true,
+          "operation": "join"
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "topologyDescriptions": {
+          "id-1014/topology/4454978d6314": ["face","profile-side/turn-start",["id-1001"],"id-1014"],
+          "id-1014/topology/2434f6d5351f": ["face","profile-side/turn-end",["id-1001"],"id-1014"],
+          "id-1014/topology/3cb6ede61924": ["face","profile-side/turn-start",["id-1002"],"id-1014"],
+          "id-1014/topology/dc8ffc609dd1": ["face","profile-side/turn-end",["id-1002"],"id-1014"],
+          "id-1014/topology/ac20a6c32c75": ["edge","profile/boundary",["id-1014/topology/2434f6d5351f","id-1014/topology/4454978d6314"],"id-1014"],
+          "id-1014/topology/9642115461a1": ["edge","profile/boundary",["id-1014/topology/4454978d6314"],"id-1014"],
+          "id-1014/topology/e9514d597a13": ["edge","profile/boundary",["id-1014/topology/2434f6d5351f"],"id-1014"],
+          "id-1014/topology/cb24d561c627": ["edge","profile/boundary",["id-1014/topology/3cb6ede61924","id-1014/topology/4454978d6314"],"id-1014"],
+          "id-1014/topology/aee245ae20e7": ["edge","profile/boundary",["id-1014/topology/3cb6ede61924"],"id-1014"],
+          "id-1014/topology/d25be05bfd10": ["edge","profile/boundary",["id-1014/topology/2434f6d5351f","id-1014/topology/dc8ffc609dd1"],"id-1014"],
+          "id-1014/topology/569a30c4cb61": ["edge","profile/boundary",["id-1014/topology/dc8ffc609dd1"],"id-1014"],
+          "id-1014/topology/90acc9e8f1ef": ["edge","profile/boundary",["id-1014/topology/3cb6ede61924","id-1014/topology/dc8ffc609dd1"],"id-1014"],
+          "id-1014/topology/72d3adaeeb9b": ["vertex","profile/boundary",["id-1014/topology/9642115461a1","id-1014/topology/e9514d597a13"],"id-1014"],
+          "id-1014/topology/9f956bd15187": ["vertex","profile/boundary",["id-1014/topology/9642115461a1"],"id-1014"],
+          "id-1014/topology/87b29b37d2d8": ["vertex","profile/boundary",["id-1014/topology/e9514d597a13"],"id-1014"],
+          "id-1014/topology/b8859135231f": ["vertex","profile/boundary",["id-1014/topology/569a30c4cb61","id-1014/topology/9642115461a1","id-1014/topology/aee245ae20e7","id-1014/topology/e9514d597a13"],"id-1014"],
+          "id-1014/topology/eafc6dc85258": ["vertex","profile/boundary",["id-1014/topology/aee245ae20e7"],"id-1014"],
+          "id-1014/topology/362a0bbce9c3": ["vertex","profile/boundary",["id-1014/topology/569a30c4cb61"],"id-1014"],
+          "id-1014/topology/e79d4bef7c29": ["vertex","profile/boundary",["id-1014/topology/569a30c4cb61","id-1014/topology/aee245ae20e7"],"id-1014"],
+          "id-1014/topology/288bcf88621e": ["body","profile/body",["id-1001","id-1002","id-1003"],"id-1014"],
+          "id-1014/topology/56457e105fbd": ["body","profile/body",["id-1003"],"id-1014"],
+          "id-1014/topology/e2c5bf7d4f8d": ["body","profile/body",["id-1001"],"id-1014"],
+          "id-1014/topology/2c83c76fc8de": ["body","profile/body",["id-1002"],"id-1014"]
+        }
+      },
+      {
+        "$class": "ShellFeature",
+        "id": "id-1042",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "faces": null,
+          "thickness": 0.59,
+          "side": false,
+          "joinType": "rounded"
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        }
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "Main Assembly",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-1006": true
+      },
+      "itemNames": {},
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [50,50,40]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [0,0,5]
+      }
+    }
+  ]
+}

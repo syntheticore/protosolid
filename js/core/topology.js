@@ -22,23 +22,36 @@ export function topologyNeighbors(item) {
   return item.cachedTopologyNeighbors
 }
 
-// Branch evidence is evaluated anew at the producer. Named boundary uses
-// come first so selection recipes prefer them over geometric sides.
-export function topologySides(item) {
-  if(item.cachedTopologySides) return item.cachedTopologySides
+// Evaluate branch evidence at the producer. Geometric sides are read only
+// for saved recipes that contain them.
+export function topologySides(item, legacyGeometry = false) {
+  if(!item.cachedTopologySides) {
+    const named = item.topologyKind == 'body' ? bodyEvidence(item) : boundaryEvidence(item)
+    if(item.topology.construction) named.unshift({ frame: 'construction', tags: item.topology.construction })
+    item.cachedTopologySides = named
+  }
+  if(!legacyGeometry) return item.cachedTopologySides
+  return item.cachedLegacyTopologySides ||= [...item.cachedTopologySides, ...geometricSides(item)]
+}
+
+function bodyEvidence(body) {
+  const support = topologySupport(body, body.compound.solids())
+  return support ? [{ frame: 'body', support }] : []
+}
+
+// Older saved recipes include signed geometric sides.
+function geometricSides(item) {
   // A cut can split both faces adjacent to an edge into symmetric branches.
   // Other named faces on the same solid still provide stable support frames.
   const faces = item.topologyKind == 'body' ? item.faces() : item.solid.faces()
   const supportFaces = (item.topologyKind == 'body' ? item.compound : item.solid.compound)
     .solids().flatMap(solid => solid.faces())
-  const named = item.topologyKind == 'body' ? [] : boundaryEvidence(item, supportFaces)
   let points
   try {
     points = sidePoints(item)
   } catch(error) {
     if(!isModelingFailure(error)) throw error
-    // Named boundary evidence remains available without a mesh.
-    return item.cachedTopologySides = named
+    return []
   }
   const constraints = []
   const axes = []
@@ -88,8 +101,7 @@ export function topologySides(item) {
       support: first.support, crossSupport: second.support, frame: 'axes',
     })
   }
-  item.cachedTopologySides = [...named, ...constraints.sort(compareEvidence)]
-  return item.cachedTopologySides
+  return constraints.sort(compareEvidence)
 }
 
 function sidePoints(item) {
@@ -105,48 +117,104 @@ function sidePoints(item) {
 
 const compareEvidence = (a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))
 
-function boundaryEvidence(item, supportFaces) {
+function boundaryEvidence(item) {
   const { solid, topologyKind } = item
+  const siblings = solid.compound.solids()
+  const supportFaces = siblings.flatMap(body => body.faces())
   const faces = new Map(solid.faces().map(face => [face.kernelId, face]))
   const edges = new Map(solid.edges().map(edge => [edge.kernelId, edge]))
-  const evidence = []
-  const body = topologySupport(solid, solid.compound.solids())
-  if(body) evidence.push({ frame: 'body', support: body })
+  const vertices = new Map(solid.vertices().map(vertex => [vertex.kernelId, vertex]))
+  const evidence = bodyEvidence(solid)
   const incident = topologyKind == 'edge' ? [item] :
     topologyKind == 'face' ? item.boundaryEdges() : item.edges()
   for(const edge of incident) {
-    for(const [faceId, previousId, nextId, start] of edge.geom().boundaryUses()) {
+    const [first, last] = edge.vertexIds()
+    if(topologyKind == 'edge') {
+      evidence.push({ frame: 'edge-vertices', ends: [vertices.get(first).topology.anchors,
+        vertices.get(last).topology.anchors].sort(compareEvidence) })
+    } else if(topologyKind == 'vertex') {
+      const opposite = vertices.get(first == item.kernelId ? last : first)
+      evidence.push({ frame: 'vertex-edge', edge: edge.topology.anchors, opposite: opposite.topology.anchors })
+    }
+    for(const [faceId, previousId, nextId, start, winding] of boundaryUses(edge)) {
       const face = faces.get(faceId)
       // Shell traversal reverses with the material side. Use the direction
       // of the supporting chart so flipping an extrusion keeps its corners.
       const reversed = face.geom().orientation() == 'reversed'
       const previous = edges.get(reversed ? nextId : previousId)
       const next = edges.get(reversed ? previousId : nextId)
+      const chartStart = reversed ? (start == first ? last : first) : start
       if(topologyKind == 'face') {
-        if(faceId == item.kernelId) evidence.push({ frame: 'face-boundary', edge: edge.topology.anchors,
-          previous: previous.topology.anchors, next: next.topology.anchors })
+        if(faceId == item.kernelId) {
+          evidence.push({ frame: 'face-boundary', edge: edge.topology.anchors,
+            previous: previous.topology.anchors, next: next.topology.anchors })
+          evidence.push({ frame: 'face-vertex', edge: edge.topology.anchors, vertex: vertices.get(chartStart).topology.anchors })
+        }
         continue
       }
-      const support = topologySupport(face, supportFaces)
-      if(!support) continue
+      const support = topologySupport(face, supportFaces) || face.topology.anchors
+      const run = () => boundaryRun(edge, [faceId, previousId, nextId, start], edges, reversed)
       if(topologyKind == 'edge') {
         evidence.push({ frame: 'boundary', support, previous: previous.topology.anchors, next: next.topology.anchors })
+        if(face.topology.construction) evidence.push({ frame: 'constructed-face', support, tags: face.topology.construction })
+        if(winding.some(turns => turns)) evidence.push({ frame: 'boundary-winding', support,
+          winding: reversed ? winding.map(turns => -turns) : winding })
+        const span = run()
+        if(span) evidence.push({ frame: 'boundary-run', support, ...span })
       } else {
-        const [first, last] = edge.vertexIds()
-        const chartStart = reversed ? (start == first ? last : first) : start
-        if(chartStart == item.kernelId) evidence.push({ frame: 'vertex-boundary', support,
-          incoming: previous.topology.anchors, outgoing: edge.topology.anchors })
+        if(chartStart == item.kernelId) {
+          evidence.push({ frame: 'vertex-boundary', support,
+            incoming: previous.topology.anchors, outgoing: edge.topology.anchors })
+          const span = run()
+          if(span) evidence.push({ frame: 'vertex-run', support, ...span })
+        }
       }
     }
   }
   return evidence.sort(compareEvidence)
 }
 
-function topologySupport(face, supportFaces) {
-  if(face.cachedTopologySupport === undefined) {
-    face.cachedTopologySupport = supportName(face, supportFaces, topologyNeighbors)
+function boundaryUses(edge) {
+  return edge.cachedBoundaryUses ||= edge.geom().boundaryUses()
+}
+
+// A run of repeated arcs can be named by its offset between distinct coedges,
+// such as the two uses of a periodic surface seam.
+function boundaryRun(edge, use, edges, reversed) {
+  const anchors = JSON.stringify(edge.topology.anchors)
+  const endpoint = (current, start) => current.vertexIds().find(id => id != start) || start
+  const walk = direction => {
+    let current = edge, currentUse = use
+    const seen = new Set([current])
+    while(true) {
+      const [faceId, previous, next, start] = currentUse
+      const adjacent = edges.get(direction == 1 ? next : previous)
+      if(JSON.stringify(adjacent.topology.anchors) != anchors) {
+        return { edge: adjacent.topology.anchors, offset: seen.size - 1 }
+      }
+      if(seen.has(adjacent)) return
+      const uses = boundaryUses(adjacent).filter(([face, before, after, vertex]) =>
+        face == faceId && (direction == 1 ?
+          before == current.kernelId && vertex == endpoint(current, start) :
+          after == current.kernelId && endpoint(adjacent, vertex) == start))
+      if(uses.length != 1) return
+      seen.add(adjacent)
+      current = adjacent
+      currentUse = uses[0]
+    }
   }
-  return face.cachedTopologySupport
+  const before = walk(reversed ? 1 : -1)
+  const after = walk(reversed ? -1 : 1)
+  if(before && after && (before.offset || after.offset)) {
+    return { before, after, edge: edge.topology.anchors }
+  }
+}
+
+function topologySupport(item, candidates) {
+  if(item.cachedTopologySupport === undefined) {
+    item.cachedTopologySupport = supportName(item, candidates, topologyNeighbors)
+  }
+  return item.cachedTopologySupport
 }
 
 export function identifyTopology(compound) {

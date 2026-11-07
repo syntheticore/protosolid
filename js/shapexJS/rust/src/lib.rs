@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use shapex::{
     Axis3, BooleanKind, Circle2, Curve2, Curve3, Line2, NurbsCurve2, Origin, ParameterRange,
     RigidTransform3, Surface3, SurfaceChart,
-    ChamferMode, Compound, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
+    ChamferMode, Compound, ConstructionBranch, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
     ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, ShellJoin, Solid, SplitKeep,
     StepAssembly, StepLengthUnit, StepOccurrence, StepProduct,
     TessellationOptions, TriangleMesh, TrimmedCurve2, TrimmedCurve3, Vec2, Vec3, VertexHandle, Wire2, Wire3,
@@ -823,7 +823,9 @@ impl NativeEdge {
     #[wasm_bindgen(js_name = boundaryUses)]
     pub fn boundary_uses(&self) -> Result<JsValue, JsValue> {
         let uses = self.inner.boundary_uses().map_err(js_error)?
-            .into_iter().map(|ids| ids.map(id_string)).collect::<Vec<_>>();
+            .into_iter().map(|([face, previous, next, start], winding)|
+                (id_string(face), id_string(previous), id_string(next), id_string(start), winding))
+            .collect::<Vec<_>>();
         JSON::parse(&serde_json::json!(uses).to_string())
     }
 
@@ -1175,6 +1177,11 @@ fn creation_role(role: &CreationRole) -> NativeCreationRole {
                 SurfaceChart::SectionNegative => "section-negative",
             }.to_owned()),
         },
+        CreationRole::RevolutionMeridian { generator, half_turn, endpoint } => NativeCreationRole {
+            kind: "revolution-meridian".into(), boundary: None, hole_index: None, segment: None,
+            part: *endpoint, generators: vec![*generator],
+            chart: Some(if *half_turn { "half-turn" } else { "start" }.into()),
+        },
         CreationRole::ShellSource | CreationRole::ShellOffset | CreationRole::ShellRim => NativeCreationRole {
             kind: match role {
                 CreationRole::ShellSource => "shell-source",
@@ -1246,12 +1253,31 @@ impl NativeCompound {
                     "operation": role.to_string(), "sources": sources.iter().map(|id| id_string(*id)).collect::<Vec<_>>() }),
             }
         }).collect::<Vec<_>>();
-        let construction_roles = self.inner.faces().map(|face| {
-            (id_string(face.persistent_id()), self.inner.creation_roles(face).iter()
-                .map(creation_role).collect::<Vec<_>>())
+        let roles = |roles: Vec<CreationRole>| roles.iter().map(creation_role).collect::<Vec<_>>();
+        let construction_roles = self.inner.faces().map(|face|
+            (id_string(face.persistent_id()), roles(self.inner.creation_roles(face))))
+            .chain(self.inner.edges().filter_map(|edge| {
+                let roles = roles(self.inner.creation_roles(edge));
+                (!roles.is_empty()).then(|| (id_string(edge.persistent_id()), roles))
+            }))
+            .chain(self.inner.vertices().filter_map(|vertex| {
+                let roles = roles(self.inner.creation_roles(vertex));
+                (!roles.is_empty()).then(|| (id_string(vertex.persistent_id()), roles))
+            }))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let construction_tags = history.construction_tags().iter().map(|(output, tags)| {
+            let tags = tags.iter().map(|tag| {
+                let (role, quarter) = match tag.branch {
+                    ConstructionBranch::BlendSpan(quarter) => ("blend-span", Some(quarter)),
+                    ConstructionBranch::BlendJunction(quarter) => ("blend-junction", Some(quarter)),
+                    ConstructionBranch::ShellCorner => ("shell-corner", None),
+                };
+                serde_json::json!({ "source": id_string(tag.source), "role": role, "quarter": quarter })
+            }).collect::<Vec<_>>();
+            (id_string(*output), tags)
         }).collect::<std::collections::BTreeMap<_, _>>();
         serde_json::json!({ "changes": changes, "origins": origins,
-            "constructionRoles": construction_roles }).to_string()
+            "constructionRoles": construction_roles, "constructionTags": construction_tags }).to_string()
     }
     pub fn volume(&self) -> f64 {
         self.inner.volume()

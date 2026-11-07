@@ -79,7 +79,8 @@ pub use geometry::{
     SurfaceProjectionPcurve2, Torus3,
 };
 pub use history::{
-    BlendRole, ChangeKind, CreationRole, DerivationRole, OperationHistory, Origin,
+    BlendRole, ChangeKind, ConstructionBranch, ConstructionTag, CreationRole, DerivationRole,
+    OperationHistory, Origin,
     ProfileBoundary, SurfaceChart,
 };
 pub use intersection::{

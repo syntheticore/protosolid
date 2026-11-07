@@ -17,6 +17,8 @@ const ancestry = sources => unique(sources.flatMap(source =>
 
 export class TopologySelectionError extends Error {}
 
+const geometricFrames = new Set(['plane', 'axis', 'cylinder', 'axes'])
+
 export function topologyIncludesFeature(topology, feature) {
   return topology.origin.feature?.id == feature.id ||
     [topology.identity, ...topology.ancestors].some(name => name.startsWith(`${feature.id}/topology/`)) ||
@@ -73,6 +75,7 @@ function inherit(item, sources, oneToOne) {
   const identities = unique(sources.map(source => source.topology.identity))
   const identity = identities.length == 1 ? identities[0] :
     topologyIdentity(item.topologyKind, 'merged', identities)
+  const construction = unique(sources.flatMap(source => source.topology.construction || []))
   item.topology = Object.freeze({
     kind: item.topologyKind,
     identity,
@@ -85,6 +88,7 @@ function inherit(item, sources, oneToOne) {
     ancestors: Object.freeze(ancestry(sources)),
     names: oneToOne ? sources[0].topology.names :
       unique([identity, ...sources.flatMap(source => source.topology.names)]),
+    ...(construction.length ? { construction } : {}),
   })
 }
 
@@ -98,6 +102,7 @@ function nameBranch(item, role, sources) {
   item.topology = Object.freeze({ ...item.topology,
     names: unique([...item.topology.names, ...inherited.names]),
     ancestors: inherited.ancestors,
+    ...(inherited.construction ? { construction: inherited.construction } : {}),
   })
 }
 
@@ -200,24 +205,36 @@ function incidenceContexts(neighbors) {
   }
 }
 
-// Name a face that can frame oriented side constraints. Its anchors suffice
-// when unique; split siblings also need their distinguishing incidence paths.
-// Mirror-symmetric siblings that incidence cannot separate are not supports.
+// Name a support face or body. Its anchors suffice when unique. Split
+// siblings also need distinguishing incidence paths.
 export function supportName(item, candidates, neighbors) {
   const siblings = candidates.filter(candidate =>
     item.topology.anchors.every(name => candidate.topology.names.includes(name)))
   if(siblings.length == 1) return item.topology.anchors
   const contextFor = incidenceContexts(neighbors)
+  const excludes = []
   const distinguishes = branch => siblings.filter(sibling =>
-    branch.every(path => contextFor(sibling).has(path))).length == 1
+    branch.every(path => contextFor(sibling).has(path)) &&
+    excludes.every(path => !contextFor(sibling).has(path))).length == 1
   const branch = incidencePaths(item, neighbors).filter(path =>
     siblings.some(sibling => !contextFor(sibling).has(path)))
+  if(!distinguishes(branch) && item.topology.kind == 'body') {
+    // A component can carry a subset of a sibling's construction paths.
+    // Use named boundaries on the siblings as witnesses for that complement.
+    const paths = siblings.flatMap(sibling => incidencePaths(sibling, neighbors))
+    excludes.push(...unique(paths.map(path => JSON.stringify(path)))
+      .map(path => JSON.parse(path)).filter(path => !contextFor(item).has(path)))
+  }
   if(!distinguishes(branch)) return null
   for(let i = branch.length - 1; i >= 0; i--) {
     const [path] = branch.splice(i, 1)
     if(!distinguishes(branch)) branch.splice(i, 0, path)
   }
-  return { anchors: item.topology.anchors, branch }
+  for(let i = excludes.length - 1; i >= 0; i--) {
+    const [path] = excludes.splice(i, 1)
+    if(!distinguishes(branch)) excludes.splice(i, 0, path)
+  }
+  return { anchors: item.topology.anchors, branch, ...(excludes.length ? { excludes } : {}) }
 }
 
 export function topologySelection(item, neighbors, policy = 'single') {
@@ -287,9 +304,10 @@ export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
       contexts.some(context => !context.has(path))) : []
     const resolution = resolveRecipe(items, recipe, contextFor, sides)
     origin.recipe = recipe
-    origin.selectable = !!origin.feature && resolution.status == 'resolved' && resolution.items[0] === item
+    origin.incidenceResolves = !!origin.feature && resolution.status == 'resolved' && resolution.items[0] === item
     // Retain the producer's evidence for picks made after later modifiers.
-    origin.pickRecipe = () => {
+    origin.branchRecipe = () => {
+      if(!origin.feature) return null
       const constraints = sides(item)
       const captured = { ...recipe, sides: [...constraints] }
       const pickContext = incidenceContexts(neighbors)
@@ -297,18 +315,15 @@ export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
         const result = resolveRecipe(items, captured, pickContext, sides)
         return result.status == 'resolved' && result.items[0] === item
       }
-      if(!origin.feature || !constraints.length || !resolved()) {
-        throw new TopologySelectionError('The selected topology cannot be distinguished by its construction and boundaries')
-      }
-      // Keep only the evidence needed to identify this cell. In particular,
-      // a bore rim needs its axial side, not unrelated supporting boundaries.
+      if(!constraints.length || !resolved()) return null
+      // Keep only the evidence needed to identify this cell.
       for(let i = captured.sides.length - 1; i >= 0; i--) {
         const [constraint] = captured.sides.splice(i, 1)
         if(!resolved()) captured.sides.splice(i, 0, constraint)
       }
       return captured
     }
-    if(item.topology.kind == 'body' && siblings.length > 1 && origin.selectable) {
+    if(item.topology.kind == 'body' && siblings.length > 1 && origin.incidenceResolves) {
       branches.push(item)
     }
   }
@@ -331,7 +346,7 @@ export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
     for(const [item, matched] of matches) {
       if(matched.length > 1) {
         item.topology = Object.freeze({ ...item.topology,
-          origin: { ...item.topology.origin, selectable: false },
+          origin: { ...item.topology.origin, incidenceResolves: false },
         })
         continue
       }
@@ -346,7 +361,7 @@ export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
         ...item.topology, identity,
         anchors: Object.freeze(unique([...item.topology.anchors, identity])),
         names: unique([...item.topology.names, identity]),
-        origin: { feature, selectable: true },
+        origin: { feature, incidenceResolves: true },
       })
       // A selected branch requires its restored logical identity. Its broad
       // construction ancestry must never bypass an unresolved branch binding.
@@ -360,11 +375,11 @@ export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
 export function captureTopologySelection(item, policy = 'single') {
   const origin = item.topology.origin
   const { feature } = origin
-  if(!origin.selectable && !origin.pickRecipe) {
+  if(!feature) throw new TopologySelectionError('Display-only topology cannot be referenced')
+  const recipe = origin.incidenceResolves ? origin.recipe : origin.branchRecipe?.()
+  if(!recipe) {
     throw new TopologySelectionError('The selected topology cannot be distinguished by its construction and boundaries')
   }
-  const recipe = origin.selectable ? origin.recipe : origin.pickRecipe()
-  if(!feature) throw new TopologySelectionError('Display-only topology cannot be referenced')
   return withTopologyNaming(feature, () => {
     const identity = topologyIdentity(recipe.kind, 'selection', [selectionSource(recipe)])
     feature.topologyNames.selections ||= []
@@ -378,6 +393,7 @@ export function captureTopologySelection(item, policy = 'single') {
 }
 
 function resolveRecipe(items, recipe, contextFor, sides = () => []) {
+  const legacyGeometry = recipe.sides?.some(constraint => geometricFrames.has(constraint.frame))
   const constrained = items.filter(item => {
     if(!matchesSelection(item, recipe)) return false
     if(recipe.branch.length) {
@@ -385,7 +401,7 @@ function resolveRecipe(items, recipe, contextFor, sides = () => []) {
       if(!recipe.branch.every(path => context.has(path))) return false
     }
     return !recipe.sides || recipe.sides.every(constraint =>
-      sides(item).some(side => JSON.stringify(side) == JSON.stringify(constraint)))
+      sides(item, legacyGeometry).some(side => JSON.stringify(side) == JSON.stringify(constraint)))
   })
   return resolveTopologyWithContexts(constrained, recipe, contextFor)
 }

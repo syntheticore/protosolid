@@ -169,6 +169,8 @@ pub enum CreationRole {
     ProfileEnd,
     /// Input section, ring and profile segment supplied to the operation.
     ProfileSide { generators: Vec<[usize; 3]>, chart: Option<SurfaceChart> },
+    /// A meridian of a two-chart revolution, or one of its profile endpoints.
+    RevolutionMeridian { generator: [usize; 3], half_turn: bool, endpoint: Option<usize> },
     ShellSource,
     ShellOffset,
     ShellRim,
@@ -197,6 +199,20 @@ pub enum ProfileBoundary {
     Hole(usize),
 }
 
+/// A landmark in the construction of an output, relative to a named input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ConstructionBranch {
+    BlendSpan(u8),
+    BlendJunction(u8),
+    ShellCorner,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ConstructionTag {
+    pub source: PersistentId,
+    pub branch: ConstructionBranch,
+}
+
 /// Complete provenance emitted by every topology-changing operation.
 #[derive(Debug, Clone, Default)]
 pub struct OperationHistory {
@@ -207,6 +223,7 @@ pub struct OperationHistory {
     // Construction semantics are independent of entity ancestry. In particular,
     // a trimmed cap may derive from a limit face while serving as a profile end.
     pub(crate) construction_roles: BTreeMap<PersistentId, Vec<CreationRole>>,
+    pub(crate) construction_tags: BTreeMap<PersistentId, BTreeSet<ConstructionTag>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -270,6 +287,7 @@ impl OperationHistory {
             origins: self.origins.clone(),
             construction: self.construction.clone(),
             construction_roles: self.construction_roles.clone(),
+            construction_tags: self.construction_tags.clone(),
         }
     }
 
@@ -306,6 +324,17 @@ impl OperationHistory {
     }
     pub fn construction_roles(&self) -> &BTreeMap<PersistentId, Vec<CreationRole>> {
         &self.construction_roles
+    }
+    pub fn construction_tags(&self) -> &BTreeMap<PersistentId, BTreeSet<ConstructionTag>> {
+        &self.construction_tags
+    }
+    pub(crate) fn tag_construction(&mut self, output: PersistentId, tag: ConstructionTag) {
+        self.construction_tags.entry(output).or_default().insert(tag);
+    }
+    pub(crate) fn inherit_construction_tags(&mut self, output: PersistentId, source: PersistentId) {
+        if let Some(tags) = self.construction_tags.get(&source).cloned() {
+            self.construction_tags.entry(output).or_default().extend(tags);
+        }
     }
     pub fn change(&self, input: PersistentId) -> Option<(ChangeKind, &[PersistentId])> {
         self.changes
@@ -391,6 +420,9 @@ impl OperationHistory {
         if let Some(roles) = self.construction_roles.remove(&old) {
             self.construction_roles.insert(new, roles);
         }
+        if let Some(tags) = self.construction_tags.remove(&old) {
+            self.construction_tags.insert(new, tags);
+        }
         if let Some(change) = self.changes.remove(&old) {
             self.changes.insert(new, change);
         }
@@ -417,12 +449,14 @@ impl OperationHistory {
         self.origins.extend(other.origins);
         self.construction.extend(other.construction);
         self.construction_roles.extend(other.construction_roles);
+        self.construction_tags.extend(other.construction_tags);
     }
 
     pub(crate) fn forget_output(&mut self, name: PersistentId) {
         self.origins.remove(&name);
         self.construction.remove(&name);
         self.construction_roles.remove(&name);
+        self.construction_tags.remove(&name);
     }
 
     pub(crate) fn record_construction(
@@ -441,6 +475,9 @@ impl OperationHistory {
     }
 
     pub(crate) fn merge_construction(&mut self, removed: PersistentId, survivor: PersistentId) {
+        if let Some(tags) = self.construction_tags.remove(&removed) {
+            self.construction_tags.entry(survivor).or_default().extend(tags);
+        }
         let removed = self.construction.remove(&removed).unwrap_or_default();
         self.record_construction(survivor, removed);
         if let Some(records) = self.construction.get_mut(&survivor) {

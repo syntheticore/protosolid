@@ -2,7 +2,7 @@
 //! rolling center, and how each spine ends or continues at its vertices.
 
 use super::*;
-use crate::{geometry_error, invalid, topology_error, unsupported};
+use crate::{geometry_error, invalid, topology_error, unsupported, ConstructionBranch, ConstructionTag};
 
 impl Transaction<'_> {
     /// Decide how `spine` ends at its endpoint `endpoint_index`. A spine whose
@@ -214,6 +214,13 @@ impl Transaction<'_> {
 
             let source_name = edge.name;
             let seam = edge.vertices[0];
+            // Label the intervals in the source curve's increasing chart,
+            // even when the stored edge traverses that chart in reverse.
+            let forward = edge.range.span() > 0.0;
+            let seam_name = self.working.vertex(seam)?.name;
+            self.history.tag_construction(seam_name, ConstructionTag {
+                source: source_name, branch: ConstructionBranch::BlendJunction(0),
+            });
             let mut vertices = vec![seam];
             for part in 1..4 {
                 let parameter = edge.range.start + edge.range.span() * part as f64 / 4.0;
@@ -226,6 +233,10 @@ impl Transaction<'_> {
                 ));
                 self.history
                     .derived(name, [source_name], kind.role(BlendRole::PeriodicSplitVertex));
+                let quarter = if forward { part } else { 4 - part };
+                self.history.tag_construction(name, ConstructionTag {
+                    source: source_name, branch: ConstructionBranch::BlendJunction(quarter),
+                });
                 vertices.push(vertex);
             }
             vertices.push(seam);
@@ -245,6 +256,9 @@ impl Transaction<'_> {
                 survivor.coedges.clear();
             }
             let mut arcs = vec![*edge_id];
+            self.history.tag_construction(source_name, ConstructionTag {
+                source: source_name, branch: ConstructionBranch::BlendSpan(if forward { 0 } else { 3 }),
+            });
             for part in 1..4 {
                 let name = self.names.next_derived(kind.role(BlendRole::PeriodicSplitEdge))?;
                 let arc = self.make_edge(
@@ -255,6 +269,10 @@ impl Transaction<'_> {
                 )?;
                 self.history
                     .derived(name, [source_name], kind.role(BlendRole::PeriodicSplitEdge));
+                let quarter = if forward { part } else { 3 - part };
+                self.history.tag_construction(name, ConstructionTag {
+                    source: source_name, branch: ConstructionBranch::BlendSpan(quarter as u8),
+                });
                 arcs.push(arc);
             }
 

@@ -1,11 +1,13 @@
 //! Revolutions and lofts built from exact profile sections. Display triangles
 //! never enter BREP.
 use super::geometry::de_casteljau_split;
-use super::sew::{cap, publish_shells_with_roles, publish_with_roles, BrepPatch, BrepPatchLoop, BrepPatchSegment};
+use super::history::EntitySource;
+use super::sew::{cap, publish_shells_with_roles, publish_with_roles, BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
 use super::*;
 use crate::{Point2, Point3, Vec2, Vec3};
 use cgmath::prelude::*;
 use cgmath::Vector4;
+use std::collections::BTreeMap;
 
 fn range(a: f64, b: f64) -> KernelResult<ParameterRange> {
     ParameterRange::new(a, b)
@@ -134,6 +136,8 @@ pub(super) fn revolve(
     };
     let mut patches = Vec::new();
     let mut roles = Vec::new();
+    let mut boundary_roles = BTreeMap::new();
+    let boundary_namespace = super::identity::fresh_uuid();
     if !full {
         // Radial/axial profile normal points opposite the positive sweep.
         patches.push(cap(&profile, section_plane(low)?, false)?);
@@ -151,10 +155,8 @@ pub(super) fn revolve(
             {
                 continue;
             }
-            let role = |chart| CreationRole::ProfileSide {
-                generators: vec![[0, ring, profile.generator(ring, segment_index)]],
-                chart,
-            };
+            let generator = [0, ring, profile.generator(ring, segment_index)];
+            let role = |chart| CreationRole::ProfileSide { generators: vec![generator], chart };
             if full && matches!(segment.curve(), Curve2::Line(line)
                 if line.direction().y.abs() <= tolerance.linear)
             {
@@ -194,8 +196,21 @@ pub(super) fn revolve(
                     // Both uses of a full turn's seam share one spatial curve.
                     // Their p-curves retain the two sides of the periodic chart.
                     let meridian = if full && !two_poles { 0.0 } else { end };
+                    let mut provenance = SegmentProvenance::default();
+                    if two_poles {
+                        let mut landmark = |endpoint| {
+                            let name = PersistentId { namespace: boundary_namespace, local: boundary_roles.len() as u64 };
+                            boundary_roles.insert(name, CreationRole::RevolutionMeridian {
+                                generator, half_turn: end == middle, endpoint,
+                            });
+                            EntitySource { name, unchanged: false }
+                        };
+                        provenance.edges.push(landmark(None));
+                        provenance.vertices[0].push(landmark(Some(usize::from(t != segment.range().start))));
+                        provenance.vertices[1].push(landmark(Some(usize::from(next_t != segment.range().start))));
+                    }
                     edges.push(BrepPatchSegment {
-                        provenance: Default::default(),
+                        provenance,
                         curve: section_plane(meridian)?.lift_trimmed_curve(segment, tolerance)?,
                         pcurve: Line2::new(Point2::new(end, 0.0), Vec2::unit_y())?.into(),
                         range: range(t, next_t)?,
@@ -225,10 +240,12 @@ pub(super) fn revolve(
         }
     }
     // A complete turn seals each hole into a cavity.
-    if full && !profile.holes().is_empty() {
-        return publish_shells_with_roles(patches, roles, tolerance);
-    }
-    publish_with_roles(patches, roles, tolerance)
+    let compound = if full && !profile.holes().is_empty() {
+        publish_shells_with_roles(patches, roles, tolerance)?
+    } else {
+        publish_with_roles(patches, roles, tolerance)?
+    };
+    Ok(compound.with_patch_roles(&boundary_roles))
 }
 
 /// A radial line sweeps a disk or annulus bounded directly by closed circles.

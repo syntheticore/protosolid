@@ -201,6 +201,7 @@ impl Transaction<'_> {
                         ],
                         kind.role(BlendRole::ContactVertex),
                     );
+                    self.history.inherit_construction_tags(name, self.working.vertex(old_vertex)?.name);
                     contact_vertices.insert(key, vertex);
                 }
                 if let (
@@ -521,6 +522,7 @@ impl Transaction<'_> {
                 ],
                 kind.role(BlendRole::BlendFace),
             );
+            self.history.inherit_construction_tags(blend_face_name, selected_name);
             self.history
                 .derived(blend_loop_name, [blend_face_name], kind.role(BlendRole::BlendLoop));
 
@@ -579,6 +581,7 @@ impl Transaction<'_> {
                     ],
                     kind.role(BlendRole::ContactEdge),
                 );
+                self.history.inherit_construction_tags(edge_name, selected_name);
                 self.history.derived(
                     parent_use_name,
                     [edge_name],
@@ -662,6 +665,7 @@ impl Transaction<'_> {
                                 [selected_name],
                                 kind.role(BlendRole::TransitionEdge),
                             );
+                            self.history.inherit_construction_tags(edge_name, self.working.vertex(*vertex)?.name);
                             let mate_pcurve = matches!(junctions[vertex].kind, BlendJunctionKind::Miter { .. })
                                 .then(|| boundary.parent_pcurve.clone());
                             smooth_edges.insert(*vertex, (edge, mate_pcurve));

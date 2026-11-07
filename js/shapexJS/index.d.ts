@@ -373,7 +373,7 @@ export interface Edge extends NativeValue {
   endpoints(): Point3[]
   curve(): Line3 | Circle3 | TrimmedCurve3
   trimmedCurve(): TrimmedCurve3
-  boundaryUses(): [face: string, previous: string, next: string, start: string][]
+  boundaryUses(): [face: string, previous: string, next: string, start: string, winding: [number, number]][]
   connectedFaces(): Face[]
   vertices(): Vertex[]
   tessellate(options?: TessellationOptions): Polyline
@@ -407,13 +407,14 @@ export interface Resolution<T extends Face | Edge | Vertex = Face | Edge | Verte
 export interface CreationRole {
   readonly kind: 'profile-start' | 'profile-end' | 'profile-side' |
     'extrusion-start' | 'extrusion-end' | 'extrusion-side' |
-    'shell-source' | 'shell-offset' | 'shell-rim'
+    'shell-source' | 'shell-offset' | 'shell-rim' | 'revolution-meridian'
   readonly boundary?: string
   readonly holeIndex?: number
   readonly segment?: number
   readonly part?: number
   readonly generators: readonly [number, number, number][]
-  readonly chart?: 'full-turn' | 'turn-start' | 'turn-end' | 'section-positive' | 'section-negative'
+  readonly chart?: 'full-turn' | 'turn-start' | 'turn-end' | 'section-positive' | 'section-negative' |
+    'start' | 'half-turn'
 }
 
 export interface Compound extends NativeValue {
@@ -449,6 +450,10 @@ export interface Compound extends NativeValue {
     changes: { source: string, kind: string, outputs: string[] }[]
     origins: { id: string, sources: string[], role?: CreationRole, operation?: string }[]
     constructionRoles: Record<string, CreationRole[]>
+    constructionTags: Record<string, (
+      { source: string, role: 'blend-span' | 'blend-junction', quarter: number } |
+      { source: string, role: 'shell-corner', quarter: null }
+    )[]>
   }
   creationRole(entity: Face | Edge): CreationRole | undefined
   facesGeneratedFrom(entity: Face | Edge): Face[]

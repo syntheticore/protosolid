@@ -941,5 +941,19 @@ pub(super) fn assemble_shell_boundary(
     }
     let mut committed = transaction.finish()?;
     committed.history.record_patch_roles(&tokens);
+    // A rounded offset face is constructed at an input vertex. Preserve
+    // that landmark before same-kind correspondence is attributed.
+    let source_vertices = source.vertices().map(|vertex| vertex.persistent_id()).collect::<BTreeSet<_>>();
+    let corner_sources = committed.history.construction_roles.iter()
+        .filter(|(_, roles)| roles.contains(&crate::CreationRole::ShellOffset))
+        .flat_map(|(output, _)| committed.history.construction[output].iter()
+            .filter(|record| source_vertices.contains(&record.name))
+            .map(move |record| (*output, record.name)))
+        .collect::<Vec<_>>();
+    for (output, source) in corner_sources {
+        committed.history.tag_construction(output, crate::ConstructionTag {
+            source, branch: crate::ConstructionBranch::ShellCorner,
+        });
+    }
     Compound::from_operation_with_parents(kernel, committed, &[source], crate::DerivationRole::Shell)
 }

@@ -316,16 +316,28 @@ impl EdgeHandle {
             })
             .collect()
     }
-    /// The face, neighboring edges and start vertex of each oriented boundary use.
-    pub fn boundary_uses(&self) -> KernelResult<Vec<[PersistentId; 4]>> {
+    /// The face, neighboring edges, start vertex and chart winding of each boundary use.
+    pub fn boundary_uses(&self) -> KernelResult<Vec<([PersistentId; 4], [i32; 2])>> {
         let topology = self.state.topology();
-        topology.edge(self.edge)?.coedges().iter().map(|id| {
+        let edge = topology.edge(self.edge)?;
+        edge.coedges().iter().map(|id| {
             let coedge = topology.coedge(*id)?;
             let face = topology.face(topology.loop_(coedge.loop_id())?.face())?;
             let previous = topology.edge(topology.coedge(coedge.previous())?.edge())?;
             let next = topology.edge(topology.coedge(coedge.next())?.edge())?;
             let start = topology.vertex(topology.coedge_vertices(*id)?[0])?;
-            Ok([face.name(), previous.name(), next.name(), start.name()])
+            let mut winding = [0; 2];
+            if edge.vertices()[0] == edge.vertices()[1] {
+                let domains = face.surface().domains();
+                for (axis, domain) in domains.iter().enumerate() {
+                    if let Some(period) = domain.period {
+                        let from = coedge.pcurve().evaluate(coedge.range().start)?.point;
+                        let to = coedge.pcurve().evaluate(coedge.range().end)?.point;
+                        winding[axis] = ((to[axis] - from[axis]) / period).round() as i32;
+                    }
+                }
+            }
+            Ok(([face.name(), previous.name(), next.name(), start.name()], winding))
         }).collect()
     }
     /// Start and end vertices; a closed edge reports its single vertex twice.
@@ -1702,6 +1714,7 @@ fn attribute_to_parents(
     let mut descendants = BTreeMap::<PersistentId, BTreeMap<PersistentId, bool>>::new();
     let mut attributed = OperationHistory::default();
     attributed.construction_roles = history.construction_roles.clone();
+    attributed.construction_tags = history.construction_tags.clone();
     for (output, kind) in &outputs {
         let mut records = history
             .construction

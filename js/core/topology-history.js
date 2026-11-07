@@ -9,17 +9,24 @@ export function seedProfileTopology(compound, profiles, owner, extraSources = []
   const turnAliases = new Map()
   const sources = [...profiles.flatMap(profile => profile.rings.flatMap(ring =>
     ring.segments.map(segment => profile.getBaseId(segment)))), ...extraSources]
+  const generatorSource = ([section, ring, segment]) => {
+    const profile = profiles[section]
+    return profile.getBaseId(profile.rings[ring].segments[segment])
+  }
+  const nameMeridian = item => {
+    const tags = (constructionRoles[item.kernelId] || [])
+      .filter(role => role.kind == 'revolution-meridian')
+      .map(({ kind, chart, part, generators }) =>
+        JSON.stringify({ role: kind, chart, part, sources: generators.map(generatorSource) }))
+    if(tags.length) setConstruction(item, tags)
+  }
   for(const face of compound.faces()) {
     const roles = constructionRoles[face.kernelId].map(role => {
       if(role.kind.endsWith('-start')) return { role: 'profile-start', sources }
       if(role.kind.endsWith('-end')) return { role: 'profile-end', sources }
       const generators = role.generators?.length ? role.generators : [[0,
         role.boundary == 'outer' ? 0 : role.holeIndex + 1, role.segment]]
-      const generatorSources = [...generators.map(generator => {
-        const [section, ring, segment] = generator
-        const profile = profiles[section]
-        return profile.getBaseId(profile.rings[ring].segments[segment])
-      }), ...extraSources]
+      const generatorSources = [...generators.map(generatorSource), ...extraSources]
       if(role.chart == 'full-turn') {
         turnAliases.set(face, ['turn-start', 'turn-end'].map(chart => {
           const half = {}
@@ -51,15 +58,33 @@ export function seedProfileTopology(compound, profiles, owner, extraSources = []
         }
         edge.topology.names.sort()
       }
+      nameMeridian(edge)
     }
     for(const vertex of solid.vertices()) {
       nameTopology(vertex, 'vertex', 'profile/boundary',
         vertex.edges().flatMap(edge => edge.topology.anchors), owner)
+      nameMeridian(vertex)
     }
     nameTopology(solid, 'body', 'profile/body', sources, owner)
   }
   identifyTopology(compound)
   return compound
+}
+
+function setConstruction(item, tags) {
+  item.topology = Object.freeze({ ...item.topology,
+    construction: [...new Set([...(item.topology.construction || []), ...tags])].sort(),
+  })
+}
+
+function constructionSource(item) {
+  const origin = item.topology.origin
+  const recipe = origin.incidenceResolves ? origin.recipe : origin.branchRecipe?.()
+  return {
+    anchors: item.topology.anchors,
+    ...(recipe?.branch.length ? { branch: recipe.branch } : {}),
+    ...(recipe?.sides?.length ? { sides: recipe.sides } : {}),
+  }
 }
 
 // Imported bodies carry no construction semantics. Their order in the stored
@@ -113,6 +138,8 @@ export function trackOperations(out, parents, operations) {
   const outputs = topologyItems(out)
   out.topologyFailures = new Map(parents.flatMap(parent => [...(parent.topologyFailures || [])]))
   const roles = new Map()
+  const inputById = new Map(inputs.map(item => [item.kernelId, item]))
+  const construction = new Map()
   const correspondence = operations.flatMap(({ compound, operation, branch, bodyParents = parents }) => {
     const solidIds = new Set(compound.solids().map(solid => solid.kernelId))
     const cells = outputs.filter(item => solidIds.has((item.topologyKind == 'body' ? item : item.solid).kernelId))
@@ -121,6 +148,20 @@ export function trackOperations(out, parents, operations) {
     cells.forEach(item => roles.set(item, { name: policy.role(item), branch }))
     const changes = new Map(history.changes.map(change => [change.source, change]))
     const origins = new Map(history.origins.map(origin => [origin.id, origin]))
+    const tagSources = (id, visited = new Set()) => {
+      const input = inputById.get(id)
+      if(input) return [JSON.stringify(constructionSource(input))]
+      if(visited.has(id)) return []
+      visited.add(id)
+      return origins.get(id)?.sources.flatMap(source => tagSources(source, visited)) || []
+    }
+    for(const item of cells) {
+      const tags = history.constructionTags[item.kernelId]?.flatMap(({ source, ...tag }) => {
+        const inputs = [...new Set(tagSources(source))].sort()
+        return inputs.length ? [JSON.stringify({ ...tag, inputs })] : []
+      })
+      if(tags?.length) construction.set(item, tags)
+    }
     const generatedFrom = (id, source, visited = new Set()) => {
       if(visited.has(id)) return false
       const origin = origins.get(id)
@@ -155,6 +196,7 @@ export function trackOperations(out, parents, operations) {
     return records
   })
   propagateTopology(outputs, correspondence, item => roles.get(item), topologyNeighbors)
+  for(const [item, tags] of construction) setConstruction(item, tags)
   identifyTopology(out)
   return out
 }

@@ -723,13 +723,14 @@ pub(super) fn offset_regions_with_joins(
         let center = topology.vertex(vertex)?.point();
         let mut adjacent = sections.iter().map(|(parent, _)| *parent).collect::<Vec<_>>();
         let faces = topology.vertex_faces(vertex)?;
-        let names = faces.iter().map(|face| topology.face(*face).map(|face| face.name()))
+        let mut names = faces.iter().map(|face| topology.face(*face).map(|face| face.name()))
             .collect::<KernelResult<Vec<_>>>()?;
         adjacent.extend(names.iter().filter_map(|name| by_source.get(name).copied()));
         if let Some((sphere, boundary)) = outward_corner(
             center, radius, sections.into_iter().map(|(_, section)| section).collect(), tolerance,
         )? {
             supports.push(sphere);
+            names.push(topology.vertex(vertex)?.name());
             ancestry.push(names);
             parents.push(adjacent);
             curves.push(boundary.clone());

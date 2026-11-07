@@ -1366,18 +1366,20 @@ fn line_circle_intersection(
     let offset = line.origin() - circle.center();
     let direction = line.direction();
     let a = direction.magnitude2();
-    let b = 2.0 * offset.dot(direction);
-    let c = offset.magnitude2() - circle.radius().powi(2);
-    let discriminant = b * b - 4.0 * a * c;
-    let threshold = tolerance.linear.powi(2) * a.max(1.0);
-    if discriminant < -threshold {
+    let closest_parameter = -offset.dot(direction) / a;
+    let closest_distance = (offset + direction * closest_parameter).magnitude();
+    // Tangency is decided on the linear distance between line and circle.
+    // The squared gap r² - d² shrinks with 2r·(r - d), so a squared tolerance
+    // splits solved tangencies into two hits a square root apart.
+    let gap = circle.radius() - closest_distance;
+    if gap < -tolerance.linear {
         return Ok(CurvePairIntersection::default());
     }
-    let root = discriminant.max(0.0).sqrt();
-    let parameters = if discriminant.abs() <= threshold {
-        vec![-b / (2.0 * a)]
+    let parameters = if gap <= tolerance.linear {
+        vec![closest_parameter]
     } else {
-        vec![(-b - root) / (2.0 * a), (-b + root) / (2.0 * a)]
+        let step = ((circle.radius() + closest_distance) * gap / a).sqrt();
+        vec![closest_parameter - step, closest_parameter + step]
     };
     let mut hits = Vec::new();
     for parameter in parameters {

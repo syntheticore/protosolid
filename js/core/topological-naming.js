@@ -399,6 +399,20 @@ export function restoreTopologySelections(feature, items, neighbors, sides) {
   return failures
 }
 
+// Rewrites a cell's names while keeping its structure. Unlike a namespace, this
+// lets merged cells keep the continuity names of their other parents.
+export function renameTopology(items, rename, origin = topology => topology.origin) {
+  for(const item of items) {
+    const { topology } = item
+    item.topology = Object.freeze({ ...topology,
+      identity: rename(topology.identity),
+      origin: origin(topology),
+      anchors: Object.freeze(unique(topology.anchors.map(rename))),
+      names: unique(topology.names.map(rename)),
+    })
+  }
+}
+
 export function namespaceTopology(items, role) {
   for(const item of items) {
     const ancestors = ancestry([item])

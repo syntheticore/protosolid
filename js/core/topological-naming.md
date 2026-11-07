@@ -60,6 +60,15 @@ cell, mirror or imported component. A grid cell `(u, v)` retains its identity wh
 number of rows changes. Component occurrences scope references separately.
 Projected sketch curves use the persistent projection ID.
 
+A pattern or mirror repeats its input features by evaluating them again at each
+instance, with the model moved or reflected into the features' frame. Their
+construction identities therefore reproduce unchanged, so a fillet's selection
+binds the new pocket's edge. While they run, the names of their original results
+are held under a prefix, keeping those cells out of resolution. Afterwards the
+held names return and the new names are mapped into the repeating feature's
+namespace by logical cell. A repeated feature may only modify cells created by
+the repeated features.
+
 ## Selection and rebuilding
 
 A face, edge, or body reference stores a component ID and a selection descriptor:

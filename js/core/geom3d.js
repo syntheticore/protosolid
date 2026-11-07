@@ -4,7 +4,7 @@ import { makeID } from './id.js'
 import { markRaw } from 'vue'
 import { resolveCompoundSelection, restoreCompoundSelections, identifyTopology, topologyItems } from './topology.js'
 import { seedProfileTopology, seedImportTopology, trackTopology, trackOperations } from './topology-history.js'
-import { captureTopologySelection, namespaceTopology } from './topological-naming.js'
+import { captureTopologySelection, namespaceTopology, renameTopology } from './topological-naming.js'
 import { normalFromMatrix, rotationFromNormal, EPSILON } from './utils.js'
 import { fail } from './errors.js'
 import {
@@ -652,6 +652,11 @@ export class Compound extends Volumetric {
   }
   namespaceTopology(role) {
     namespaceTopology(topologyItems(this), role)
+    identifyTopology(this)
+    return this
+  }
+  renameTopology(rename, origin) {
+    renameTopology(topologyItems(this), rename, origin)
     identifyTopology(this)
     return this
   }

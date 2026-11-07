@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { markRaw } from 'vue'
+import { markRaw, toRaw } from 'vue'
 
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
@@ -15,7 +15,7 @@ import { LengthGizmo, AngleGizmo, TransformGizmo, FeatureGizmos, edgeGizmoFrame,
 import { lastId, makeID, setLastId } from './id.js'
 import Expression from './expression.js'
 import { measureIds, measureValue } from './measures.js'
-import { withTopologyNaming } from './topological-naming.js'
+import { topologyID, withTopologyNaming } from './topological-naming.js'
 import { fail, featureError } from './errors.js'
 import {
   alignJointWorld,
@@ -393,6 +393,9 @@ export class Feature {
 }
 
 
+// Inputs naming the geometry a feature changes, as opposed to geometry it reads.
+const modifiedInputKeys = ['faces', 'edges', 'face', 'tools']
+
 export class SolidFeature extends Feature {
   captureVisibility() {
     this.visibilities = this.document.captureVisualViewState().visibilities
@@ -426,7 +429,7 @@ export class SolidFeature extends Feature {
     // Inputs such as limit faces can remain references to hidden geometry;
     // selected faces and edges to modify must belong to visible solids.
     const scopedReferences = { ...references }
-    for(const key of ['faces', 'edges', 'face', 'tools']) {
+    for(const key of modifiedInputKeys) {
       if(!references[key]) continue
       const items = [references[key]].flat().filter(item => this.isSolidVisible(tree, item.solid || item))
       scopedReferences[key] = this.settings[key].multi ? items : items[0]
@@ -437,7 +440,7 @@ export class SolidFeature extends Feature {
     // The scoped compound has its own native topology handles. Rebind local
     // selections before operations that require the current body revision.
     const scopedSolids = component.compound.solids()
-    for(const key of ['faces', 'edges', 'face', 'tools']) {
+    for(const key of modifiedInputKeys) {
       if(!scopedReferences[key]) continue
       const items = [scopedReferences[key]].flat().map(item => {
         if(inputComponentId(item) != this.componentId) return item
@@ -452,7 +455,88 @@ export class SolidFeature extends Feature {
 }
 
 
-export class PatternFeature extends SolidFeature {
+const inputItemKind = item => item instanceof Feature ? 'feature' :
+  ['Component', 'Solid'].find(type => type == item?.typename?.())
+const inputReferenceKind = reference => reference.componentReference ? 'Component' :
+  reference.solidReference ? 'Solid' : 'feature'
+
+// Repeats solids, components or timeline features at other places. A feature
+// takes one kind of input; multiple features combine different kinds.
+class RepeatingFeature extends SolidFeature {
+  constructor(...args) {
+    super(...args)
+    // Features repeat with their own operations, components as instances.
+    this.settings.operation.when = feature => feature.inputs?.().some(input => input.solidReference)
+  }
+
+  acceptsInput(item) {
+    const kind = inputItemKind(item)
+    if(!kind) return true
+    const current = this.inputs?.()[0]
+    if(current && inputReferenceKind(current) != kind) return false
+    return kind != 'feature' || this.canReplay(item)
+  }
+
+  // Replaying a feature needs a solid modeling feature of the same component.
+  // Its component instances could not be repeated under the same IDs.
+  canReplay(feature) {
+    return feature instanceof SolidFeature && feature.componentId == this.componentId &&
+      !feature.inputs?.().some(input => input.componentReference)
+  }
+
+  // Runs the input features again at every instance, in timeline order. Moving
+  // the model into the features' own frame keeps their sketches, planes and
+  // construction identities valid without any per-feature handling. Holding the
+  // names of the original results lets references resolve to the new geometry only.
+  // An instance is { key, enter, leave }, with the latter two moving a compound
+  // into the features' frame and back.
+  replayInputFeatures(tree, comp, instances) {
+    const inputIds = new Set(this.inputs().map(input => input.featureId))
+    const timeline = this.document.pendingTimeline || this.document.timeline
+    const features = timeline.features.filter(feature => inputIds.has(feature.id))
+    if(!features.length) return
+
+    const unsupported = features.find(feature => !this.canReplay(feature))
+    if(unsupported) fail(`${unsupported.title} cannot be repeated`)
+
+    const isInputName = name => features.some(feature => name.startsWith(`${feature.id}/topology/`))
+    const heldPrefix = `${this.id}/held/`
+    const hold = name => isInputName(name) ? heldPrefix + name : name
+
+    // Modifying pre-existing geometry would change it again at its original place.
+    for(const feature of features) {
+      for(const key of modifiedInputKeys) {
+        if(!feature.settings[key] || !feature[key]) continue
+        const references = [feature[key]()].flat().filter(reference => reference.componentId == this.componentId)
+        if(!references.every(reference => isInputName(reference.selection.identity))) {
+          fail(`Also select the feature that created the geometry modified by ${feature.title}`)
+        }
+      }
+    }
+
+    for(const { key, enter, leave } of instances) {
+      const failures = comp.compound.topologyFailures
+      comp.compound = enter(comp.compound).renameTopology(hold)
+
+      const replicas = features.map(feature => {
+        const replica = replayReplica(feature)
+        replica.execute(tree)
+        if(replica.error?.type == 'error') fail(`${feature.title}: ${replica.error.msg}`)
+        if(replica.error) this.error = { ...replica.error, msg: `${feature.title}: ${replica.error.msg}` }
+        return replica
+      })
+
+      const release = name => name.startsWith(heldPrefix) ? name.slice(heldPrefix.length) :
+        isInputName(name) ? topologyID(this.id, JSON.stringify([key, name])) : name
+      comp.compound = leave(comp.compound).renameTopology(release, topology =>
+        replicas.includes(topology.origin.feature) ? { feature: this } : topology.origin)
+      comp.compound.topologyFailures = failures
+    }
+  }
+}
+
+
+export class PatternFeature extends RepeatingFeature {
   static icon = 'th'
 
   constructor(doc) {
@@ -503,11 +587,28 @@ export class PatternFeature extends SolidFeature {
         gizmo: true,
         when: feature => feature.patternType == 'grid',
       },
+      radialMode: {
+        title: 'Spacing',
+        type: 'enum',
+        options: {
+          total: { title: 'Total angle', icon: 'circle-notch' },
+          step: { title: 'Angle step', icon: 'ellipsis-h' },
+        },
+        when: feature => feature.patternType == 'radial',
+      },
       radialCount: {
         title: 'Count',
         type: 'integer',
         min: 1,
         when: feature => feature.patternType == 'radial',
+      },
+      radialAngle: {
+        title: 'Total Angle',
+        type: 'angle',
+        step: 1,
+        allowNegative: true,
+        gizmo: true,
+        when: feature => feature.patternType == 'radial' && feature.radialMode == 'total',
       },
       radialStep: {
         title: 'Angle Step',
@@ -515,7 +616,7 @@ export class PatternFeature extends SolidFeature {
         step: 1,
         allowNegative: true,
         gizmo: true,
-        when: feature => feature.patternType == 'radial',
+        when: feature => feature.patternType == 'radial' && feature.radialMode == 'step',
       },
     })
 
@@ -525,15 +626,24 @@ export class PatternFeature extends SolidFeature {
     this.uCount = 2
     this.vOffset = 10
     this.vCount = 1
+    this.radialMode = 'total'
+    this.radialAngle = 360
     this.radialStep = 45
     this.radialCount = 8
     this.inputs = null
   }
 
+  static undump(dump, context) {
+    const feature = super.undump(dump, context)
+    // Radial patterns saved before total angles existed were spaced by steps
+    if(!dump.values.radialMode) feature.radialMode = 'step'
+    return feature
+  }
+
   isComplete() {
     if(!super.isComplete()) return false
     if(this.patternType == 'radial') {
-      return this.radialCount >= 1 && Number.isFinite(this.radialStep)
+      return this.radialCount >= 1 && Number.isFinite(this.radialMode == 'step' ? this.radialStep : this.radialAngle)
     }
     return this.uCount >= 1 && this.vCount >= 1 &&
       Number.isFinite(this.uOffset) && Number.isFinite(this.vOffset)
@@ -550,8 +660,6 @@ export class PatternFeature extends SolidFeature {
       Array.from({ length: this.instanceCount() }, (_, i) => `radial/${i + 1}`) :
       this.gridTransforms().map(transform => transform.topologyKey)
   }
-
-  acceptsInput() { return true }
 
   updateFeature(tree, references) {
     if(hasFutureInput(this)) {
@@ -575,15 +683,18 @@ export class PatternFeature extends SolidFeature {
       })
     })
 
+    this.previewBody = null
     const sources = references.inputs
-      .filter(input => input?.typename?.() != 'Component')
-      .map(input => input.toCompound ? input.toCompound() : input)
-    if(!sources.length) {
-      this.previewBody = null
-      return
-    }
+      .filter(input => input?.typename?.() == 'Solid')
+      .map(input => input.toCompound())
 
     try {
+      this.replayInputFeatures(tree, comp, transforms.map(transform => ({
+        key: transform.topologyKey,
+        enter: compound => compound.transform(transform.clone().invert()),
+        leave: compound => compound.transform(transform),
+      })))
+
       const copies = transforms.flatMap(transform =>
         sources.map(source => {
           const copy = source.transform(transform)
@@ -591,10 +702,7 @@ export class PatternFeature extends SolidFeature {
           return copy
         })
       )
-      if(!copies.length) {
-        this.previewBody = null
-        return
-      }
+      if(!copies.length) return
       const tool = copies.slice(1).reduce(
         (combined, copy) => combined.boolean(copy, 'join'),
         copies[0],
@@ -617,12 +725,21 @@ export class PatternFeature extends SolidFeature {
     return transforms
   }
 
+  // A full turn spaces instances evenly, as the last would coincide with the
+  // first. A partial total angle places the last instance at its end.
+  radialAngleStep() {
+    if(this.radialMode == 'step') return this.radialStep
+    const fullTurn = Math.abs(Math.abs(this.radialAngle) - 360) < 1e-9
+    return this.radialAngle / (fullTurn ? Math.floor(this.radialCount) : Math.floor(this.radialCount) - 1)
+  }
+
   radialTransforms(axis) {
     const origin = new THREE.Vector3().setFromMatrixPosition(axis)
     const direction = normalFromMatrix(axis)
     const transforms = []
+    const step = this.radialAngleStep()
     for(let i = 1; i < Math.floor(this.radialCount); i++) {
-      const angle = rad(this.radialStep * i)
+      const angle = rad(step * i)
       const transform = new THREE.Matrix4().makeTranslation(origin.clone().negate())
           .premultiply(new THREE.Matrix4().makeRotationAxis(direction, angle))
           .premultiply(new THREE.Matrix4().makeTranslation(origin))
@@ -653,12 +770,13 @@ export class PatternFeature extends SolidFeature {
       if(radial.lengthSq() < 1e-12) radial.setFromMatrixColumn(axis, 0)
       radial.normalize()
       const rotation = new THREE.Matrix4().makeBasis(radial, direction.clone().cross(radial), direction)
+      const key = this.radialMode == 'step' ? 'radialStep' : 'radialAngle'
       return {
-        radialStep: {
-          type: 'angle', center, rotation, value: this.radialStep,
+        [key]: {
+          type: 'angle', center, rotation, value: this[key],
           cb: angle => {
-            this.setExpression('radialStep', null)
-            this.radialStep = angle
+            this.setExpression(key, null)
+            this[key] = angle
           },
         },
       }
@@ -697,23 +815,41 @@ export class PatternFeature extends SolidFeature {
 Serialize.register(PatternFeature, 'PatternFeature')
 
 
+// A stand-in for evaluating a feature again without touching its published
+// state. It shares identities and values, but keeps its own inputs and results.
+function replayReplica(feature) {
+  const replica = Object.create(toRaw(feature))
+  replica.expressions = {}
+  replica.suppressUpdate = false
+  replica.error = null
+  for(const [key, setting] of Object.entries(feature.settings)) {
+    if(!feature[key] || !feature.isPickerSetting(setting)) continue
+    const input = feature[key]()
+    const clone = Array.isArray(input) ? input.map(reference => reference.clone()) : input.clone()
+    replica[key] = () => clone
+  }
+  return replica
+}
+
+
 // Whether any input feature of a pattern or mirror comes after it in the timeline.
 function hasFutureInput(feature) {
   const timeline = feature.document.pendingTimeline || feature.document.timeline
-  const ownIndex = timeline.features.indexOf(feature)
+  // By ID, since a replayed pattern or mirror is not itself in the timeline
+  const ownIndex = timeline.features.findIndex(other => other.id == feature.id)
   return feature.inputs().some(input => input.featureId &&
     timeline.features.findIndex(other => other.id == input.featureId) >= ownIndex
   )
 }
 
 
-export class MirrorFeature extends SolidFeature {
+export class MirrorFeature extends RepeatingFeature {
   static icon = 'mirror'
 
   constructor(doc) {
     super(doc, true, 'Mirror', {
       inputs: {
-        title: 'Solids',
+        title: 'Features',
         type: 'patternInput',
         multi: true,
       },
@@ -728,7 +864,7 @@ export class MirrorFeature extends SolidFeature {
   }
 
   // Component placements are rigid, so mirrored instances cannot be expressed
-  acceptsInput(item) { return item?.typename?.() != 'Component' }
+  acceptsInput(item) { return item?.typename?.() != 'Component' && super.acceptsInput(item) }
 
   updateFeature(tree, references) {
     if(hasFutureInput(this)) {
@@ -745,11 +881,17 @@ export class MirrorFeature extends SolidFeature {
       plane = relativeComponentTransform(planeSource, target).multiply(plane)
     }
 
+    this.previewBody = null
     try {
-      const tool = references.inputs
-        .map(input => input.toCompound ? input.toCompound() : input)
+      const reflect = compound => compound.mirror(plane)
+      this.replayInputFeatures(tree, comp, [{ key: 'mirror', enter: reflect, leave: reflect }])
+
+      const copies = references.inputs
+        .filter(input => input?.typename?.() == 'Solid')
+        .map(input => input.toCompound())
         .map(source => source.mirror(plane).namespaceTopology(`mirror/${source.componentId}`))
-        .reduce((combined, copy) => combined.boolean(copy, 'join'))
+      if(!copies.length) return
+      const tool = copies.reduce((combined, copy) => combined.boolean(copy, 'join'))
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) { this.error = featureError(err, 'Mirror could not be created') }

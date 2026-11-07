@@ -245,10 +245,11 @@
 
       handleClick() {
         if(this.bus.featurePickerActive) {
-          if(this.feature === this.document.activeFeature) return
+          // A feature being created is not the active feature yet
+          const target = this.document.activeFeature || this.document.creatingFeature
           const featureIndex = this.document.timeline.features.indexOf(this.feature)
-          const activeIndex = this.document.timeline.features.indexOf(this.document.activeFeature)
-          if(featureIndex >= activeIndex) return
+          const targetIndex = this.document.timeline.features.indexOf(target)
+          if(featureIndex >= targetIndex || !target.acceptsInput(this.feature)) return
           this.bus.emit('picked', this.feature)
         } else {
           this.document.selection.handle(this.feature, this.bus.isCtrlPressed)

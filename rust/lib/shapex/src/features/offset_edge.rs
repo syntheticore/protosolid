@@ -107,20 +107,34 @@ pub(super) fn offset_edge(
         if reparameterized.contains(&face) {
             return Err(not_implemented("replacement of a periodic seam face"));
         }
-        let coedge_id = topology.edge(edge)?.coedges()[0];
+        let uses = topology.edge(edge)?.coedges();
+        let coedge_id = uses.iter().copied()
+            .find(|id| matches!(topology.coedge(*id).unwrap().pcurve(), Curve2::Line(_)))
+            .unwrap_or(uses[0]);
         let coedge = topology.coedge(coedge_id)?;
         let range = coedge.range();
         let pcurve = coedge.pcurve().clone();
+        let mid = range.middle();
+        let uv = pcurve.first_order(mid)?.0;
+        let support = &supports[&face];
         let range = continued_range(&supports[&face], &pcurve, bounds[&face], range, tolerance)?;
-        let curve = supports[&face].boundary_curve(pcurve.clone(), range, tolerance)?;
+        let curve = support.boundary_curve(pcurve.clone(), range, tolerance)?;
         return Ok(OffsetEdge {
             curve,
-            pcurves: topology
-                .edge(edge)?
-                .coedges()
-                .iter()
-                .map(|coedge| Ok((*coedge, topology.coedge(*coedge)?.pcurve().clone())))
-                .collect::<KernelResult<_>>()?,
+            pcurves: uses.iter().map(|id| {
+                let original = topology.coedge(*id)?.pcurve();
+                // A chart mate can carry a bounded inverse projection of
+                // the source seam. Continue its exact periodic lift instead
+                // of projecting the extended edge onto the edited support.
+                if matches!(pcurve, Curve2::Line(_)) && !matches!(original, Curve2::Line(_)) {
+                    let delta = original.first_order(mid)?.0 - uv;
+                    let shift = whole_periods(support.domains(), delta);
+                    if (delta - shift).magnitude() <= tolerance.parameter * 64.0 {
+                        return Ok((*id, crate::trim::translate_pcurve(&pcurve, shift, tolerance)?));
+                    }
+                }
+                Ok((*id, original.clone()))
+            }).collect::<KernelResult<_>>()?,
             range,
         });
     }
@@ -629,6 +643,15 @@ pub(super) fn refine_offset_corner(
         .iter()
         .map(|face| {
             let surface = &supports[face];
+            if let (Surface3::Cone(original), Surface3::Cone(edited)) =
+                (topology.face(*face)?.surface(), surface)
+            {
+                // A cone tip is a point constraint. Its chart has no single
+                // normal there, and projecting onto the cone loses the tip.
+                if topology.vertex(vertex)?.point().distance(original.apex()) <= tolerance.linear {
+                    return Ok(CornerConstraint::Point(edited.apex()));
+                }
+            }
             if !matches!(surface, Surface3::Offset(_) | Surface3::RollingBall(_) | Surface3::Blend(_) | Surface3::Ruled(_)) {
                 return Ok(CornerConstraint::Surface(surface, None));
             }
@@ -1231,6 +1254,34 @@ pub(crate) fn extended_support(
         }
         _ => Ok(surface.clone()),
     }
+}
+
+pub(super) fn offset_support(
+    surface: &Surface3,
+    bounds: [ParameterRange; 2],
+    distance: f64,
+    tolerance: crate::ModelTolerance,
+) -> KernelResult<Surface3> {
+    if let Surface3::Cone(cone) = surface {
+        if !bounds[1].contains(0.0, tolerance) {
+            return surface.offset(distance, tolerance);
+        }
+        let height = cone.axis().magnitude();
+        let radius = cone.reference_radius();
+        let handedness = cone.x_radius().cross(cone.y_radius()).dot(cone.axis()).signum();
+        let signed_distance = distance * handedness * bounds[1].middle().signum();
+        // The parallel generators meet at a translated apex. Use the cone
+        // through that apex to trim the envelope, including at a source pole.
+        let axial_shift = -signed_distance * height.hypot(radius) / radius;
+        return crate::Cone3::new(
+            cone.apex() + cone.axis() * (axial_shift / height),
+            cone.axis(),
+            cone.x_radius(),
+            cone.y_radius(),
+            tolerance,
+        ).map(Into::into);
+    }
+    surface.offset(distance, tolerance)
 }
 
 // Contact rails delimit the material sector of a blend. Miter end curves can

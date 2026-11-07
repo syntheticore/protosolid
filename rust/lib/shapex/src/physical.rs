@@ -422,10 +422,44 @@ pub(super) fn integrate_face<const TERMS: usize>(
             previous_end = Some(raw_end + chart_shift);
             let mut breakpoints = coedge.pcurve().integration_breakpoints(range);
             breakpoints.extend(coedge.pcurve().support_integration_breakpoints(range)?);
+            let primitive = |point: Point2| {
+                let mut breaks = support.integration_breakpoints(primitive_axis);
+                if let Some(period) = primitive_domain.period {
+                    let lower = primitive_origin.min(point[primitive_axis]);
+                    let upper = primitive_origin.max(point[primitive_axis]);
+                    breaks = breaks.iter().flat_map(|knot| {
+                        let first = ((lower - knot) / period).floor() as i64;
+                        let last = ((upper - knot) / period).ceil() as i64;
+                        (first..=last).map(move |turn| knot + turn as f64 * period)
+                    }).collect();
+                }
+                adaptive_gauss_kronrod_partitioned(
+                    primitive_origin, point[primitive_axis],
+                    |parameter| {
+                        if primitive_axis == 0 {
+                            surface_terms(parameter, point.y)
+                        } else {
+                            surface_terms(point.x, parameter)
+                        }
+                    },
+                    targets, 14, "exact BREP surface primitive did not converge", &breaks,
+                )
+            };
             let outer = if matches!(face.surface(), Surface3::Plane(_))
                 && matches!(coedge.pcurve(), Curve2::SurfaceIntersection(_)) {
                 integrate_planar_contour(coedge.pcurve(), range, chart_shift, primitive_axis,
                     primitive_origin, orientation, targets, &breakpoints, &surface_terms)
+            } else if matches!(coedge.pcurve(), Curve2::SurfaceIntersection(_))
+                && matches!(topology.edge(coedge.edge())?.curve(), Curve3::SurfaceIntersection(curve)
+                if matches!((curve.first_surface(), curve.second_surface()),
+                    (Surface3::Blend(first), Surface3::Blend(second))
+                    if first.is_curvature_continuous() && second.is_curvature_continuous()))
+            {
+                // G2 miter supports meet tangentially at their rails. The
+                // implicit parameter speed loses accuracy there, while the
+                // corrected positions still determine the contour integral.
+                integrate_uv_contour(coedge.pcurve(), range, chart_shift, primitive_axis,
+                    orientation, targets, &breakpoints, &primitive)
             } else { adaptive_gauss_kronrod_partitioned(
                 range.start,
                 range.end,
@@ -439,33 +473,7 @@ pub(super) fn integrate_face<const TERMS: usize>(
                     if weight == 0.0 {
                         return Ok([0.0; TERMS]);
                     }
-                    let point = raw_point + chart_shift;
-                    let mut breaks = support.integration_breakpoints(primitive_axis);
-                    if let Some(period) = primitive_domain.period {
-                        let lower = primitive_origin.min(point[primitive_axis]);
-                        let upper = primitive_origin.max(point[primitive_axis]);
-                        breaks = breaks.iter().flat_map(|knot| {
-                            let first = ((lower - knot) / period).floor() as i64;
-                            let last = ((upper - knot) / period).ceil() as i64;
-                            (first..=last).map(move |turn| knot + turn as f64 * period)
-                        }).collect();
-                    }
-                    let inner = adaptive_gauss_kronrod_partitioned(
-                        primitive_origin,
-                        point[primitive_axis],
-                        |parameter| {
-                            if primitive_axis == 0 {
-                                surface_terms(parameter, point.y)
-                            } else {
-                                surface_terms(point.x, parameter)
-                            }
-                        },
-                        targets,
-                        14,
-                        "exact BREP surface primitive did not converge",
-                        &breaks,
-                    )?;
-                    Ok(inner.map(|value| value * weight * orientation))
+                    Ok(primitive(raw_point + chart_shift)?.map(|value| value * weight * orientation))
                 },
                 targets,
                 20,
@@ -504,22 +512,31 @@ pub(super) fn integrate_face<const TERMS: usize>(
 fn integrate_planar_contour<const N: usize>(curve: &Curve2, range: super::ParameterRange,
     shift: Vec2, axis: usize, origin: f64, orientation: f64, targets: [f64; N],
     breaks: &[f64], terms: &impl Fn(f64, f64) -> KernelResult<[f64; N]>) -> KernelResult<[f64; N]> {
-    const RULE: [(f64, f64); 3] = [(0.1127016653792583, 5.0 / 18.0),
-        (0.5, 8.0 / 18.0), (0.8872983346207417, 5.0 / 18.0)];
+    integrate_uv_contour(curve, range, shift, axis, orientation, targets, breaks, &|point| {
+        let mut result = [0.0; N];
+        let span = point[axis] - origin;
+        for (fraction, weight) in CONTOUR_RULE {
+            let parameter = origin + span * fraction;
+            let values = if axis == 0 { terms(parameter, point.y)? } else { terms(point.x, parameter)? };
+            for index in 0..N { result[index] += values[index] * span * weight; }
+        }
+        Ok(result)
+    })
+}
+
+const CONTOUR_RULE: [(f64, f64); 3] = [(0.1127016653792583, 5.0 / 18.0),
+    (0.5, 8.0 / 18.0), (0.8872983346207417, 5.0 / 18.0)];
+
+fn integrate_uv_contour<const N: usize>(curve: &Curve2, range: super::ParameterRange,
+    shift: Vec2, axis: usize, orientation: f64, targets: [f64; N],
+    breaks: &[f64], primitive: &impl Fn(Point2) -> KernelResult<[f64; N]>) -> KernelResult<[f64; N]> {
     let chord = |a: Point2, b: Point2| -> KernelResult<[f64; N]> {
         let mut result = [0.0; N];
         let delta = b - a;
         let direction = if axis == 0 { delta.y } else { -delta.x } * orientation;
-        for (s, outer_weight) in RULE {
-            let point = a + delta * s + shift;
-            let span = point[axis] - origin;
-            for (t, inner_weight) in RULE {
-                let parameter = origin + span * t;
-                let values = if axis == 0 { terms(parameter, point.y)? } else { terms(point.x, parameter)? };
-                for index in 0..N {
-                    result[index] += values[index] * span * inner_weight * outer_weight * direction;
-                }
-            }
+        for (fraction, weight) in CONTOUR_RULE {
+            let values = primitive(a + delta * fraction + shift)?;
+            for index in 0..N { result[index] += values[index] * weight * direction; }
         }
         Ok(result)
     };
@@ -538,7 +555,7 @@ fn integrate_planar_contour<const N: usize>(curve: &Curve2, range: super::Parame
         let values = std::array::from_fn(|i| four[i] + (four[i] - two[i]) / 3.0);
         let errors = std::array::from_fn(|i| (values[i] - (two[i] + (two[i] - coarse[i]) / 3.0)).abs());
         Ok((values, errors))
-    }, targets, 24, "planar contour integration did not converge", breaks)
+    }, targets, 24, "UV contour integration did not converge", breaks)
 }
 
 #[cfg(test)]

@@ -128,7 +128,49 @@
         "expressions": {},
         "measures": {},
         "topologyNames": {
-          "version": 2
+          "version": 2,
+          "selections": [
+            {
+              "identity": "id-1014/topology/c41688ffeb74",
+              "recipe": {
+                "version": 1,
+                "kind": "face",
+                "identity": "id-1014/topology/4454978d6314",
+                "anchors": ["id-1014/topology/4454978d6314"],
+                "policy": "single",
+                "context": [
+                  ["id-1014/topology/9642115461a1","id-1014/topology/2434f6d5351f"],
+                  ["id-1014/topology/9642115461a1","id-1014/topology/3cb6ede61924"],
+                  ["id-1014/topology/9642115461a1"],
+                  ["id-1014/topology/aee245ae20e7","id-1014/topology/3cb6ede61924"],
+                  ["id-1014/topology/aee245ae20e7"],
+                  ["id-1014/topology/e9514d597a13","id-1014/topology/2434f6d5351f"],
+                  ["id-1014/topology/e9514d597a13"]
+                ],
+                "branch": []
+              }
+            },
+            {
+              "identity": "id-1014/topology/a0730f9c3651",
+              "recipe": {
+                "version": 1,
+                "kind": "face",
+                "identity": "id-1014/topology/2434f6d5351f",
+                "anchors": ["id-1014/topology/2434f6d5351f"],
+                "policy": "single",
+                "context": [
+                  ["id-1014/topology/569a30c4cb61","id-1014/topology/dc8ffc609dd1"],
+                  ["id-1014/topology/569a30c4cb61"],
+                  ["id-1014/topology/9642115461a1","id-1014/topology/4454978d6314"],
+                  ["id-1014/topology/9642115461a1"],
+                  ["id-1014/topology/e9514d597a13","id-1014/topology/4454978d6314"],
+                  ["id-1014/topology/e9514d597a13","id-1014/topology/dc8ffc609dd1"],
+                  ["id-1014/topology/e9514d597a13"]
+                ],
+                "branch": []
+              }
+            }
+          ]
         },
         "topologyDescriptions": {
           "id-1014/topology/4454978d6314": ["face","profile-side/turn-start",["id-1001"],"id-1014"],
@@ -153,19 +195,46 @@
           "id-1014/topology/288bcf88621e": ["body","profile/body",["id-1001","id-1002","id-1003"],"id-1014"],
           "id-1014/topology/56457e105fbd": ["body","profile/body",["id-1003"],"id-1014"],
           "id-1014/topology/e2c5bf7d4f8d": ["body","profile/body",["id-1001"],"id-1014"],
-          "id-1014/topology/2c83c76fc8de": ["body","profile/body",["id-1002"],"id-1014"]
+          "id-1014/topology/2c83c76fc8de": ["body","profile/body",["id-1002"],"id-1014"],
+          "id-1014/topology/c41688ffeb74": ["face","selection",["88b59a80e743"],"id-1014"],
+          "id-1014/topology/a0730f9c3651": ["face","selection",["af060f9e06d2"],"id-1014"]
         }
       },
       {
-        "$class": "ShellFeature",
+        "$class": "MoveFeature",
         "id": "id-1042",
         "componentId": "id-0",
         "componentOccurrenceId": "id-0",
         "values": {
-          "faces": null,
-          "thickness": 0.59,
-          "side": false,
-          "joinType": "rounded"
+          "faces": [
+            {
+              "$class": "FaceReference",
+              "componentId": "id-0",
+              "selection": {
+                "version": 1,
+                "kind": "face",
+                "identity": "id-1014/topology/c41688ffeb74",
+                "policy": "single"
+              }
+            },
+            {
+              "$class": "FaceReference",
+              "componentId": "id-0",
+              "selection": {
+                "version": 1,
+                "kind": "face",
+                "identity": "id-1014/topology/a0730f9c3651",
+                "policy": "single"
+              }
+            }
+          ],
+          "transformSpace": "component",
+          "x": 0,
+          "y": -0.37,
+          "z": 0,
+          "rx": 0,
+          "ry": 0,
+          "rz": 0
         },
         "expressions": {},
         "measures": {},

@@ -2086,12 +2086,31 @@ fn trace_surface_intersections_in_domains(
             // Boxes cannot separate tilted, nearly parallel cells whose gap
             // grows only quadratically away from a tangential contact. Their
             // control hulls also bound them along either cell's normal.
-            if [transverse, first_cell.normal(first)?, second_cell.normal(second)?].into_iter().flatten().any(|normal| {
+            let separates = |normal| {
                 let [first_low, first_high] = first_cell.extent_along(normal);
                 let [second_low, second_high] = second_cell.extent_along(normal);
                 first_high + tolerance.linear < second_low || second_high + tolerance.linear < first_low
-            }) {
+            };
+            if [transverse, first_cell.normal(first)?, second_cell.normal(second)?]
+                .into_iter().flatten().any(separates)
+            {
                 continue;
+            }
+            // The normal tests can still leave long, oblique hulls whose
+            // edges pass each other. Test cross-edge axes before subdividing.
+            if first_cell.padding == 0.0 && second_cell.padding == 0.0 {
+                let first_directions = first_cell.corner_directions();
+                let second_directions = second_cell.corner_directions();
+                let angular_squared = tolerance.angular.powi(2);
+                if first_directions.into_iter().any(|a| {
+                    second_directions.into_iter().any(|b| {
+                        let normal = a.cross(b);
+                        normal.magnitude2() > angular_squared * a.magnitude2() * b.magnitude2()
+                            && separates(normal.normalize())
+                    })
+                }) {
+                    continue;
+                }
             }
             let first_flat = first_cell.directional_flatness()?;
             let second_flat = second_cell.directional_flatness()?;
@@ -2120,6 +2139,31 @@ fn trace_surface_intersections_in_domains(
             }
         }
     } else {
+        // Project the helical chart samples for nearby seeds on small branches.
+        // A long screw needs a comparable density on each turn.
+        for (surface, other, ranges, other_ranges, reverse) in [
+            (first, second, first_domains, second_domains, false),
+            (second, first, second_domains, first_domains, true),
+        ] {
+            let Surface3::Swept(sweep) = surface else { continue; };
+            let Some(rate) = sweep.helix_rate() else { continue; };
+            let rail_divisions =
+                ((rate.abs() * ranges[1].span().abs() / std::f64::consts::FRAC_PI_4).ceil() as usize).max(8);
+            let domains = other.domains();
+            for i in 0..=8 {
+                let u = ranges[0].start + ranges[0].span() * i as f64 / 8.0;
+                for j in 0..=rail_divisions {
+                    let v = ranges[1].start + ranges[1].span() * j as f64 / rail_divisions as f64;
+                    let point = surface.first_order(u, v)?.0;
+                    // A sample can have no unique foot, such as on a torus axis.
+                    let Ok(projection) = other.project(point, tolerance) else { continue; };
+                    let (a, b) = projection.parameters;
+                    let a = domains[0].nearest(a, other_ranges[0].middle());
+                    let b = domains[1].nearest(b, other_ranges[1].middle());
+                    try_seed(if reverse { [a, b, u, v] } else { [u, v, a, b] })?;
+                }
+            }
+        }
         const DIVISIONS: usize = 3;
         for first_u in 0..=DIVISIONS {
             for first_v in 0..=DIVISIONS {
@@ -2793,6 +2837,15 @@ impl RationalSurfaceCell {
         };
         let direction = end.truncate() / end.w - start.truncate() / start.w;
         (direction.magnitude2() > 0.0).then(|| direction.normalize())
+    }
+
+    fn corner_directions(&self) -> [Vec3; 2] {
+        let point = |control: Vec4| control.truncate() / control.w;
+        let origin = point(self.controls[0][0]);
+        [
+            point(*self.controls[0].last().unwrap()) - origin,
+            point(self.controls.last().unwrap()[0]) - origin,
+        ]
     }
 
     fn directional_flatness(&self) -> KernelResult<[f64; 2]> {

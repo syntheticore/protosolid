@@ -523,7 +523,23 @@ impl Transaction<'_> {
                             *tangent_faces,
                         );
                         match junction {
-                            Ok(junction) => {
+                            Ok(mut junction) => {
+                                // Adjacent walls may share a tangent at the
+                                // source vertex and form a crease farther up
+                                // the seam where the new rails meet them.
+                                if junction.faces.len() == 3 {
+                                    let point = junction.contact_points[&tangent_faces[0]];
+                                    let tolerance = self.kernel.tolerance;
+                                    let first = self.working.face(tangent_faces[0])?.oriented_normal_near(point, tolerance)?;
+                                    let second = self.working.face(tangent_faces[1])?.oriented_normal_near(point, tolerance)?;
+                                    if first.dot(second) < 1.0 - tolerance.angular.max(f64::EPSILON.sqrt()) * 8.0 {
+                                        junction = self.prepare_miter_junction(
+                                            *vertex,
+                                            BlendJunctionKind::Miter { seam_edge: *seam_edge, wall_faces: *tangent_faces },
+                                            &spines,
+                                        )?;
+                                    }
+                                }
                                 junctions.insert(*vertex, junction);
                             }
                             Err(error)

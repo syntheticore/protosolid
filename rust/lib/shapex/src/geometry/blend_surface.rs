@@ -281,6 +281,40 @@ impl EdgeBlendSurface3 {
         Ok(self.section(parameter)?.curvature.map(|controls| (controls, spine.direction())))
     }
 
+    /// A circular spine and coaxial plane/cylinder contacts rotate the whole
+    /// quintic section rigidly, including its endpoint curvature constraints.
+    pub(crate) fn rotating_quintic(&self, parameter: f64) -> KernelResult<Option<([Point3; 6], Axis3)>> {
+        let Curve3::Circle(spine) = self.center_curve() else { return Ok(None); };
+        if !self.curvature_continuous { return Ok(None); }
+        let (plane, plane_rail, cylinder, cylinder_rail) = match (self.first_surface(), self.second_surface()) {
+            (Surface3::Plane(plane), Surface3::Cylinder(cylinder)) =>
+                (plane, self.first_pcurve(), cylinder, self.second_pcurve()),
+            (Surface3::Cylinder(cylinder), Surface3::Plane(plane)) =>
+                (plane, self.second_pcurve(), cylinder, self.first_pcurve()),
+            _ => return Ok(None),
+        };
+        let (Curve2::SurfaceProjection(projection), Curve2::Line(line)) = (plane_rail, cylinder_rail) else {
+            return Ok(None);
+        };
+        let Surface3::Plane(chart) = projection.surface() else { return Ok(None); };
+        let axis = spine.normal();
+        let cylinder_normal = cylinder.x_radius().cross(cylinder.y_radius()).normalize();
+        let delta = spine.center() - cylinder.origin();
+        let angular = f64::EPSILON * 256.0;
+        let linear = angular * spine.center().to_vec().magnitude().max(cylinder.radius()).max(1.0);
+        if projection.curve() != self.center_curve()
+            || chart.u() != plane.u() || chart.v() != plane.v()
+            || axis.cross(plane.normal()).magnitude() > angular
+            || axis.cross(cylinder_normal).magnitude() > angular
+            || delta.cross(axis).magnitude() > linear
+            || line.direction() != Vec2::new(axis.dot(cylinder_normal).signum(), 0.0)
+        {
+            return Ok(None);
+        }
+        let axis = Axis3::new(spine.center(), axis)?;
+        Ok(self.section(self.center_parameter(parameter))?.curvature.map(|controls| (controls, axis)))
+    }
+
     pub(super) fn contact(
         surface: &Surface3,
         pcurve: &Curve2,

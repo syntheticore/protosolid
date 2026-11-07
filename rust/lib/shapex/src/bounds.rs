@@ -365,7 +365,10 @@ fn surface_patch(support: &Surface3, uv: Bounds) -> KernelResult<Bounds> {
         Surface3::Offset(s) => Ok(surface_patch(s.base(), uv)?.expanded(s.maximum_distance())),
         Surface3::Blend(blend) => {
             let u = blend.center_range().middle();
-            let (controls, direction) = blend.translating_quintic(u)?.ok_or_else(unavailable)?;
+            let translation = blend.translating_quintic(u)?;
+            let rotation = if translation.is_none() { blend.rotating_quintic(u)? } else { None };
+            let controls = translation.map(|(controls, _)| controls)
+                .or_else(|| rotation.map(|(controls, _)| controls)).ok_or_else(unavailable)?;
             // Restrict the Bernstein polygon to the chart box. The blossom
             // also handles trims on an extension of the nominal section.
             let section = (0..=5).map(|upper_count| {
@@ -378,9 +381,20 @@ fn surface_patch(support: &Surface3, uv: Bounds) -> KernelResult<Bounds> {
                 }
                 points[0]
             });
-            Ok(Bounds::points(section.flat_map(|point| {
-                [point + direction * (uv.0.x - u), point + direction * (uv.1.x - u)]
-            })))
+            if let Some((_, direction)) = translation {
+                Ok(Bounds::points(section.flat_map(|point| {
+                    [point + direction * (uv.0.x - u), point + direction * (uv.1.x - u)]
+                })))
+            } else {
+                let (_, axis) = rotation.unwrap();
+                Ok(section.map(|point| {
+                    let axial = axis.origin() + axis.direction() * (point - axis.origin()).dot(axis.direction());
+                    let radius = point.distance(axial);
+                    let extent = Vec3::new(1.0, 1.0, 1.0) - axis.direction().mul_element_wise(axis.direction());
+                    let extent = Vec3::new(extent.x.max(0.0).sqrt(), extent.y.max(0.0).sqrt(), extent.z.max(0.0).sqrt()) * radius;
+                    Bounds(axial - extent, axial + extent)
+                }).reduce(Bounds::union).unwrap())
+            }
         }
         _ => surface(support, None),
     }

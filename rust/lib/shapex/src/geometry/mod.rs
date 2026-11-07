@@ -209,6 +209,7 @@ impl Curve2 {
         };
         match self {
             Self::Nurbs(curve) => Ok(curve.extended(range)?.into()),
+            Self::Projected(curve) => curve.extended(range).map(Self::Projected),
             Self::SurfaceIntersection(pcurve) => {
                 Ok(Self::SurfaceIntersection(SurfaceIntersectionPcurve2 {
                     curve: Box::new(pcurve.curve.extended(range)?),

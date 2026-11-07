@@ -204,7 +204,7 @@
             "item": {
               "$class": "HelperReference",
               "componentId": "id-0",
-              "helperId": "id-0/XY"
+              "helperId": "id-0/YZ"
             }
           },
           "base2": null,
@@ -213,15 +213,15 @@
           "point3": null,
           "angle": 0,
           "position": 0,
-          "offset": 2.13,
-          "rotationX": 23.7,
-          "rotationY": 41.3,
+          "offset": 0.77,
+          "rotationX": -17.3,
+          "rotationY": 27.9,
           "rotationTransform": {
             "$class": "Matrix4",
-            "elements": [0.7512641335035112,0.2652862030261237,-0.6043388388935471,0,0,0.9156625933395611,0.4019477766559601,0,0.6600016679609366,-0.3019689481431027,0.6879044647668233,0,0,0,0,1]
+            "elements": [0.8837656300886935,-0.13915056959297978,-0.44676104357462054,0,0,0.9547607995027975,-0.29737487407778596,0,0.46792981426057334,0.2628096929619004,0.8437847795565745,0,0,0,0,1]
           },
-          "rotationAppliedX": 23.7,
-          "rotationAppliedY": 41.3
+          "rotationAppliedX": -17.3,
+          "rotationAppliedY": 27.9
         },
         "expressions": {},
         "measures": {},
@@ -260,36 +260,27 @@
               "points": [
                 {
                   "$class": "Vector3",
-                  "elements": [1.37,0.83,0]
+                  "elements": [2.19,-1.43,0]
                 },
                 {
                   "$class": "Vector3",
-                  "elements": [7.37,0.83,0]
+                  "elements": [9.19,-1.43,0]
                 }
               ]
             },
             {
-              "$class": "Spline",
+              "$class": "Line",
               "id": "id-1060",
               "points": [
                 {
                   "$class": "Vector3",
-                  "elements": [7.37,0.83,0]
+                  "elements": [9.19,-1.43,0]
                 },
                 {
                   "$class": "Vector3",
-                  "elements": [10.370000000000001,5.83,0]
-                },
-                {
-                  "$class": "Vector3",
-                  "elements": [3.37,10.83,0]
-                },
-                {
-                  "$class": "Vector3",
-                  "elements": [6.37,16.83,0]
+                  "elements": [5.1899999999999995,10.57,0]
                 }
-              ],
-              "trim": null
+              ]
             },
             {
               "$class": "Line",
@@ -297,11 +288,11 @@
               "points": [
                 {
                   "$class": "Vector3",
-                  "elements": [6.37,16.83,0]
+                  "elements": [5.1899999999999995,10.57,0]
                 },
                 {
                   "$class": "Vector3",
-                  "elements": [1.37,16.83,0]
+                  "elements": [2.19,10.57,0]
                 }
               ]
             },
@@ -311,11 +302,11 @@
               "points": [
                 {
                   "$class": "Vector3",
-                  "elements": [1.37,16.83,0]
+                  "elements": [2.19,10.57,0]
                 },
                 {
                   "$class": "Vector3",
-                  "elements": [1.37,0.83,0]
+                  "elements": [2.19,-1.43,0]
                 }
               ]
             },
@@ -325,11 +316,11 @@
               "points": [
                 {
                   "$class": "Vector3",
-                  "elements": [1.37,-50,0]
+                  "elements": [2.19,-50,0]
                 },
                 {
                   "$class": "Vector3",
-                  "elements": [1.37,50,0]
+                  "elements": [2.19,50,0]
                 }
               ],
               "isReference": true
@@ -477,7 +468,7 @@
             }
           ],
           "keepTools": false,
-          "operation": "intersect"
+          "operation": "join"
         },
         "expressions": {},
         "measures": {},

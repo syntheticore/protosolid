@@ -420,9 +420,13 @@ fn outward_corner(
     let mut ordered = vec![first];
     while !unpaired.is_empty() {
         let end = ordered.last().unwrap().1[2];
-        let next = unpaired.iter().position(|(_, points)| {
+        let Some(next) = unpaired.iter().position(|(_, points)| {
             points[0].distance(end).min(points[2].distance(end)) <= linear
-        }).ok_or_else(|| topology_error("rounded offset vertex has an open normal contour"))?;
+        }) else {
+            // A mixed corner can have an open fan of outward edge joins.
+            // The adjoining faces trim those joins against one another.
+            return Ok(None);
+        };
         let mut next = unpaired.swap_remove(next);
         if next.1[0].distance(end) > linear {
             next.0.range = next.0.range.reversed();
@@ -431,7 +435,7 @@ fn outward_corner(
         ordered.push(next);
     }
     if ordered[0].1[0].distance(ordered.last().unwrap().1[2]) > linear {
-        return Err(topology_error("rounded offset vertex has an open normal contour"));
+        return Ok(None);
     }
     // Put the normal contour around the equator, away from both chart poles.
     let radial = ordered.iter().map(|(_, points)| points[1] - center).sum::<crate::Vec3>().normalize();
@@ -1077,13 +1081,13 @@ pub(crate) fn shell(
         return assemble_shell_boundary(source, &rounded, &opening_ids, distance);
     }
     let outward_envelope = |error| {
-        if distance <= 0.0 || !opening_ids.is_empty() || converging || divergent_edges.is_empty() {
+        if distance <= 0.0 || !opening_ids.is_empty() || divergent_edges.is_empty() {
             return Err(error);
         }
         // Convex outward joins already have their centers on the source
         // edges and vertices, even when the sharp intermediate is invalid.
         let rounded = offset_regions_with_joins(source, None, &divergent_edges, &opening_ids,
-            distance, false, false)?;
+            distance, false, converging)?;
         assemble_shell_boundary(source, &rounded, &opening_ids, distance)
     };
     let (raw_offset, has_vanished_blends) = match offset_body(source, &opening_ids, distance, false, None) {

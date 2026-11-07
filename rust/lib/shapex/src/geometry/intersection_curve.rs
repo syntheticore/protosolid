@@ -535,6 +535,20 @@ impl SurfaceProjectionPcurve2 {
             return Ok((domains[0].nearest(uv.0, guide.x) + lift.x,
                 domains[1].nearest(uv.1, guide.y) + lift.y));
         }
+        if let Surface3::RollingBall(blend) = self.surface.as_ref() {
+            if guide.y == 0.0 || guide.y == 1.0 {
+                // At a nearly tangent contact rail the transverse direction
+                // can be too weak to invert the full chart. Resolve the
+                // exact one-dimensional rail instead.
+                let range = blend.center_range();
+                let chart = Line2::new(Point2::new(0.0, guide.y), Vec2::unit_x())?.into();
+                let rail = self.surface.boundary_curve(chart, range, self.tolerance)?;
+                let projection = rail.project_on_trim(target, range, self.tolerance)?;
+                if projection.distance <= self.tolerance.linear_at_scale(scale) {
+                    return Ok((domains[0].nearest(projection.parameter, guide.x) + lift.x, guide.y + lift.y));
+                }
+            }
+        }
         Err(KernelError::new(
             DiagnosticKind::NumericalFailure,
             "exact curve-to-surface parameter correction did not converge",

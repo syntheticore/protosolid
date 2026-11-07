@@ -20,10 +20,18 @@ pub(crate) fn move_faces(
     let mut supports = BTreeMap::new();
     let mut bounds = BTreeMap::new();
     let mut displacement = transform.translation().magnitude();
-    for face in faces {
-        for edge in topology.face_edges(face.topology_id())? {
-            for vertex in topology.edge(edge)?.vertices() {
-                let point = topology.vertex(vertex)?.point();
+    if transform.rotation() != crate::Matrix3::identity() {
+        let mut edges = BTreeSet::new();
+        for face in faces {
+            edges.extend(topology.face_edges(face.topology_id())?);
+        }
+        for id in edges {
+            let edge = topology.edge(id)?;
+            let range = edge.range();
+            // Closed edges can have their only vertex on the rotation axis.
+            // Include interior points when sizing the support continuation.
+            for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let point = edge.curve().first_order(range.start + fraction * range.span())?.0;
                 displacement = displacement.max(point.distance(transform.transform_point(point)));
             }
         }

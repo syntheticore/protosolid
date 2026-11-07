@@ -39,7 +39,7 @@ pub(super) fn offset_body(
                 collapsed.insert(*face_id, support);
                 continue;
             }
-            base.offset(distance * orientation, tolerance)?
+            offset_support(&base, face_bounds, distance * orientation, tolerance)?
         };
         let expanded = expanded_offset_bounds(&surface, face_bounds, distance, tolerance)?;
         supports.insert(*face_id, surface);

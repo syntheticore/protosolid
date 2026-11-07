@@ -737,33 +737,44 @@ impl NurbsSurface3 {
             self.control_points[0].len() == p + 1,
             self.control_points.len() == q + 1,
         ];
-        let padding = std::array::from_fn::<_, 2, _>(|axis| {
+        let mut padding = std::array::from_fn::<_, 2, _>(|axis| {
             if extend_axis[axis] && self.domains()[axis].period.is_none() {
                 padding[axis]
             } else {
                 0.0
             }
         });
+        if padding.iter().any(|value| !value.is_finite()) {
+            return Err(invalid("NURBS continuation requires finite padding"));
+        }
         // Blossom evaluation gives the controls on any affine subinterval,
         // including an interval extending beyond [0, 1], in homogeneous space.
-        let extend = |controls: &[Vec4], axis: usize| -> Vec<Vec4> {
-            if padding[axis] == 0.0 {
-                return controls.to_vec();
+        let mut net = self.homogeneous_rows();
+        for (axis, padding) in padding.iter_mut().enumerate() {
+            if *padding == 0.0 { continue; }
+            let mut rows = if axis == 0 {
+                net
+            } else {
+                (0..net[0].len()).map(|column| net.iter().map(|row| row[column]).collect()).collect()
+            };
+            // Extrapolation can leave the positive rational basis. Shorten
+            // the collar on this axis while preserving the original patch.
+            loop {
+                let a = -*padding / ranges[axis].span();
+                let extended = rows.iter()
+                    .map(|row| bezier_controls_on_interval(row, a, 1.0 - a))
+                    .collect::<Vec<_>>();
+                if extended.iter().flatten().all(|value| value.w.is_finite() && value.w > 0.0) {
+                    rows = extended;
+                    break;
+                }
+                *padding *= 0.5;
             }
-            let a = -padding[axis] / ranges[axis].span();
-            let b = 1.0 - a;
-            bezier_controls_on_interval(controls, a, b)
-        };
-        let mut net = self
-            .homogeneous_rows()
-            .iter()
-            .map(|row| extend(row, 0))
-            .collect::<Vec<_>>();
-        for column in 0..net[0].len() {
-            let controls = net.iter().map(|row| row[column]).collect::<Vec<_>>();
-            for (row, value) in extend(&controls, 1).into_iter().enumerate() {
-                net[row][column] = value;
-            }
+            net = if axis == 0 {
+                rows
+            } else {
+                (0..rows[0].len()).map(|column| rows.iter().map(|row| row[column]).collect()).collect()
+            };
         }
         let knots = |axis: usize, degree: usize| {
             if padding[axis] == 0.0 {

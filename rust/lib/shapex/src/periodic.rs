@@ -262,6 +262,28 @@ impl Transaction<'_> {
             let mut crossing = Vec::<(EdgeId, f64, Option<VertexId>, f64)>::new();
             while !seam.coedges.contains(&current) {
                 let value = self.working.coedge(current)?;
+                let edge = self.working.edge(value.edge)?;
+                let mut record = |parameter: f64, uv: Point2| {
+                    let fraction = (parameter - value.range.start) / value.range.span();
+                    let endpoint = if fraction.abs() <= tolerance.parameter * 64.0 {
+                        Some(edge.vertices[usize::from(!value.forward)])
+                    } else if (fraction - 1.0).abs() <= tolerance.parameter * 64.0 {
+                        Some(edge.vertices[usize::from(value.forward)])
+                    } else {
+                        None
+                    };
+                    if endpoint.is_none() || !crossing.iter().any(|hit| hit.2 == endpoint) {
+                        crossing.push((value.edge, value.edge_parameter(edge, parameter), endpoint, uv[other_axis]));
+                    }
+                };
+                // A trim vertex on the proposed cut counts even when the
+                // curve-pair solve misses an endpoint or a tangential hit.
+                for parameter in [value.range.start, value.range.end] {
+                    let uv = value.pcurve.first_order(parameter)?.0;
+                    if domain.equivalent(uv[axis], target, tolerance.parameter * 64.0) {
+                        record(parameter, uv);
+                    }
+                }
                 let midpoint = value.pcurve.evaluate(value.range.middle())?.point[axis];
                 let lifted = domain.nearest(target, midpoint);
                 let mut origin = Point2::new(0.0, 0.0);
@@ -278,26 +300,7 @@ impl Transaction<'_> {
                     let parameter = hit.first_parameter;
                     let fraction = (parameter - value.range.start) / value.range.span();
                     if fraction >= -tolerance.parameter && fraction <= 1.0 + tolerance.parameter {
-                        let edge = self.working.edge(value.edge)?;
-                        let parameter = edge.range.start
-                            + edge.range.span()
-                                * if value.forward {
-                                    fraction
-                                } else {
-                                    1.0 - fraction
-                                };
-                        let endpoint = if fraction.abs() <= tolerance.parameter * 64.0 {
-                            Some(edge.vertices[usize::from(!value.forward)])
-                        } else if (fraction - 1.0).abs() <= tolerance.parameter * 64.0 {
-                            Some(edge.vertices[usize::from(value.forward)])
-                        } else {
-                            None
-                        };
-                        if endpoint.is_none() || !crossing.iter().any(|hit| hit.2 == endpoint) {
-                            let transverse =
-                                value.pcurve.evaluate(hit.first_parameter)?.point[other_axis];
-                            crossing.push((value.edge, parameter, endpoint, transverse));
-                        }
+                        record(parameter, value.pcurve.first_order(parameter)?.0);
                     }
                 }
                 current = value.next;

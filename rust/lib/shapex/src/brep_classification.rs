@@ -255,12 +255,24 @@ impl<'a> BrepClassifier<'a> {
             if let Ok(projection) = surface.project(point, self.tolerance) {
                 if self.in_trim(face, projection.parameters)? {
                     if projection.distance <= linear { return Ok(PointClassification::Boundary); }
-                    minimum.consider(projection.point,
-                        surface.normal(projection.parameters.0, projection.parameters.1)? * sign, point, linear);
-                    // These supports have a global analytical projection. Once
-                    // it lies in the trim, an edge cannot be a closer minimum.
-                    if matches!(surface, Surface3::Plane(_) | Surface3::Cylinder(_)
-                        | Surface3::Cone(_) | Surface3::Sphere(_) | Surface3::Torus(_)) { continue; }
+                    let (u, v) = projection.parameters;
+                    let on_domain_end = surface.domains().into_iter().zip([u, v]).any(|(domain, value)| {
+                        domain.period.is_none() && matches!(domain.bounds, super::DomainBounds::Bounded(range)
+                            if (value - range.start).abs().min((value - range.end).abs()) <= self.tolerance.parameter)
+                    });
+                    let stationary = if on_domain_end {
+                        let (position, du, dv) = surface.first_order(u, v)?;
+                        stationary_projection(point - position, du, dv, linear)
+                    } else {
+                        true
+                    };
+                    if stationary {
+                        minimum.consider(projection.point, surface.normal(u, v)? * sign, point, linear);
+                        // These supports have a global analytical projection.
+                        // Once it lies in the trim, an edge cannot be closer.
+                        if matches!(surface, Surface3::Plane(_) | Surface3::Cylinder(_)
+                            | Surface3::Cone(_) | Surface3::Sphere(_) | Surface3::Torus(_)) { continue; }
+                    }
                 }
             }
             for boundary in &face.boundary {
@@ -281,9 +293,14 @@ impl<'a> BrepClassifier<'a> {
                 minimum.consider(projection.point, normal, point, linear);
                 let uv = refine_face_projection(surface, point, uv, face.parameters, self.tolerance)?;
                 if self.in_trim(face, (uv.x, uv.y))? {
-                    let (position, _, _) = surface.first_order(uv.x, uv.y)?;
+                    let (position, du, dv) = surface.first_order(uv.x, uv.y)?;
                     if position.distance(point) <= linear { return Ok(PointClassification::Boundary); }
-                    minimum.consider(position, surface.normal(uv.x, uv.y)? * sign, point, linear);
+                    let on_trim_box = face.parameters.into_iter().zip([uv.x, uv.y]).any(|(range, value)| {
+                        (value - range.start).abs().min((value - range.end).abs()) <= self.tolerance.parameter
+                    });
+                    if !on_trim_box || stationary_projection(point - position, du, dv, linear) {
+                        minimum.consider(position, surface.normal(uv.x, uv.y)? * sign, point, linear);
+                    }
                 }
             }
         }
@@ -314,6 +331,12 @@ impl BoundaryMinimum {
             self.normal += normal;
         }
     }
+}
+
+fn stationary_projection(residual: Vec3, du: Vec3, dv: Vec3, linear: f64) -> bool {
+    // A projection clamped to the end of a support must use the trim
+    // normals, since its residual need not be normal to this face.
+    [du, dv].into_iter().all(|tangent| residual.dot(tangent).abs() <= linear * tangent.magnitude())
 }
 
 fn bounds_distance(bounds: Bounds, point: Point3) -> f64 {

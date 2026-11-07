@@ -1474,13 +1474,14 @@ fn arrange_regions(
             continue;
         }
         if matches!(piece.curve, Curve3::SurfaceIntersection(_))
-            && !(matches!(surface, Surface3::RollingBall(_)) && surface.domains()[0].period.is_none()
+            && !((matches!(surface, Surface3::RollingBall(_)) && surface.domains()[0].period.is_none()
+                || matches!(surface, Surface3::Swept(_) | Surface3::Revolved(_)))
                 && matches!(piece.pcurve, Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_)))
         {
             // A tracing spline selects the intersection branch but is not the
             // intersection itself. Center side probes on the corrected curve.
-            // Exact p-curves on open rolling joins already select that branch;
-            // a global blend projection can land on a different local minimum.
+            // Exact p-curves already select that branch. A global projection
+            // can land on a different local minimum or change the UV chart.
             let point = piece.curve.evaluate(parameter)?.point;
             let projection = surface.project(point, tolerance)?;
             uv = nearest_uv(
@@ -1667,7 +1668,9 @@ fn arrange_regions(
         // Enclosing loops must be classified before their holes, regardless
         // of which source face supplied the first arrangement edge.
         loops.sort_by(|first, second| second.1.abs().total_cmp(&first.1.abs()));
-        let mut classified = Vec::<(Vec<DirectedPiece>, Vec<Point2>, f64, bool, Point2)>::new();
+        let curved_nesting = loops.len() > 1 && matches!(surface, Surface3::Plane(_));
+        let mut classified = Vec::<(Vec<DirectedPiece>, Vec<Point2>, f64, bool, Option<usize>)>::new();
+        let mut planar_trims: Vec<(Vec<FaceCurve>, _)> = Vec::new();
         for (mut loop_, area) in loops {
             if area.abs() <= tolerance.parameter.powi(2) {
                 continue;
@@ -1677,34 +1680,51 @@ fn arrange_regions(
             // outside it, while a boundary sample can lie on a shared chart
             // seam and mistake an adjacent region for an enclosing one.
             let sample = polygon_interior_point(&polygon)?;
+            let mut nesting = 0;
+            let mut parent = None;
+            for (index, (_, enclosing, enclosing_area, is_outer, _)) in classified.iter().enumerate() {
+                if enclosing_area.abs() <= area.abs() {
+                    continue;
+                }
+                let contains = if curved_nesting {
+                    let (boundary, samples) = &planar_trims[index];
+                    point_in_sampled_trim(sample, boundary, samples)?
+                } else {
+                    point_in_polygon(sample, enclosing)
+                };
+                if contains {
+                    nesting += 1;
+                    if *is_outer { parent = Some(index); }
+                }
+            }
             let outer = if section.is_some() {
                 // Plane clipping already orients every retained boundary
                 // from the source face and the cut normal. A coarse polygon
                 // nesting test can reverse a resolved thin crescent.
                 area.signum() == orientation_sign
             } else {
-                classified.iter().filter(|(_, enclosing, enclosing_area, _, _)| {
-                    enclosing_area.abs() > area.abs() && point_in_polygon(sample, enclosing)
-                }).count() % 2 == 0
+                nesting % 2 == 0
             };
             let desired_sign = orientation_sign * if outer { 1.0 } else { -1.0 };
             if area.signum() != desired_sign.signum() {
                 loop_.reverse();
                 loop_ = loop_.into_iter().map(|piece| piece.reversed()).collect();
             }
-            classified.push((loop_, polygon, area, outer, sample));
+            if curved_nesting {
+                let boundary = loop_.iter().enumerate().map(|(index, piece)| FaceCurve {
+                    provenance: piece.provenance.clone(),
+                    curve: piece.curve.clone(),
+                    pcurve: piece.pcurve.clone(),
+                    range: piece.range,
+                    loop_end: index + 1 == loop_.len(),
+                    loop_kind: LoopKind::Outer,
+                    parameter_seam: false,
+                }).collect::<Vec<_>>();
+                let samples = trim_samples(&boundary)?;
+                planar_trims.push((boundary, samples));
+            }
+            classified.push((loop_, polygon, area, outer, parent));
         }
-        // A hole bounds only its innermost enclosing outer loop. Nested
-        // regions (for example concentric annuli) would otherwise reuse it.
-        let parents = classified.iter().map(|(_, _, hole_area, is_outer, sample)| {
-            if *is_outer { return None; }
-            classified.iter().enumerate()
-                .filter(|(_, (_, polygon, area, outer, _))| {
-                    *outer && area.abs() > hole_area.abs() && point_in_polygon(*sample, polygon)
-                })
-                .min_by(|(_, first), (_, second)| first.2.abs().total_cmp(&second.2.abs()))
-                .map(|(index, _)| index)
-        }).collect::<Vec<_>>();
         for outer_index in classified
             .iter()
             .enumerate()
@@ -1716,8 +1736,9 @@ fn arrange_regions(
                 kind: LoopKind::Outer,
                 segments: patch_segments(outer),
             }];
-            for ((hole, ..), parent) in classified.iter().zip(&parents) {
-                if *parent == Some(outer_index) {
+            // Each hole belongs to its smallest enclosing outer loop.
+            for (hole, _, _, is_outer, parent) in &classified {
+                if !is_outer && *parent == Some(outer_index) {
                     patch_loops.push(BrepPatchLoop {
                         kind: LoopKind::Inner,
                         segments: patch_segments(hole),

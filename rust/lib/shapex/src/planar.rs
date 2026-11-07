@@ -201,6 +201,16 @@ impl ProjectedCurve2 {
     pub fn range(&self) -> ParameterRange {
         self.range
     }
+    pub(crate) fn extended(&self, range: ParameterRange) -> KernelResult<Self> {
+        let curve = if self.curve.domain().contains_range(range, 0.0) {
+            self.curve.clone()
+        } else if let super::Curve3::SurfaceIntersection(curve) = self.curve.as_ref() {
+            Box::new(curve.extended(range)?.into())
+        } else {
+            return Err(invalid("projected curve source cannot cover its extension"));
+        };
+        Ok(Self { curve, plane: self.plane, range })
+    }
     pub(crate) fn evaluate(&self, u: f64) -> KernelResult<Curve2Evaluation> {
         let value = self.curve.evaluate(u)?;
         let vector = |v: crate::Vec3| {

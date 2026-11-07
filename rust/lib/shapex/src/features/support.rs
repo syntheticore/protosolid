@@ -174,7 +174,27 @@ pub(crate) fn support_patches(
                                 &edges,
                                 &supports,
                                 tolerance,
-                            ) {
+                            ).or_else(|error| {
+                                // The old corner can be on the wrong side of
+                                // a nearly tangent wall. Seed the same triple
+                                // from its retained pairwise intersections.
+                                for id in &uses {
+                                    let edge_faces = topology.edge_faces(*id)?;
+                                    let Some(third) = subset.iter().find(|face| !edge_faces.contains(face)) else { continue; };
+                                    let surface = &supports[third];
+                                    let curve = &edges[id].curve;
+                                    let (Ok(rail), Ok(uv)) = (curve.project(source_point, tolerance),
+                                        surface.project(source_point, tolerance)) else { continue; };
+                                    if let Ok(hit) = curve.intersect_surface_near(surface, rail.parameter, uv.parameters, tolerance) {
+                                        if let Ok(point) = refine_offset_corner(
+                                            topology, vertex, hit.point, &subset, &uses, &edges, &supports, tolerance,
+                                        ) {
+                                            return Ok(point);
+                                        }
+                                    }
+                                }
+                                Err(error)
+                            }) {
                                 ends.push((point, uses));
                             }
                         }

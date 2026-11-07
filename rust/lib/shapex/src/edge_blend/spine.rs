@@ -2,7 +2,13 @@
 //! rolling center, and how each spine ends or continues at its vertices.
 
 use super::*;
-use crate::{geometry_error, invalid, topology_error, unsupported, ConstructionBranch, ConstructionTag};
+use crate::{geometry_error, invalid, topology_error, unsupported, ConstructionBranch, ConstructionTag, CurveEvaluation};
+
+struct BlendSide {
+    concave: bool,
+    cusp_inward: Option<Vec3>,
+    support_normals: [Vec3; 2],
+}
 
 impl Transaction<'_> {
     /// Decide how `spine` ends at its endpoint `endpoint_index`. A spine whose
@@ -184,8 +190,8 @@ impl Transaction<'_> {
         let walls = self.working.edge_faces(seam_edge)?;
         if walls.len() == 2 {
             let surfaces = [self.working.face(walls[0])?.surface.clone(), self.working.face(walls[1])?.surface.clone()];
-            let midpoint = seam.curve.evaluate((seam.range.start + seam.range.end) * 0.5)?.point;
-            if !self.blend_edge_is_concave(seam, [seam.coedges[0], seam.coedges[1]], [walls[0], walls[1]], &surfaces, midpoint)? {
+            let midpoint = seam.curve.evaluate(seam.range.middle())?;
+            if !self.blend_side(seam, [seam.coedges[0], seam.coedges[1]], [walls[0], walls[1]], &surfaces, midpoint)?.concave {
                 return Ok(None);
             }
         }
@@ -399,18 +405,10 @@ impl Transaction<'_> {
             let bounds = super::super::features::face_parameter_bounds(&self.working, faces[index], tolerance)?;
             *surface = super::super::features::extended_support(surface, bounds, size.abs() + collar, tolerance)?;
         }
-        let midpoint = edge
-            .curve
-            .evaluate((edge.range.start + edge.range.end) * 0.5)?
-            .point;
-        let concave = self.blend_edge_is_concave(&edge, uses, faces, &parent_surfaces, midpoint)?;
-        let support_normals = || {
-            (0..2).map(|index| {
-                let uv = parent_surfaces[index].project(midpoint, tolerance)?.parameters;
-                let sign = if self.working.face(faces[index])?.orientation == FaceOrientation::Forward { 1.0 } else { -1.0 };
-                Ok(parent_surfaces[index].normal(uv.0, uv.1)? * sign)
-            }).collect::<KernelResult<Vec<_>>>()
-        };
+        let sample = edge.curve.evaluate(edge.range.middle())?;
+        let midpoint = sample.point;
+        let BlendSide { concave, cusp_inward, support_normals } =
+            self.blend_side(&edge, uses, faces, &parent_surfaces, sample)?;
         // Equal setbacks on planar supports correspond to r = d cot(theta/2),
         // where theta is the angle between outward normals. Perpendicular rims
         // retain r = d, including plane/cylinder tangent chains.
@@ -442,9 +440,8 @@ impl Transaction<'_> {
                 source.offsets[index]
             })
         } else if kind == EdgeBlendKind::Chamfer {
-            let normals = support_normals()?;
-            let cosine = normals[0].dot(normals[1]).clamp(-1.0, 1.0);
-            if let Some(settings) = chamfer {
+            let cosine = support_normals[0].dot(support_normals[1]).clamp(-1.0, 1.0);
+            let dimensions = chamfer.map(|settings| {
                 let reference = settings.reference_faces.get(&edge.name).ok_or_else(|| {
                     invalid("chamfer edge has no reference face")
                 })?;
@@ -458,8 +455,13 @@ impl Transaction<'_> {
                     .ok_or_else(|| {
                         invalid("chamfer reference face must border its edge")
                     })?;
+                Ok::<_, KernelError>((first, settings.mode))
+            }).transpose()?;
+            if let Some(inward) = cusp_inward {
+                self.cusp_chamfer_offsets(&parent_surfaces, faces, midpoint, inward, concave, size, dimensions)?
+            } else if let Some((first, mode)) = dimensions {
                 let sine = (1.0 - cosine * cosine).sqrt();
-                let second = match settings.mode {
+                let second = match mode {
                     ChamferMode::TwoDistances(distance) => distance,
                     ChamferMode::DistanceAngle(angle) => {
                         let denominator = sine * angle.cos() - cosine * angle.sin();
@@ -479,8 +481,7 @@ impl Transaction<'_> {
                 [size * ((1.0 + cosine) / (1.0 - cosine)).sqrt(); 2]
             }
         } else if kind.constant_width() {
-            let normals = support_normals()?;
-            let chord_factor = (normals[0] - normals[1]).magnitude();
+            let chord_factor = (support_normals[0] - support_normals[1]).magnitude();
             if chord_factor <= tolerance.angular {
                 return Err(unsupported("constant-width fillet requires distinct support normals"));
             }
@@ -542,30 +543,30 @@ impl Transaction<'_> {
                 }
             }
         };
-        let mut center = candidates
+        let (mut center, projection) = candidates
             .into_iter()
             .filter_map(|candidate| {
-                candidate
-                    .curve
-                    .project(midpoint, tolerance)
-                    .ok()
-                    .map(|projection| (candidate, projection.distance))
+                let projection = candidate.curve.project(midpoint, tolerance).ok()?;
+                if cusp_inward.is_some_and(|inward| (projection.point - midpoint).dot(inward) <= tolerance.linear) {
+                    return None;
+                }
+                Some((candidate, projection))
             })
-            .min_by(|first, second| first.1.total_cmp(&second.1))
-            .map(|candidate| candidate.0)
+            .min_by(|first, second| first.1.distance.total_cmp(&second.1.distance))
             .ok_or_else(|| {
                 KernelError::new(
                     DiagnosticKind::NumericalFailure,
                     "blend could not select the local offset intersection branch",
                 )
             })?;
+        let mut middle_parameter = projection.parameter;
         if shared.is_none() && !local_guide && edge.vertices[0] != edge.vertices[1] {
-            if let Some(chart) = open_blend_chart(&center, &edge, tolerance)? {
+            if let Some(chart) = open_blend_chart(&center, &edge, middle_parameter, tolerance)? {
+                middle_parameter = chart.curve.project(midpoint, tolerance)?.parameter;
                 center = chart;
             }
         }
 
-        let middle_parameter = center.curve.project(midpoint, tolerance)?.parameter;
         let endpoint_seeds = edge
             .vertices
             .iter()
@@ -585,7 +586,6 @@ impl Transaction<'_> {
         let endpoint_seeds = [endpoint_seeds[0], endpoint_seeds[1]];
         let domain = center.curve.domain();
         let endpoint_seeds = if domain.period.is_some() {
-            let middle_parameter = center.curve.project(midpoint, tolerance)?.parameter;
             let middle = domain.nearest(middle_parameter, endpoint_seeds[0]);
             [
                 endpoint_seeds[0],
@@ -666,15 +666,14 @@ impl Transaction<'_> {
         })
     }
 
-    fn blend_edge_is_concave(
+    fn blend_side(
         &self,
         edge: &Edge,
         uses: [CoedgeId; 2],
         faces: [FaceId; 2],
         parent_surfaces: &[Surface3; 2],
-        midpoint: Point3,
-    ) -> KernelResult<bool> {
-        let parameter = (edge.range.start + edge.range.end) * 0.5;
+        midpoint: CurveEvaluation,
+    ) -> KernelResult<BlendSide> {
         let use_value = self.working.coedge(uses[0])?;
         let traversal = if edge.range.span() == 0.0 {
             if use_value.forward {
@@ -685,23 +684,115 @@ impl Transaction<'_> {
         } else {
             use_value.range.span().signum()
         };
-        let tangent = edge.curve.evaluate(parameter)?.first_derivative * traversal;
-        let mut normals = [Vec3::new(0.0, 0.0, 0.0); 2];
+        let tangent = midpoint.first_derivative.normalize() * traversal;
+        let mut support_normals = [Vec3::new(0.0, 0.0, 0.0); 2];
+        let mut parameters = [(0.0, 0.0); 2];
         for index in 0..2 {
             let uv = parent_surfaces[index]
-                .project(midpoint, self.kernel.tolerance)?
+                .project(midpoint.point, self.kernel.tolerance)?
                 .parameters;
-            normals[index] = parent_surfaces[index].normal(uv.0, uv.1)?;
-            if self.working.face(faces[index])?.orientation == FaceOrientation::Reversed {
-                normals[index] = -normals[index];
+            parameters[index] = uv;
+            let normal = parent_surfaces[index].normal(uv.0, uv.1)?;
+            support_normals[index] = normal * self.working.face(faces[index])?.orientation.sign();
+        }
+        let normals = support_normals.map(|normal| normal.normalize());
+        let signed_turn = tangent.dot(normals[0].cross(normals[1]));
+        if signed_turn.abs() > self.kernel.tolerance.angular {
+            return Ok(BlendSide { concave: signed_turn < 0.0, cusp_inward: None, support_normals });
+        }
+        if normals[0].dot(normals[1]) < 0.0 {
+            // At a cusp both face interiors extend along the same tangent.
+            // Their transverse curvature orders the two sheets across it.
+            let inward = normals[0].cross(tangent).normalize();
+            let bending = |index: usize| {
+                let (u, v) = parameters[index];
+                let sample = parent_surfaces[index].evaluate(u, v)?;
+                let normal = sample.du.cross(sample.dv);
+                let area = normal.magnitude2();
+                let du = inward.cross(sample.dv).dot(normal) / area;
+                let dv = sample.du.cross(inward).dot(normal) / area;
+                Ok::<_, KernelError>(normals[0].dot(
+                    sample.duu * du.powi(2) + sample.duv * (2.0 * du * dv) + sample.dvv * dv.powi(2),
+                ))
+            };
+            let [first, second] = [bending(0)?, bending(1)?];
+            if (first - second).abs() > f64::EPSILON * 64.0 * first.abs().max(second.abs()) {
+                return Ok(BlendSide { concave: first < second, cusp_inward: Some(inward), support_normals });
             }
-            normals[index] = normals[index].normalize();
         }
-        let signed_turn = tangent.normalize().dot(normals[0].cross(normals[1]));
-        if signed_turn.abs() <= self.kernel.tolerance.angular {
-            return Err(unsupported("blend edge has no well-defined convex or concave dihedral"));
+        Err(unsupported("blend edge has no well-defined convex or concave dihedral"))
+    }
+
+    /// Use the true transverse section where the tangent-plane setback
+    /// formula degenerates at a plane/cylinder cusp.
+    fn cusp_chamfer_offsets(
+        &self,
+        surfaces: &[Surface3; 2],
+        faces: [FaceId; 2],
+        tip: Point3,
+        inward: Vec3,
+        concave: bool,
+        size: f64,
+        dimensions: Option<(usize, ChamferMode)>,
+    ) -> KernelResult<[f64; 2]> {
+        let (cylindrical, cylinder) = match surfaces {
+            [Surface3::Cylinder(cylinder), Surface3::Plane(_)] => (0, cylinder),
+            [Surface3::Plane(_), Surface3::Cylinder(cylinder)] => (1, cylinder),
+            _ => return Err(unsupported("a cusp chamfer requires a planar and a cylindrical support")),
+        };
+        let tolerance = self.kernel.tolerance;
+        let (u, v) = surfaces[cylindrical].project(tip, tolerance)?.parameters;
+        let angular_direction = cylinder.evaluate(u, v)?.du.dot(inward).signum();
+        let setback = |side, distance| {
+            if side == cylindrical {
+                let angle = distance / cylinder.radius();
+                if angle >= std::f64::consts::PI {
+                    return Err(invalid("chamfer setback exceeds the local cylindrical section"));
+                }
+                let value = cylinder.evaluate(u + angular_direction * angle, v)?;
+                Ok((value.point, value.du.normalize() * angular_direction))
+            } else {
+                Ok((tip + inward * distance, inward))
+            }
+        };
+        let normal_at = |side: usize, point| -> KernelResult<Vec3> {
+            let (u, v) = surfaces[side].project(point, tolerance)?.parameters;
+            Ok(surfaces[side].normal(u, v)? * self.working.face(faces[side])?.orientation.sign())
+        };
+        let (first, mode) = dimensions.unwrap_or((0, ChamferMode::TwoDistances(size)));
+        let second = 1 - first;
+        let (first_contact, first_tangent) = setback(first, size)?;
+        let first_normal = normal_at(first, first_contact)?;
+        let sign = if concave { 1.0 } else { -1.0 };
+        let second_contact = match mode {
+            ChamferMode::TwoDistances(distance) => setback(second, distance)?.0,
+            ChamferMode::DistanceAngle(angle) => {
+                let direction = -first_tangent * angle.cos() + first_normal * (sign * angle.sin());
+                let ray = Curve3::from(crate::Line3::new(first_contact, direction)?);
+                let IntersectionSet::Isolated(hits) = ray.intersect_surface(&surfaces[second], tolerance)? else {
+                    return Err(invalid("chamfer angle does not intersect the opposite face"));
+                };
+                hits.into_iter()
+                    .filter(|hit| hit.curve_parameter > tolerance.linear
+                        && (hit.point - tip).dot(inward) > tolerance.linear)
+                    .min_by(|a, b| a.curve_parameter.total_cmp(&b.curve_parameter))
+                    .ok_or_else(|| invalid("chamfer angle does not intersect the opposite face"))?
+                    .point
+            }
+        };
+        let second_normal = normal_at(second, second_contact)?;
+        // The spine is the intersection of the two contact normals. Express
+        // it as offsets so the usual trimming and junction code can use it.
+        let cross = first_normal.cross(second_normal);
+        let denominator = cross.magnitude2();
+        if denominator <= tolerance.angular.powi(2) {
+            return Err(invalid("cusp chamfer contacts have parallel normals"));
         }
-        Ok(signed_turn < 0.0)
+        let delta = second_contact - first_contact;
+        let mut offsets = [0.0; 2];
+        offsets[first] = sign * delta.cross(second_normal).dot(cross) / denominator;
+        offsets[second] = sign * delta.cross(first_normal).dot(cross) / denominator;
+        Ok(offsets)
     }
 
     fn tangent_chain_continuation(
@@ -868,18 +959,18 @@ impl Transaction<'_> {
                 let supports = [first_face.surface.clone(), second_face.surface.clone()];
                 let Ok(midpoint) = value
                     .curve
-                    .evaluate((value.range.start + value.range.end) * 0.5)
+                    .evaluate(value.range.middle())
                 else {
                     return false;
                 };
-                self.blend_edge_is_concave(
+                self.blend_side(
                     value,
                     [value.coedges[0], value.coedges[1]],
                     [faces[0], faces[1]],
                     &supports,
-                    midpoint.point,
+                    midpoint,
                 )
-                .is_ok_and(|concave| continues_direction || concave == spine.concave)
+                .is_ok_and(|side| continues_direction || side.concave == spine.concave)
             });
             if let Some(continuation) = continuation {
                 if kind == EdgeBlendKind::Chamfer && !selected.contains(&continuation) {

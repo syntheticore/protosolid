@@ -87,6 +87,84 @@ fn fillet_modes_build_and_tessellate_a_closed_cylinder_rim() {
 }
 
 #[test]
+fn edge_blends_treat_both_cusps_of_a_tangent_cylindrical_notch() {
+    let tolerance = ModelTolerance::default();
+    let notch_radius = 15.0;
+    let fillet_radius = 0.1;
+    let corners = [
+        Point2::new(0.0, 0.0),
+        Point2::new(2.0 * notch_radius, 0.0),
+        Point2::new(2.0 * notch_radius, 90.0),
+        Point2::new(0.0, 90.0),
+    ];
+    let notch = TrimmedCurve2::new(
+        crate::Circle2::new(Point2::new(notch_radius, 0.0), notch_radius).unwrap(),
+        ParameterRange::new(std::f64::consts::PI, 0.0).unwrap(),
+    ).unwrap();
+    let wire = Wire2::new([
+        notch,
+        TrimmedCurve2::line(corners[1], corners[2]).unwrap(),
+        TrimmedCurve2::line(corners[2], corners[3]).unwrap(),
+        TrimmedCurve2::line(corners[3], corners[0]).unwrap(),
+    ], tolerance).unwrap();
+    let body = Profile::new(wire, [], tolerance).unwrap()
+        .extrude(Plane3::xy(), Vec3::unit_z() * 13.0).unwrap();
+    let tips = body.edges().filter(|edge| {
+        matches!(edge.curve(), Curve3::Line(_))
+            && edge.endpoints().unwrap().iter().all(|point| point.y.abs() < tolerance.linear)
+    }).cloned().collect::<Vec<_>>();
+    assert_eq!(tips.len(), 2);
+    for tip in tips {
+        let edges = std::slice::from_ref(&tip);
+        let rounded = body.fillet_with_options(edges,
+            FilletOptions::new(fillet_radius).with_tangent_propagation(true)).unwrap();
+        assert_eq!(rounded.faces().count(), body.faces().count() + 1);
+        assert!(rounded.volume() < body.volume());
+        let (radius, center) = rounded.faces().find_map(|face| match face.surface() {
+            Surface3::RollingBall(blend) => Some((blend.radius(),
+                blend.center_curve().evaluate(blend.center_range().middle()).unwrap().point)),
+            Surface3::Cylinder(cylinder) if (cylinder.radius() - fillet_radius).abs() < tolerance.linear =>
+                Some((cylinder.radius(), cylinder.origin())),
+            _ => None,
+        }).expect("a circular fillet face");
+        assert!((radius - fillet_radius).abs() < tolerance.linear);
+        assert!((center.y - 2.0 * (notch_radius * fillet_radius).sqrt()).abs() < tolerance.linear);
+        rounded.tessellate(TessellationOptions::new(0.05, 0.1, 24).unwrap()).unwrap();
+
+        let check_bevel = |result: &crate::Compound| {
+            assert_eq!(result.faces().count(), body.faces().count() + 1);
+            assert!(result.volume() < body.volume());
+            result.tessellate(TessellationOptions::new(0.05, 0.1, 24).unwrap()).unwrap();
+        };
+        for distance in [0.1, 1.0] {
+            let bevelled = body.chamfer_with_tangent_propagation(edges, distance, true).unwrap();
+            check_bevel(&bevelled);
+            let bevel = bevelled.faces().find(|face| {
+                body.faces().all(|old| old.persistent_id() != face.persistent_id())
+            }).unwrap();
+            let mut rails = bevel.boundary_edges().unwrap().into_iter().filter_map(|edge| {
+                let [first, last] = edge.endpoints().unwrap();
+                ((last.z - first.z).abs() > 12.0).then_some(first.y)
+            }).collect::<Vec<_>>();
+            rails.sort_by(f64::total_cmp);
+            assert_eq!(rails.len(), 2);
+            assert!((rails[0] - notch_radius * (distance / notch_radius).sin()).abs() < tolerance.linear);
+            assert!((rails[1] - distance).abs() < tolerance.linear);
+        }
+        for face in tip.connected_faces().unwrap() {
+            for mode in [
+                crate::ChamferMode::TwoDistances(0.12),
+                crate::ChamferMode::DistanceAngle(std::f64::consts::FRAC_PI_4),
+            ] {
+                let bevelled = body.chamfer_with_options(edges, std::slice::from_ref(&face), 0.1, mode, true)
+                    .unwrap_or_else(|error| panic!("{mode:?} on {}: {error}", face.surface().kind_name()));
+                check_bevel(&bevelled);
+            }
+        }
+    }
+}
+
+#[test]
 fn fillet_modes_build_a_constant_width_on_a_tilted_cylinder_rim() {
     let tolerance = ModelTolerance::default();
     let cylinder = Profile::new(Wire2::new([TrimmedCurve2::circle(Point2::origin(), 5.0).unwrap()], tolerance).unwrap(),

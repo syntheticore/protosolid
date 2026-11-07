@@ -840,6 +840,7 @@ fn closed_blend_chart(
 fn open_blend_chart(
     center: &SurfaceSurfaceCurve,
     edge: &Edge,
+    middle: f64,
     tolerance: ModelTolerance,
 ) -> KernelResult<Option<SurfaceSurfaceCurve>> {
     let Curve3::SurfaceIntersection(curve) = &center.curve else { return Ok(None) };
@@ -857,7 +858,6 @@ fn open_blend_chart(
     };
     let start = project(edge.range.start)?;
     let end = project(edge.range.end)?;
-    let middle = project((edge.range.start + edge.range.end) * 0.5)?;
     if (middle - start) * (middle - end) <= 0.0 {
         return Ok(None);
     }

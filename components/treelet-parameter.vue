@@ -32,7 +32,7 @@
     box-shadow: none
     &:not(:hover):not(:focus)
       background: none
-      color: white
+      color: var(--fg)
 
   .variable
     max-width: 38px !important

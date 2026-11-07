@@ -42,19 +42,19 @@
 <style lang="stylus" scoped>
 
   .tab-bar
-    background: $dark2
+    background: dark2()
     display: flex
-    // background: linear-gradient(to bottom, $dark1 * 0.9, $dark2 * 0.95)
-    border-bottom: 1px solid black
-    box-shadow: 0 1px 0 #323840
+    // background: linear-gradient(to bottom, dark1(0.9), dark2(0.95))
+    border-bottom: 1px solid var(--ring)
+    box-shadow: 0 1px 0 dark1(1.15)
     max-width: 100vw
     align-items: center
     z-index: 3
 
     .blurry &
       // backdrop-filter: blur(32px)
-      // background: rgba($dark2, 0.925)
-      background: $dark2
+      // background: dark2(1, 0.925)
+      background: dark2()
 
     [data-platform="darwin"] &
       border-radius: 4px 4px 0px 0px
@@ -130,7 +130,7 @@
     button
       background: none
       border: none
-      color: $bright1
+      color: bright1()
       font-size: 12px
       margin: 0
       padding: 0 12px
@@ -141,11 +141,12 @@
         // border-radius: 0px 4px 0px 0px
 
       &:hover
-        background: $dark1
-        color: white
+        background: dark1()
+        color: var(--fg)
 
         &:last-child
           background: #b70f0f
+          color: white
 
 </style>
 

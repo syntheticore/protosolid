@@ -1,11 +1,12 @@
 @import './reset.styl'
 @import './variables.styl'
+@import './theme.styl'
 
 body
   height: 100vh
   margin: 0
-  color: white
-  background: #1c2127
+  color: var(--fg)
+  background: var(--body-bg)
   overflow: hidden
   // Helvetica Neue ships with macOS only, other platforms get the bundled Inter
   font-family: "HelveticaNeue-Light", "Helvetica Neue Light", "Helvetica Neue", Helvetica, "Inter Variable", Arial, "Lucida Grande", sans-serif;
@@ -13,9 +14,9 @@ body
   &[data-platform="darwin"]
 
     &[data-dark-mode]
-      // background: rgba($dark1, 0)
-      background: $dark2
-      border: 1px solid $dark2
+      // background: dark1(1, 0)
+      background: dark2()
+      border: 1px solid dark2()
       border-top: 1px solid black
       border-radius: 4px
 
@@ -24,10 +25,10 @@ body
   height: 100%
 
 h1, h2, h3, h4
-  color: $bright1
+  color: bright1()
 
 legend
-  color: $bright1 * 0.95
+  color: bright1(0.95)
   font-size: 12px
   font-weight: bold
   margin: 6px 0
@@ -35,7 +36,7 @@ legend
 label
   display: flex
   align-items: center
-  color: $bright2
+  color: bright2()
 
 .inset
   margin-bottom: 6px
@@ -44,7 +45,7 @@ label
     margin-bottom: 0
 
 .input
-  background: $bright1
+  background: var(--input-bg)
   border: 2px solid transparent
   font-weight: 700
   border-radius: 2px
@@ -52,7 +53,7 @@ label
   padding: 3px 5px
   font-size: 11px
   transition: all 0.2s
-  color: $dark1
+  color: var(--input-fg)
 
   &:focus
     background: white
@@ -60,6 +61,10 @@ label
 
   &:hover
     background: white
+
+  // Outlined by the ring of fused buttons, which shows against light panels
+  :where([data-theme="light"]) &
+    box-shadow: 0 0 0 1px var(--ring)
 
   // Standard size for dialogs
   &.large
@@ -108,7 +113,7 @@ input[type="color"]
     > input[type="color"]
       height: 16px
       border-radius: 2px
-      border: 2px solid $bright1
+      border: 2px solid var(--input-bg)
 
   h3
     font-size: 12px
@@ -124,12 +129,12 @@ input[type="color"]
     margin: 8px 0
 
 .button
-  color: $bright1
-  box-shadow: 0 0 0 1px $dark2 * 0.5, 0 2px 5px rgba(black, 0.15)
-  text-shadow: 0 -1px 0px black
-  border: 1px solid $dark1 * 1.1
-  border-top-color: $dark1 * 1.25
-  background: $dark1
+  color: bright1()
+  box-shadow: 0 0 0 1px var(--ring), 0 2px 5px shadow(0.15)
+  text-shadow: var(--emboss)
+  border: 1px solid var(--rim)
+  border-top-color: var(--rim-top)
+  background: dark1()
   border-radius: 5px
   padding: 4px 8px
   transition: background 0.15s, border 0.15s
@@ -138,18 +143,31 @@ input[type="color"]
   // margin: 5px
 
   &:hover
-    background: $dark1 * 1.2
-    border-top-color: $dark1 * 1.5
+    background: dark1(1.2)
+    border-top-color: dark1(1.5)
     transition: none
 
   &.pressed
 
   &:active
-    border: 1px solid $dark1 * 0.95
-    background: $dark1 * 0.9
+    border: 1px solid dark1(0.95)
+    background: dark1(0.9)
+
+  // Flat like combo boxes, with their hover style. :where keeps component specific button styles in charge.
+  :where([data-theme="light"]) &
+    background: dark2(1.1)
+
+    &:hover
+      color: var(--fg)
+      background: dark1()
+      border-top-color: var(--rim-top)
+
+    &:active
+      border-color: var(--rim)
+      background: dark2(1.3)
 
   &:disabled
-    color: $bright2
+    color: bright2()
 
   // Default action of a dialog or form
   &.primary
@@ -165,7 +183,7 @@ input[type="color"]
     font-size: 13px
 
   // svg
-  //   filter: drop-shadow(0 -1px 0px rgba(0,0,0, 0.6))
+  //   filter: drop-shadow(0 -1px 0px shadow(0.6))
 
   span
     margin-left: 7px
@@ -173,18 +191,18 @@ input[type="color"]
 // The default action's border pulses blue
 @keyframes primary-pulse
   0%, 100%
-    border-color: $dark1 * 1.1
-    border-top-color: $dark1 * 1.5
+    border-color: var(--rim)
+    border-top-color: var(--rim-top)
   50%
     border-color: $highlight
 
 .bordered
   position: relative
   border-radius: 5px
-  border: 1px solid $dark1 * 1.1
-  border-top-color: $dark1 * 1.25
-  background: $dark2
-  box-shadow: 0 0 0 1px $dark2 * 0.5, 0 2px 5px rgba(black, 0.15)
+  border: 1px solid var(--rim)
+  border-top-color: var(--rim-top)
+  background: dark2()
+  box-shadow: 0 0 0 1px var(--ring), 0 2px 5px shadow(0.15)
 
   .blurry &
     isolation: isolate
@@ -200,7 +218,7 @@ input[type="color"]
       // Repaint the border on top of the backdrop, as Chrome blurs over the original one
       border: 1px solid
       border-color: inherit
-      background: rgba($dark2, 0.875)
+      background: dark2(1, 0.875)
       backdrop-filter: blur(32px)
 
 .tipped
@@ -217,8 +235,8 @@ input[type="color"]
     left: 16px
     border-left: triWidth solid transparent
     border-right: triWidth solid transparent
-    border-bottom: triWidth solid $dark2
-    filter: drop-shadow(0 -1px 0px $dark1 * 1.7) drop-shadow(0 -1px 0px $dark2 * 0.5)
+    border-bottom: triWidth solid dark2()
+    filter: drop-shadow(0 -1px 0px var(--tip-rim)) drop-shadow(0 -1px 0px var(--ring))
 
 .tipped-bottom
   position: relative
@@ -234,12 +252,12 @@ input[type="color"]
     left: 16px
     border-left: triWidth solid transparent
     border-right: triWidth solid transparent
-    border-top: triWidth solid $dark2
-    filter: drop-shadow(0 1px 0px $dark1 * 1.7) drop-shadow(0 1px 0px $dark2 * 0.5)
+    border-top: triWidth solid dark2()
+    filter: drop-shadow(0 1px 0px var(--tip-rim)) drop-shadow(0 1px 0px var(--ring))
 
   &.bright::before
-    border-top-color: $dark1
-    filter: drop-shadow(0 1px 0px $dark1) drop-shadow(0 1px 0px $dark2 * 0.5)
+    border-top-color: dark1()
+    filter: drop-shadow(0 1px 0px dark1()) drop-shadow(0 1px 0px var(--ring))
 
 .flex
   display: flex

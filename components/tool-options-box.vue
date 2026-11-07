@@ -80,7 +80,7 @@
     flex-direction: column
     align-items: center
     font-size: 12px
-    color: $bright1
+    color: bright1()
     font-weight: bold
     white-space: nowrap
 
@@ -114,20 +114,20 @@
     display: flex
     flex-direction: column
     justify-content: space-around
-    background: $dark1
+    background: dark1()
     border-radius: 0 4px 4px 0
 
     button
       height: 100%
       background: none
       border: none
-      color: $bright1
+      color: bright1()
       font-size: 16px
       padding: 0px 9px 0px 11px
       transition: all 0.15s
 
       &:hover
-        color: $cancel
+        color: var(--cancel)
 
       &:active
         color: darken($cancel, 15%)

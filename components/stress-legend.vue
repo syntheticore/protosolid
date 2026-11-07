@@ -28,9 +28,9 @@
     grid-template-columns: 14px auto
     column-gap: 6px
     height: 140px
-    color: $bright2
+    color: bright2()
     font-size: 11px
-    text-shadow: 0 0 2px rgba(0,0,0, 0.8)
+    text-shadow: 0 0 2px halo(0.8)
     pointer-events: none
 
   .labels
@@ -44,7 +44,7 @@
 
       &.threshold
         font-weight: bold
-        color: white
+        color: var(--fg)
 
   // Labels are placed absolutely, so invisible copies give the column its width
   .sizer
@@ -55,14 +55,14 @@
   .bar
     position: relative
     border-radius: 2px
-    box-shadow: 0 0 0 1px rgba(0,0,0, 0.5), 0 1px 3px rgba(0,0,0, 0.5)
+    box-shadow: 0 0 0 1px rgba(black, 0.5), 0 1px 3px shadow(0.5)
 
   .marker
     position: absolute
     left: 0
     right: -5px
     height: 0
-    border-top: 1px solid white
+    border-top: 1px solid var(--fg)
 
 </style>
 

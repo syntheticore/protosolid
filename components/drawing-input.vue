@@ -56,9 +56,9 @@
     height: 20px
     padding-left: 6px
     border-radius: radius
-    background: $bright1
+    background: var(--input-bg)
     border: 2px solid transparent
-    box-shadow: 0 1px 3px rgba(black, 0.5)
+    box-shadow: 0 1px 3px shadow(0.5)
     transition: background 0.1s, border-color 0.1s
 
     &.focused
@@ -76,7 +76,7 @@
     padding-right: 5px
     font-size: 11px
     font-weight: 900
-    color: $dark1
+    color: var(--input-fg)
 
     .diameter-symbol
       font-size: 1.7em
@@ -86,7 +86,7 @@
       margin-left: -4px
 
   .value
-    color: $dark2
+    color: var(--input-fg)
     transition: width 0.2s
 
     input

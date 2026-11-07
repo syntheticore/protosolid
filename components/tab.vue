@@ -31,24 +31,24 @@
     flex: 0 1 auto
     min-width: 0
     align-items: center
-    border-left: 1px solid $dark1 * 1.2
+    border-left: 1px solid dark1(1.2)
     padding-left: 12px
     height: 100%
     font-size: 12px
     font-weight: bold
     transition: all 0.2s
-    color: $bright2
-    text-shadow: 0 -1px 0px black
+    color: bright2()
+    text-shadow: var(--emboss)
 
     &:hover
-      background: $dark2 * 1.2
+      background: dark2(1.2)
 
       .close-btn
         opacity: 1
 
     &.active
-      color: $bright1
-      background: $dark1 * 1.2
+      color: bright1()
+      background: dark1(1.2)
       flex-shrink: 0
       max-width: 40vw
 
@@ -98,12 +98,12 @@
     border: none
     border-radius: 3px
     background: none
-    color: $bright2
+    color: bright2()
     font-size: 12px
 
     &:hover
-      color: white
-      background: rgba(white, 0.12)
+      color: var(--fg)
+      background: tint(0.12)
 
   .close-btn
     background: none
@@ -112,12 +112,12 @@
     opacity: 0
 
     &:hover svg
-      color: $bright1
+      color: bright1()
 
     svg
-      color: $bright2
+      color: bright2()
       transition: all 0.2s
-      filter: drop-shadow(0 1px 0px rgba(0,0,0, 0.9))
+      filter: drop-shadow(0 1px 0px shadow(0.9))
 
 </style>
 

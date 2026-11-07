@@ -73,7 +73,7 @@
     flex: 0 0 auto
     overflow: hidden
     position: relative
-    border-right: 1px solid $dark1
+    border-right: 1px solid dark1()
 
   .settings-btn
     position: absolute
@@ -92,7 +92,7 @@
   .about
     padding: 12px
     text-align: center
-    background: linear-gradient(0deg, $dark2 * 0.83, transparent)
+    background: linear-gradient(0deg, dark2(0.83), transparent)
     .logo
       width: 48px
       height: 48px
@@ -100,41 +100,41 @@
       font-family: 'Comfortaa'
       font-size: 16px
       font-weight: bold
-      color: $bright1
+      color: bright1()
       margin-top: 8px
     .version
       font-size: 11px
       margin-top: 4px
-      color: $bright2
+      color: bright2()
 
   .actions
     &:hover
       button
         transition: none
     li:first-child button
-        border-top: 1px solid $dark1
+        border-top: 1px solid dark1()
     button
       background: none
       border: none
       padding: 10px 8px
       font-size: 12px
       font-weight: 600
-      color: $bright1
+      color: bright1()
       width: 100%
       text-align: left
       display: flex
       align-items: center
       transition: all 0.15s
       &:active
-        background: $dark1
+        background: dark1()
       &:disabled
         opacity: 0.5
       &:hover
-        border-top-color: rgba(white, 0.07)
-        background: rgba(white, 0.07)
-        color: white
+        border-top-color: tint(0.07)
+        background: tint(0.07)
+        color: var(--fg)
       svg
-        color: $bright1 * 0.85
+        color: bright1(0.85)
         font-size: 16px
       span
         margin-left: 8px
@@ -143,9 +143,9 @@
   .recent-header
     font-size: 11px
     font-weight: 600
-    color: $bright2
+    color: bright2()
     padding: 14px 8px 6px
-    border-top: 1px solid $dark1
+    border-top: 1px solid dark1()
     margin-top: 4px
 
   .recent-files

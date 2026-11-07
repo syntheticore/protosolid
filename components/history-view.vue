@@ -30,7 +30,7 @@
               :cx="getX(row.lane)"
               :cy="getY(row.index)"
               :r="row.id == graph.headId ? 6.5 : 5.5"
-              :fill="row.id == graph.headId ? 'white' : getColor(row.lane)"
+              :class="{ head: row.id == graph.headId }" :fill="getColor(row.lane)"
             )
 
         ul.commits
@@ -94,11 +94,11 @@
 
     p + p
       margin-top: 0.5rem
-      color: $bright2
+      color: bright2()
 
   .changes
     padding: 0.375rem 0.75rem 0.5rem
-    color: $warn
+    color: var(--warn)
 
   // Fixed width, so revealing the row actions on hover never resizes the panel
   .scroller
@@ -110,13 +110,16 @@
 
   .canvas
     flex: 0 0 auto
-    background: rgba(white, 0.05)
+    background: tint(0.05)
     border-radius: 2px
     display: flex
 
   .dot
-    stroke: #2b2b32
+    stroke: dark1()
     stroke-width: 2
+
+    &.head
+      fill: var(--fg)
 
   .commits
     flex: 1 1 auto
@@ -133,10 +136,10 @@
     white-space: nowrap
 
     &:not(:last-child)
-      border-bottom: 1px solid $dark1
+      border-bottom: 1px solid dark1()
 
     &:hover
-      background: $dark1
+      background: dark1()
 
       .actions
         display: flex
@@ -145,7 +148,7 @@
         display: none
 
     &.head .title
-      color: white
+      color: var(--fg)
       font-weight: bold
 
   .branch
@@ -162,7 +165,7 @@
 
     &.current
       background: var(--color)
-      color: $dark2
+      color: #1e1e23 // Dark on the colored fill in either theme
 
   .title
     flex: 1 1 auto
@@ -172,7 +175,7 @@
   .date
     flex: 0 0 auto
     margin-right: calc(0.75rem - 4px)
-    color: $bright2
+    color: bright2()
     font-size: 11px
 
   .actions
@@ -190,11 +193,11 @@
       border: none
       padding: 0
       border-radius: 3px
-      color: $bright2
+      color: bright2()
 
       &:hover
-        color: white
-        background: rgba(white, 0.12)
+        color: var(--fg)
+        background: tint(0.12)
 
 </style>
 

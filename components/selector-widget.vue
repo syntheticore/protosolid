@@ -36,7 +36,7 @@
       margin-left: -7px
 
   .confirm
-    color: $confirm
+    color: var(--confirm)
 
   .info
     margin-top: 6px
@@ -48,10 +48,10 @@
     line-height: 1.35
 
   .count
-    color: $bright2 * 1.2
+    color: bright2(1.2)
 
   .type
-    color: $bright1
+    color: bright1()
     font-weight: 600
 
 </style>

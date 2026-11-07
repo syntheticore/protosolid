@@ -141,7 +141,7 @@
       transform: rotate(90deg)
 
   .problem
-    color: $warn !important
+    color: var(--warn) !important
 
   .invalid .box
     border-color: $warn !important
@@ -210,8 +210,8 @@
     justify-self: end
 
   .result-stats
-    background: $dark2 * 1.5
-    border-top: 1px solid $dark1 * 1.4
+    background: dark2(1.5)
+    border-top: 1px solid dark1(1.4)
     padding-bottom: 0
 
   .result-summary
@@ -233,7 +233,7 @@
 
   .inaccurate
     font-weight: bold
-    color: $warn
+    color: var(--warn)
 
   .stress-legend
     position: fixed

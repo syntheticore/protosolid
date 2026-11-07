@@ -202,8 +202,8 @@
     grid-template-rows: minmax(0, 1fr)
     width: 100%
     height: 100%
-    color: $bright1
-    background: $dark2 * 0.8
+    color: bright1()
+    background: dark2(0.8)
 
     &::before
       content: ''
@@ -224,7 +224,7 @@
     height: 32px
     padding: 0
     border: 0
-    color: $bright2
+    color: bright2()
     background: transparent
     font-size: 12px
     -webkit-app-region: no-drag
@@ -234,8 +234,8 @@
       background: #b70f0f
 
   .sidebar
-    background: $dark2 * 1.25
-    border-right: 1px solid $dark1
+    background: dark2(1.25)
+    border-right: 1px solid dark1()
     padding: 12px sidebarInset
 
     [data-platform="darwin"] &
@@ -255,25 +255,25 @@
       padding: 0 12px
       border: 0
       border-radius: 5px
-      color: $bright2
+      color: bright2()
       background: transparent
       font-size: 13px
       font-weight: 600
       text-align: left
 
       svg
-        color: $bright2 * 0.9
+        color: bright2(0.9)
 
       &:hover
-        color: $bright1
-        background: rgba(white, 0.06)
+        color: bright1()
+        background: tint(0.06)
 
       &.active
-        color: white
-        background: rgba(white, 0.1)
+        color: var(--fg)
+        background: tint(0.1)
 
         svg
-          color: white
+          color: var(--fg)
 
   .settings-content
     position: relative
@@ -285,7 +285,7 @@
       padding-bottom: 88px
 
     .input:focus
-      border-color: $bright2 * 0.7
+      border-color: bright2(0.7)
 
     section
       max-width: 560px
@@ -300,7 +300,7 @@
 
       p
         margin: 0
-        color: $bright2
+        color: bright2()
         font-size: 12px
         line-height: 1.5
 
@@ -334,12 +334,12 @@
     gap: 4px
 
     strong
-      color: $bright1
+      color: bright1()
       font-size: 13px
       font-weight: 600
 
     small
-      color: $bright2
+      color: bright2()
       font-size: 11px
       line-height: 1.35
 
@@ -355,8 +355,8 @@
     padding: 12px 16px
     border: 1px solid rgba($warn, 0.42)
     border-radius: 5px
-    color: $warn
-    background: $dark2 * 0.84
+    color: var(--warn)
+    background: dark2(0.84)
     font-size: 11px
     transition: all 0.2s
 

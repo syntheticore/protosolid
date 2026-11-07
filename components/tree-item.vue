@@ -200,10 +200,10 @@
     font-size: 16px
     padding: 0
     transition: color 0.2s, transform 0.2s
-    color: $bright2
+    color: bright2()
 
     &:hover
-      color: $bright1
+      color: bright1()
 
     &.closed
       transform: rotate(-0.25turn)
@@ -226,7 +226,7 @@
       padding: 1px 0
 
       &:hover
-        border-color: $dark1 * 1.85
+        border-color: dark1(1.85)
 
   .list-enter-active
   .list-leave-active
@@ -247,7 +247,7 @@
     .hidden
 
       .box
-        background: rgba($dark2 * 1.3, 0.5) !important
+        background: dark2(1.3, 0.5) !important
 
         > header > *:not(.controls)
           opacity: 0.4
@@ -255,13 +255,13 @@
   .tree-item
 
     .box
-      background: $dark2
+      background: dark2()
       font-size: 0.75rem
       font-weight: bold
-      border: 1px solid $dark1 * 1.4
+      border: 1px solid var(--treelet-border)
       border-radius: 3px
       transition: opacity 0.2s
-      box-shadow: 0 1px 3px rgba(black, 0.25)
+      box-shadow: 0 1px 3px shadow(0.25)
       overflow: hidden
       // pointer-events: auto
       margin-right: 10px // Needed in FF when scrollbars are active
@@ -269,27 +269,27 @@
 
       &:hover
       &.highlighted
-        background: $dark2 * 1.15
-        border-color: $dark1 * 1.85
-        color: white
+        background: dark2(1.15)
+        border-color: var(--treelet-border-hover)
+        color: var(--fg)
 
         .controls
-          border-color: $dark1 * 1.85
+          border-color: var(--treelet-border-hover)
           transition-delay: 0.1s
 
         .content
-          border-color: $dark1 * 1.85
+          border-color: var(--treelet-border-hover)
 
       .blurry &
         backdrop-filter: blur(16px)
 
       &.descendant-highlighted
-        background: $dark2 * 1.35
+        background: dark2(1.35)
 
       &.active
         border-color: $highlight * 1.2
         box-shadow: 0 0 0px 1px $highlight * 1.2
-        color: white
+        color: var(--fg)
 
       &.selected
         background: $highlight * 0.7 !important
@@ -309,19 +309,19 @@
         svg
           font-size: 13px
           padding: 4px
-          color: $bright2
+          color: bright2()
 
         svg.eye
         .controls svg
-          color: $bright1
+          color: bright1()
           transition: all 0.1s
 
           &:hover
-            color: white !important
-            background: $dark1 * 1.85
+            color: var(--fg) !important
+            background: dark1(1.85)
 
           &:active
-            background: $dark1 * 1.5
+            background: dark1(1.5)
             transition: none
 
         .controls svg
@@ -331,13 +331,13 @@
 
         .controls .delete
         .controls .delete:hover
-          color: $cancel !important
+          color: var(--cancel) !important
 
     .controls
       display: flex
       align-self: stretch
       align-items: center
-      border-left: 1px solid $dark1 * 1.4
+      border-left: 1px solid var(--treelet-border)
       white-space: nowrap
       overflow: hidden
       width: 0
@@ -360,25 +360,25 @@
     .widgets li
 
       .box
-        background: rgba($dark2 * 1.3, 0.8)
+        background: dark2(1.3, 0.8)
         font-size: 11px
 
         &:hover
 
           header svg
-            color: $bright1
+            color: bright1()
 
       h2
         margin-right: 8px
         white-space: nowrap
 
       .content
-        border-top: 1px solid $dark1 * 1.4
+        border-top: 1px solid var(--treelet-border)
 
       .form
 
         fieldset + fieldset
-          border-top: 1px solid $dark1 * 1.4
+          border-top: 1px solid var(--treelet-border)
 
 </style>
 

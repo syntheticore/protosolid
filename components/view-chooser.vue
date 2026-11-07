@@ -140,10 +140,10 @@
     gap: 0.5rem
 
     &:hover
-      background: $dark1
+      background: dark1()
 
     &:active
-      background: $dark1 * 0.9
+      background: dark1(0.9)
 
     &.active
       background: $highlight
@@ -183,7 +183,7 @@
     transition: all 0.25s
 
     &:hover
-      color: $cancel
+      color: var(--cancel)
       transition: none
 
     .active &
@@ -194,13 +194,13 @@
     pointer-events: none
 
   .controls
-    color: $bright1
+    color: bright1()
     height: 28px
     border: none
     padding: 0
     margin-top: 1px
-    border-top: 1px solid $dark1 * 1.1
-    box-shadow: 0 0 6px rgba(black, 0.4)
+    border-top: 1px solid dark1(1.1)
+    box-shadow: 0 0 6px shadow(0.4)
     // text-shadow: 0 -1px 0px black
     transition: all 0.25s
     overflow: hidden
@@ -208,7 +208,7 @@
     font-size: 13px
 
     &:hover
-      border-top-color: $dark1 * 1.25
+      border-top-color: dark1(1.25)
 
     &:active
       transition: none
@@ -228,29 +228,29 @@
 
   .plus
   .create-settings
-    background: $dark2 * 1.1
+    background: dark2(1.1)
     transition: all 0.25s
     padding: 7px 0.75rem
 
     &:hover
-      background: $dark1
+      background: dark1()
       transition: none
 
     &:active
-      background: $dark2 * 0.8
+      background: dark2(0.8)
 
   .plus
     flex: 1 1 auto
 
   .create-settings
-    border-left: 1px solid $dark1 * 1.1
-    background: $dark2 * 1.1
+    border-left: 1px solid dark1(1.1)
+    background: dark2(1.1)
 
   .settings
     padding: 0.5rem
     padding-top: 0
-    border-top: 1px solid $dark1 * 1.1
-    background: $dark2 * 1.1
+    border-top: 1px solid dark1(1.1)
+    background: dark2(1.1)
 
     h1
       font-size: 0.7rem

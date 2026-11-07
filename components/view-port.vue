@@ -185,15 +185,15 @@
     display: block
     // Keep the active tool cursor when OrbitControls writes an inline cursor.
     cursor: inherit !important
-    --viewport-inner: #333333
-    --viewport-outer: #1c2127
+    --viewport-inner: var(--viewport-bg-inner)
+    --viewport-outer: var(--viewport-bg-outer)
     background: radial-gradient(farthest-corner at 50% 150%, var(--viewport-inner), var(--viewport-outer))
     transition: --viewport-inner 0.4s, --viewport-outer 0.4s
 
     // Tinted while previewing a merge
     .merging &
-      --viewport-inner: #1d2729
-      --viewport-outer: #0f1517
+      --viewport-inner: var(--viewport-merge-inner)
+      --viewport-outer: var(--viewport-merge-outer)
 
   .drawpad
   .floaters
@@ -212,7 +212,7 @@
       stroke-linecap: round
 
     line
-      stroke: white
+      stroke: var(--fg)
       stroke-dasharray: 3, 7
 
     path
@@ -239,8 +239,8 @@
   .thermal-probe-box
     position: absolute
     padding: 6px 8px
-    color: white
-    background: rgba($dark1, 0.6)
+    color: var(--fg)
+    background: dark1(1, 0.6)
     backdrop-filter: blur(32px)
     border: 2px solid darkgray
     border-radius: 99px

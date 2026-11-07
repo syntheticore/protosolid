@@ -80,8 +80,8 @@
 
         &:hover
         &.pressed
-          background: rgba(white, 12%)
-          color: white
+          background: tint(12%)
+          color: var(--fg)
 
   .button
     margin: 0
@@ -100,7 +100,7 @@
 
     .expander
       margin-left: 8px
-      color: $bright2
+      color: bright2()
       transition: transform 0.2s
 
   .fade-enter-from
@@ -133,12 +133,12 @@
     text-align: center
     font-size: 14px
     font-weight: bold
-    color: $bright1
+    color: bright1()
     padding: 7px 14px
-    box-shadow: 0 0 8px rgba(black, 0.6)
+    box-shadow: 0 0 8px shadow(0.6)
     // text-shadow: 0 -1px 0px black
-    background: $dark2 * 1.1
-    border-bottom: 1px solid $dark1
+    background: dark2(1.1)
+    border-bottom: 1px solid dark1()
 
 </style>
 

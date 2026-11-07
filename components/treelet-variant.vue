@@ -67,7 +67,7 @@
     align-items: center
     margin: 0 5px 0 2px
     padding-right: 6px
-    border-right: 1px solid $dark1 * 1.4
+    border-right: 1px solid dark1(1.4)
 
     .expand
       padding: 3px !important
@@ -86,7 +86,7 @@
 
   .variant-option
     height: 21px
-    color: $bright1
+    color: bright1()
     background: transparent
     border: 0
     font-size: 10px
@@ -104,7 +104,7 @@
       padding: 0
 
     &:hover
-      color: white
+      color: var(--fg)
 
   .option-title
     flex: 1 1 auto
@@ -113,13 +113,13 @@
     &:not(:hover):not(:focus)
       padding: 0
       background: none
-      color: white
+      color: var(--fg)
 
   .option-delete
-    color: $bright1
+    color: bright1()
 
     &:hover
-      color: $cancel
+      color: var(--cancel)
 
 </style>
 

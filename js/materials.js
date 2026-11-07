@@ -1,6 +1,28 @@
 import * as THREE from 'three'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 
+// Colors that need to contrast the viewport background of each theme
+const themeColors = {
+  dark: {
+    line: 'yellow',
+    constrained: '#d7e4ed',
+    vertex: 'white',
+    ui: 'darkgray',
+    ghostWire: 'rgb(45, 49, 53)',
+    ghost: 'white',
+    plane: 'white',
+  },
+  light: {
+    line: '#d19500',
+    constrained: '#27313b',
+    vertex: '#27313b',
+    ui: '#7f858c',
+    ghostWire: 'rgb(192, 198, 205)',
+    ghost: '#1c2127',
+    plane: '#1c2127',
+  },
+}
+
 export const DRAFT_DIRECTIONS = {
   top: [0, 1, 0],
   front: [0, 0, 1],
@@ -39,7 +61,6 @@ class Materials {
     this.visibleHighlightLine.depthTest = true
 
     this.constrainedLine = this.line.clone()
-    this.constrainedLine.color.set('#d7e4ed')
 
     this.referenceLine = this.line.clone()
     this.referenceLine.color.set('#8eca53')
@@ -58,7 +79,6 @@ class Materials {
     this.referenceHighlightLine.color.set('#2590e1')
 
     this.constrainedReferenceLine = this.referenceLine.clone()
-    this.constrainedReferenceLine.color.set('#d7e4ed')
 
     this.splineControlLine = this.line.clone()
     this.splineControlLine.color.set('#8a939b')
@@ -85,7 +105,6 @@ class Materials {
     this.wire.linewidth = 2
 
     this.ghostWire = this.wire.clone()
-    this.ghostWire.color.set('rgb(45, 49, 53)')
     this.ghostWire.linewidth = 1.5
 
     this.hiddenLine = this.wire.clone()
@@ -238,10 +257,8 @@ class Materials {
     this.highlightUiPoint.color.set('#0070ff')
 
     this.constrainedUiPoint = this.uiPoint.clone()
-    this.constrainedUiPoint.color.set('#d7e4ed')
 
     this.vertexPoint = this.uiPoint.clone()
-    this.vertexPoint.color.set('white')
 
     // Surface Materials
     this.surface = new THREE.MeshStandardMaterial({
@@ -349,6 +366,24 @@ class Materials {
         side: this.makeDiagnosticSurface('draft', DRAFT_DIRECTIONS.side),
       },
     }
+
+    this.applyTheme('dark')
+  }
+
+  // Called by the app whenever the UI theme changes
+  applyTheme(theme) {
+    const colors = themeColors[theme]
+    this.line.color.set(colors.line)
+    this.constrainedLine.color.set(colors.constrained)
+    this.constrainedReferenceLine.color.set(colors.constrained)
+    this.constrainedUiPoint.color.set(colors.constrained)
+    this.vertexPoint.color.set(colors.vertex)
+    this.ui.color.set(colors.ui)
+    this.uiPoint.color.set(colors.ui)
+    this.ghostWire.color.set(colors.ghostWire)
+    this.ghostSurface.color.set(colors.ghost)
+    this.plane.color.set(colors.plane)
+    this.planeOutline.color.set(colors.plane)
   }
 
   makeSectionSurface(color) {

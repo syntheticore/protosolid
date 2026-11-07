@@ -143,18 +143,20 @@
     flex-direction: column
     justify-content: center
     align-items: center
-    background: $dark1
+    background: dark1()
+    // Follows the rounded corners of the box inside its 1px border
+    border-radius: 4px 0 0 4px
     padding: 0 10px
     min-width: 60px
 
     svg
       font-size: 21px
-      color: $bright1
+      color: bright1()
       // transition: all 0.15s
       filter: none
 
     .title
-      color: $bright1
+      color: bright1()
       font-size: 11px
       margin-top: 6px
       font-weight: bold
@@ -169,7 +171,7 @@
     flex-direction: column
     align-items: center
     font-size: 12px
-    color: $bright1
+    color: bright1()
     font-weight: bold
     white-space: nowrap
 
@@ -250,14 +252,14 @@
     display: flex
     flex-direction: column
     justify-content: space-around
-    background: $dark1
+    background: dark1()
     border-radius: 0 4px 4px 0
 
     button
       height: 100%
       background: none
       border: none
-      color: $bright1
+      color: bright1()
       font-size: 16px
       transition: all 0.15s
       padding: 0px 9px
@@ -267,10 +269,10 @@
       &:hover
 
         &.ok
-          color: $confirm
+          color: var(--confirm)
 
         &.cancel
-          color: $cancel
+          color: var(--cancel)
 
       &:active
 
@@ -282,7 +284,7 @@
         transition: none
 
       &:disabled
-        color: $bright1 * 0.5 !important
+        color: bright1(0.5) !important
 
   .error-msg
     font-size: 12px

@@ -25,7 +25,7 @@
     margin-top: 9px !important
     overflow-y: auto
     max-height: 280px
-    border-top: 1px solid $dark1
+    border-top: 1px solid dark1()
     width: 480px
 
   li
@@ -63,16 +63,16 @@
 
     &:nth-child(5) .preview
       background: white
-      color: $bright1
+      color: bright1()
 
     &:hover
-      background: $dark1
+      background: dark1()
 
     &:active
-      background: $dark1 * 0.95
+      background: dark1(0.95)
 
     &.chosen
-      background: $dark1
+      background: dark1()
       border-color: $highlight
 
   .preview
@@ -81,7 +81,7 @@
     height: width
     border-radius: 999px
     padding: 3px
-    border: 4px solid $bright1
+    border: 4px solid bright1()
 
   h1
     margin-top: 6px

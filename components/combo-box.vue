@@ -134,7 +134,7 @@
     min-width: 0
     height: 100%
     padding: 0 8px 0 10px
-    color: $bright1
+    color: bright1()
     font-size: inherit
     font-weight: inherit
     transition: background 0.25s
@@ -142,7 +142,7 @@
     // Sits on panels that blur already, and the backdrop layer of .bordered would cover the hover background
     .blurry &
       isolation: auto
-      background: $dark2
+      background: dark2()
 
       &::after
         display: none
@@ -150,12 +150,12 @@
     &:hover
     &:focus-visible
     &[aria-expanded="true"]
-      color: white
-      background: $dark1
+      color: var(--fg)
+      background: dark1()
       transition: none
 
     &:active
-      background: $dark1 * 0.9
+      background: dark1(0.9)
 
     &:disabled
       opacity: 0.5

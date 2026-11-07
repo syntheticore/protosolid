@@ -59,7 +59,7 @@
       padding: 0
       font-size: 12px
       font-weight: 900
-      color: $dark2
+      color: var(--input-fg)
       margin: 0
       z-index: 1
       font-family: Orbitron
@@ -76,7 +76,7 @@
       overflow: hidden
       line-height: 22px
       // Inherited by pills, which would show their white text color otherwise
-      caret-color: $dark2
+      caret-color: var(--input-fg)
       &::selection
       :deep(*)::selection
         background: lighten($purple, 50%)
@@ -116,7 +116,7 @@
       align-items: center
       font-size: 9px
       font-weight: 900
-      color: $bright2 * 0.6
+      color: bright2(0.6)
       pointer-events: none
 
     &.labeled input

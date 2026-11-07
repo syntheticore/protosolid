@@ -60,10 +60,11 @@
     &:hover::before
       transition: none
 
+    // Inner borders are left to the ring of the following button
     & + .button
       border-left: none
 
-    .button + &
+    &:not(:last-of-type)
       border-right: none
 
     &:first-of-type
@@ -82,6 +83,10 @@
       &::before
         opacity: 1
 
+        // The light theme keeps the light inner border around the highlight
+        :where([data-theme="light"]) &
+          box-shadow: inset 0 0 0 1px var(--rim)
+
   .label
     display: block
     margin: 0
@@ -98,11 +103,11 @@
     font-size: 9px
     color: white
     font-weight: bold
-    background: $bright2 * 0.75
+    background: bright2(0.75)
     width: 12px
     height: 12px
     border-radius: 3px
-    border: 0.5px solid $dark2
+    border: 0.5px solid dark2()
     display: flex
     align-items: center
     justify-content: center

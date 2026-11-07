@@ -30,7 +30,7 @@
   button
     top: 8px
     left: 2px
-    color: $bright1
+    color: bright1()
 
 </style>
 

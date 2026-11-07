@@ -50,6 +50,10 @@
     &::after
       switch-inner-border()
 
+      // The light theme keeps the inner border above the fill
+      :where([data-theme="light"]) &
+        z-index: 2
+
     &:has(input:focus-visible)
       switch-focus()
 
@@ -64,6 +68,10 @@
     border-radius: $switchInnerRadius
     background: $highlight
     pointer-events: none
+
+    // Ends as close to the knob as the inner border lets it start
+    :where([data-theme="light"]) &
+      width: unquote('calc(%s + var(--ratio) * (100% - %s))' % (knobArea - $switchBorder knobArea))
 
   input
     appearance: none

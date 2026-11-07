@@ -18,13 +18,13 @@
 
   .outline
     fill: none
-    stroke: $dark2 * 0.5
+    stroke: var(--ring)
     stroke-width: 3
     stroke-linejoin: round
 
   .fill
-    fill: $dark2
-    stroke: $dark1 * 1.1
+    fill: dark2()
+    stroke: var(--rim)
     stroke-width: 1
     stroke-linejoin: round
 
@@ -44,10 +44,10 @@
     background: none
 
     &:hover
-      background: $dark1
+      background: dark1()
 
     &:active
-      background: $dark2 * 0.85
+      background: dark2(0.85)
 
 .hide-point-widget-enter-active
 .hide-point-widget-leave-active

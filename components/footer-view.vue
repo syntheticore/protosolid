@@ -47,7 +47,7 @@
   .footer-view
     font-size: 13px
     padding: 12px
-    color: $bright2
+    color: bright2()
     display: flex
     // justify-content: space-between
     justify-content: flex-end
@@ -77,27 +77,27 @@
         span
           padding-right: 0
       &:not(:last-child)
-        border-right: 1px solid $dark1
+        border-right: 1px solid dark1()
 
     span:first-child
       // text-align: right
       padding-right: 8px
 
     span:last-child
-      color: $bright1
+      color: bright1()
       font-weight: bold
 
   b
     margin-right: 6px
-    color: $bright1 * 0.9
+    color: bright1(0.9)
 
   svg
     margin-left: 9px
     margin-right: 3px
-    color: $bright1
+    color: bright1()
 
   .warn
-    color: $warn !important
+    color: var(--warn) !important
 
   .debug-panel
     position: absolute

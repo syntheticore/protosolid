@@ -62,9 +62,9 @@
     width: 12px
     height: 12px
     transition: background 0.1s
-    color: #1c2127
-    background: $bright1
-    box-shadow: 0 1px 3px rgba(black, 0.5)
+    color: dark2()
+    background: bright1()
+    box-shadow: 0 1px 3px shadow(0.5)
 
     &:hover
     &.selected
@@ -80,20 +80,20 @@
     &.selected .dim-value
       border-color: $highlight
       background: lighten($highlight, 73%) !important
-      color: $dark2 !important
+      color: #1c2127 !important
 
     > *
       position: absolute
 
     .dim-value
       transform: translate(-50%, -50%)
-      background: $bright2
+      background: bright2()
       padding: 0.25rem 0.5rem
       border-radius: 99px
       font-size: 0.9rem
       font-weight: bold
-      color: $dark2
-      border: 2px solid $bright1
+      color: dark2()
+      border: 2px solid bright1()
       transition: all 0.1s
       cursor: grab
       pointer-events: auto
@@ -113,8 +113,8 @@
         color: white
 
       &:hover
-        background: $bright1
-        color: $dark2
+        background: bright1()
+        color: dark2()
 
     .number-input
       margin-top: -14px

@@ -178,14 +178,13 @@
 
     h1
       text-align: center
-      color: $bright2
-      color: gray * 1.5
+      color: bright1(0.95)
       font-size: 13px
       font-weight: bold
       letter-spacing: 1px
       margin-bottom: 8px
       text-transform: uppercase
-      text-shadow: 0 1px 2px rgba(0,0,0, 0.7)
+      text-shadow: 0 1px 2px halo(0.7)
 
     &.left
       top: 38px
@@ -232,13 +231,13 @@
         display: contents
 
       .side-label
-        color: $bright2
+        color: bright2()
         font-size: 11px
         justify-self: end
         opacity: 0
         pointer-events: none
         text-align: right
-        text-shadow: 0 0 2px rgba(0,0,0, 0.8)
+        text-shadow: 0 0 2px halo(0.8)
         transition: opacity 0.15s
         white-space: nowrap
 

@@ -22,18 +22,18 @@
     padding-top: 10px
     padding-bottom: 80px // Neccessary to avoid scroll container flickering
     pointer-events: auto
-    scrollbar-color: $dark1 * 1.15 $dark2 * 0.9
+    scrollbar-color: dark1(1.15) dark2(0.9)
     scrollbar-width: thin
 
     &::-webkit-scrollbar
       width: 8px
-      background-color: $dark2
+      background-color: dark2()
 
     &::-webkit-scrollbar-thumb
-      background: $dark1 * 1.15
+      background: dark1(1.15)
 
       &:hover
-        background: $dark1 * 1.3
+        background: dark1(1.3)
     // width: 100%
     // padding-right: 24px
     // box-sizing: content-box

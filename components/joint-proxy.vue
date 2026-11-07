@@ -22,10 +22,10 @@
     margin-left: -12px
     margin-top: -12px
     border-radius: 99px
-    color: $dark2
-    background: $bright1
+    color: dark2()
+    background: bright1()
     border: 1px solid rgba(white, 0.7)
-    box-shadow: 0 1px 4px rgba(black, 0.65)
+    box-shadow: 0 1px 4px shadow(0.65)
     transition: color 0.1s, background 0.1s, transform 0.1s
 
     &:hover
@@ -37,7 +37,7 @@
       background: $highlight
 
     &.picking
-      box-shadow: 0 0 0 2px rgba($highlight, 0.65), 0 1px 4px rgba(black, 0.65)
+      box-shadow: 0 0 0 2px rgba($highlight, 0.65), 0 1px 4px shadow(0.65)
 
 </style>
 

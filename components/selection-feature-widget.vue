@@ -60,13 +60,13 @@
 
   .outline
     fill: none
-    stroke: $dark2 * 0.5
+    stroke: var(--ring)
     stroke-width: 3
     stroke-linejoin: round
 
   .fill
-    fill: $dark2
-    stroke: $dark1 * 1.1
+    fill: dark2()
+    stroke: var(--rim)
     stroke-width: 1
     stroke-linejoin: round
 
@@ -87,13 +87,13 @@
     background: none
     border: none
     border-radius: 0
-    color: $bright2
+    color: bright2()
     font-size: 12px
     &:hover
-      color: $bright1
-      background: $dark1
+      color: bright1()
+      background: dark1()
     &:active
-      background: $dark2 * 0.85
+      background: dark2(0.85)
     &:disabled
       opacity: 0.3
 

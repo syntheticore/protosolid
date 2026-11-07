@@ -96,7 +96,7 @@
     display: flex
 
     & + .main
-      border-top: 1px solid $dark1 * 1.15
+      border-top: 1px solid dark1(1.15)
 
   .row-title
     flex: 0 0 auto
@@ -104,13 +104,13 @@
     align-items: center
     width: 90px
     padding-inline: 10px
-    border-right: 1px solid $dark1 * 1.15
-    color: $bright2
+    border-right: 1px solid dark1(1.15)
+    color: bright2()
     font-size: 12px
     white-space: nowrap
 
     &.active
-      color: $bright1
+      color: bright1()
       font-weight: bold
 
   // Feature boxes would cover the stacked tool bars
@@ -122,7 +122,7 @@
 
   .reference
     position: relative
-    border-right: 1px solid $dark1
+    border-right: 1px solid dark1()
     display: flex
     flex-direction: column
     font-size: 0.7rem
@@ -139,13 +139,13 @@
 
   .tabs
     display: flex
-    // box-shadow: 0 0 4px rgba(black, 0.6)
-    border-bottom: 1px solid $dark1 * 1.15
+    // box-shadow: 0 0 4px shadow(0.6)
+    border-bottom: 1px solid dark1(1.15)
 
     li
       flex: 1 1 auto
       padding: 5px 10px
-      background: $dark2 * 0.85
+      background: dark2(0.85)
       font-size: 12px
       text-align: center
       transition: all 0.2s
@@ -158,15 +158,15 @@
         border-top-right-radius: 2px
 
       & + li
-        border-left: 1px solid $dark1 * 1.15
+        border-left: 1px solid dark1(1.15)
 
       &:hover
-        background: $dark2 * 1.3
+        background: dark2(1.3)
 
       &:active
 
       &.active
-        background: $dark1 * 1.15
+        background: dark1(1.15)
 
   .tools
     display: flex
@@ -199,20 +199,20 @@
       width: 100%
 
       &:hover, &.active
-        background: $dark1 * 1.15
+        background: dark1(1.15)
 
         .title
-          color: $bright1
+          color: bright1()
           transition: none
 
         svg
           transition: none
 
         .hot-key
-          border-color: $dark1 * 1.9
+          border-color: dark1(1.9)
 
       &:active
-        background: $dark1 * 1.075
+        background: dark1(1.075)
 
       &:disabled
         filter: brightness(50%)
@@ -224,12 +224,12 @@
 
     svg
       font-size: 21px
-      color: $bright1
+      color: bright1()
       transition: all 0.15s
       filter: none
 
     .title
-      color: $bright2
+      color: bright2()
       font-size: 11px
       margin-top: 6px
       font-weight: bold
@@ -244,12 +244,12 @@
     top: 2px
     right: 2px
     font-size: 9px
-    color: $bright2
-    background: $dark1
+    color: bright2()
+    background: dark1()
     width: 12px
     height: 12px
     border-radius: 2px
-    border: 0.5px solid $dark1 * 1.4
+    border: 0.5px solid dark1(1.4)
     display: flex
     align-items: center
     justify-content: center

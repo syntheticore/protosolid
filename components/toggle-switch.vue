@@ -51,6 +51,10 @@
       &::after
         border-color: $highlight
 
+        // The light theme keeps the light inner border around the highlight
+        :where([data-theme="light"]) &
+          border-color: var(--switch-rim)
+
       &::before
         background: $switchKnobOn
         transform: translateX(trackWidth - $switchHeight)

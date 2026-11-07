@@ -95,20 +95,20 @@
     gap: 10px
     padding: panelPadding
     border-radius: 5px + panelPadding + 1px
-    color: $bright2
+    color: bright2()
     font-size: 13px
 
   h1
     display: flex
     align-items: center
     gap: 6px
-    color: $bright1
+    color: bright1()
     font-size: 15px
     font-weight: 600
     white-space: nowrap
 
     svg
-      color: $bright2
+      color: bright2()
       margin-right: 2px
 
   // Same look as the branch labels of the history panel
@@ -124,7 +124,7 @@
 
     &.current
       background: var(--color)
-      color: $dark2
+      color: #1e1e23 // Dark on the colored fill in either theme
 
   section
     display: flex
@@ -136,7 +136,7 @@
     align-items: center
     gap: 6px
     margin: 0 0 6px
-    color: $bright1
+    color: bright1()
     font-size: 12px
     font-weight: bold
     text-transform: uppercase
@@ -152,9 +152,9 @@
     min-width: 16px
     padding: 0 5px
     border-radius: 8px
-    border: 1px solid $dark1 * 1.5
-    background: $dark1
-    color: $bright1
+    border: 1px solid dark1(1.5)
+    background: dark1()
+    color: bright1()
     font-size: 10px
     font-weight: 600
     line-height: 1
@@ -163,14 +163,14 @@
 
   .conflict-count
     margin-left: auto
-    color: $warn
+    color: var(--warn)
     font-size: 11px
     font-weight: normal
     text-transform: none
     letter-spacing: 0
 
   .note
-    color: $bright2
+    color: bright2()
 
   .changes
     display: grid
@@ -214,12 +214,12 @@
     &.added .status
       color: $green
     &.modified .status
-      color: $warn
+      color: var(--warn)
     &.removed .status
-      color: $cancel
+      color: var(--cancel)
 
     &:hover
-      color: $bright1
+      color: bright1()
 
   .label
     display: flex
@@ -245,7 +245,7 @@
       text-overflow: ellipsis
 
     &:hover
-      color: $bright1
+      color: bright1()
 
   .radio-bar
     :deep(.button)

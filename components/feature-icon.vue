@@ -73,10 +73,10 @@
       color: $highlight !important
 
     &.active > svg
-      color: white !important
+      color: var(--fg) !important
 
     &.highlighted > svg
-      color: white !important
+      color: var(--fg) !important
       filter: drop-shadow(0 0 3px rgba($highlight, 0.9)) drop-shadow(0 0 7px rgba($highlight, 0.65))
 
     &:hover.selected
@@ -92,7 +92,7 @@
       color: lighten($red, 30%) !important
 
     &.warning > svg
-      color: $warn !important
+      color: var(--warn) !important
 
     > .merge-status
       position: absolute
@@ -115,12 +115,12 @@
       top: 6px
       right: 6px
       font-size: 9px
-      color: $warn
+      color: var(--warn)
 
     &:hover
 
       > svg
-        color: $bright1
+        color: bright1()
 
     &.dragTarget
       border-right-color: $highlight
@@ -144,28 +144,28 @@
     transform: scale(0.85)
     z-index: 1
     border-radius: 5px
-    background: $dark2
+    background: dark2()
 
   button
     background: none
     border: none
-    color: $bright2
+    color: bright2()
     padding: 4px
     transition: all 0.15s
 
     &:hover
-      color: $bright1
-      background: $dark1
+      color: bright1()
+      background: dark1()
       transition: none
 
     &:active
-      background: $dark2 * 0.85
+      background: dark2(0.85)
 
     &:disabled
       opacity: 0.3
 
     &.delete
-      color: $cancel
+      color: var(--cancel)
 
 </style>
 

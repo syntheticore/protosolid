@@ -85,7 +85,7 @@
 
   .feature-bar
     font-size: 13px
-    color: $bright2
+    color: bright2()
     display: flex
     // align-items: center
 
@@ -96,14 +96,14 @@
         pointer-events: none !important
 
   .controls
-    border-right: 1px solid $dark1
+    border-right: 1px solid dark1()
     flex: 1 0 auto
     position: relative
 
     button
       background: none
       border: none
-      color: $bright2
+      color: bright2()
       padding: 20px 15px
       transition: all 0.15s
 
@@ -112,11 +112,11 @@
         border-bottom-left-radius: 4px
 
       &:hover
-        background: $dark1
+        background: dark1()
         transition: none
 
       &:active
-        background: $dark2 * 0.85
+        background: dark2(0.85)
 
       &:disabled
         opacity: 0.3
@@ -129,20 +129,20 @@
     padding: 0 6px
     border-radius: 15px
     align-items: center
-    scrollbar-color: $dark1 * 1.15 $dark2
+    scrollbar-color: dark1(1.15) dark2()
     scrollbar-width: thin
 
     &::-webkit-scrollbar
       height: 8px
-      background-color: $dark2
+      background-color: dark2()
       border-bottom-right-radius: 4px
 
     &::-webkit-scrollbar-thumb
-      background: $dark1 * 1.15
+      background: dark1(1.15)
       // border-radius: 4px
 
       &:hover
-        background: $dark1 * 1.3
+        background: dark1(1.3)
 
     &::before
     &::after
@@ -152,13 +152,13 @@
       width: 12px
       top: 0
       height: 100%
-      background: linear-gradient(to right, $dark2 * 0.8, rgba($dark2, 0))
+      background: linear-gradient(to right, dark2(0.8), dark2(1, 0))
       z-index: 1
 
     &::after
       left: unset
       right: 0
-      background: linear-gradient(to left, $dark2, rgba($dark2, 0))
+      background: linear-gradient(to left, dark2(), dark2(1, 0))
       border-top-right-radius: 4px
       border-bottom-right-radius: 4px
 

@@ -174,9 +174,9 @@
     box-sizing: border-box
     overflow: auto
     // Like the tree view. The track is square, so a colored one would cover the rounded border.
-    scrollbar-color: $dark1 * 1.15 transparent
+    scrollbar-color: dark1(1.15) transparent
     scrollbar-width: thin
-    color: $bright1
+    color: bright1()
     font-size: 11px
     font-weight: 600
     // Teleported outside #app, so restore its defaults
@@ -200,28 +200,28 @@
       flex: 1 1 auto
 
     &.selected
-      color: white
+      color: var(--fg)
 
     &:hover
     &.active
-      color: white
-      background: $dark1
+      color: var(--fg)
+      background: dark1()
 
     &:active
-      background: $dark1 * 0.9
+      background: dark1(0.9)
 
     svg
       flex-shrink: 0
 
   .popup-heading
     padding: 8px 12px 4px
-    color: $bright2
+    color: bright2()
     white-space: nowrap
 
     &:not(:first-child)
       margin-top: 4px
       padding-top: 10px
-      border-top: 1px solid $dark1
+      border-top: 1px solid dark1()
 
   .detail
     font-weight: 400

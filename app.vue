@@ -40,7 +40,7 @@
     user-select: none
     cursor: default
     overflow: hidden
-    color: $bright1
+    color: bright1()
     display: flex
     flex-direction: column
 
@@ -81,6 +81,8 @@
     applyPreferences,
     emitter as prefEmitter,
   } from './js/preferences.js'
+  import { currentTheme, onThemeChange } from './js/theme.js'
+  import materials from './js/materials.js'
   import Document from './js/core/document.js'
   import { stepFiletype } from './js/core/features.js'
   import { loadFile, loadFiles } from './js/utils.js'
@@ -113,6 +115,12 @@
 
   const renderNeeded = ref(false)
   provide('render-needed', renderNeeded)
+
+  materials.applyTheme(currentTheme())
+  onThemeChange(theme => {
+    materials.applyTheme(theme)
+    renderNeeded.value = true
+  })
 
   // Observe every flag transition immediately, then render after mesh updates.
   watch(renderNeeded, needed => {

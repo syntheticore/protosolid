@@ -29,10 +29,11 @@
     flex: 1 1 auto
     text-align: center
 
+    // Inner borders are left to the ring of the following button
     & + .button
       border-left: none
 
-    .button + &
+    &:not(:last-child)
       border-right: none
 
     &:first-child
@@ -47,10 +48,10 @@
       padding: 0.25rem
 
   .accept:hover svg
-    color: $confirm
+    color: var(--confirm)
 
   .reject:hover svg
-    color: $cancel
+    color: var(--cancel)
 
 </style>
 

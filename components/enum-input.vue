@@ -48,7 +48,7 @@
       display: none
 
   .expander
-    color: $dark2
+    color: var(--input-fg)
     transition: transform 0.15s
 
   details[open] .expander
@@ -62,10 +62,10 @@
     right: 0
     overflow: hidden
     padding: 2px
-    background: $bright1
-    border: 1px solid $dark1
+    background: var(--input-bg)
+    border: 1px solid dark1()
     border-radius: 3px
-    box-shadow: 0 4px 12px rgba(black, 0.35)
+    box-shadow: 0 4px 12px shadow(0.35)
 
     button
       display: block
@@ -74,7 +74,7 @@
       border: 0
       border-radius: 2px
       background: transparent
-      color: $dark1
+      color: var(--input-fg)
       font: inherit
       text-align: left
       white-space: nowrap

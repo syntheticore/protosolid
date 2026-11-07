@@ -53,9 +53,9 @@
     text-align: center
     // position: relative
     &:hover
-      background: $dark1
+      background: dark1()
     &:active
-      background: $dark1 * 0.9
+      background: dark1(0.9)
     &.active
       background: $highlight
       color: white
@@ -63,24 +63,24 @@
   button
     display: block
     width: 100%
-    color: $bright1
+    color: bright1()
     padding: 6px
     height: 28px
     border: none
     margin: 0
     margin-top: 1px
-    border-top: 1px solid $dark1 * 1.1
-    box-shadow: 0 0 6px rgba(black, 0.4)
+    border-top: 1px solid dark1(1.1)
+    box-shadow: 0 0 6px shadow(0.4)
     // text-shadow: 0 -1px 0px black
-    background: $dark2 * 1.1
+    background: dark2(1.1)
     transition: all 0.25s
     overflow: hidden
     flex: 0 0 auto
     font-size: 13px
     &:hover
-      background: $dark1
+      background: dark1()
     &:active
-      background: $dark2 * 0.8
+      background: dark2(0.8)
       transition: none
     &:only-child
       margin-top: 0

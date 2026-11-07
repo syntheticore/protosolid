@@ -1,0 +1,77 @@
+// Color variables of the dark and light theme. The active theme is chosen
+// by the data-theme attribute of the root element, see js/theme.js.
+
+// Flips the lightness of a dark theme color for the light theme,
+// compressing surfaces into the bright range and keeping text contrast
+light-variant(name, c)
+  l = lightness(c)
+  if name in ('dark1' 'dark2')
+    l = 104% - l * 0.76
+  else
+    l = 100% - l * 1.05
+  hsl(hue(c), saturation(c), max(0%, min(100%, l)))
+
+theme-shades(light)
+  for name in 'dark1' 'dark2' 'bright1' 'bright2'
+    base = lookup('$' + name)
+    for f in $shadeFactors
+      c = base * f
+      {shade-variable(name, f)}: light ? light-variant(name, c) : c
+
+:root
+  color-scheme: dark
+  theme-shades(false)
+  --fg: white
+  --body-bg: #1c2127
+  --tint: 255 255 255
+  --halo: 0 0 0
+  --shadow-strength: 1
+  --emboss: 0 -1px 0px black
+  --confirm: $confirm
+  --cancel: $cancel
+  --warn: $warn
+  --input-bg: $bright1
+  --input-fg: $dark1
+  --viewport-bg-inner: #333333
+  --viewport-bg-outer: #1c2127
+  --viewport-merge-inner: #1d2729
+  --viewport-merge-outer: #0f1517
+  // Double borders of panels and buttons: a dark outer ring around a lighter inner rim
+  --ring: var(--dark2-500)
+  --rim: var(--dark1-1100)
+  --rim-top: var(--dark1-1250)
+  --tip-rim: var(--dark1-1700)
+  --switch-ring: var(--dark2-550)
+  --switch-rim: var(--dark1-1500)
+  --treelet-border: var(--dark1-1400)
+  --treelet-border-hover: var(--dark1-1850)
+
+:root[data-theme="light"]
+  color-scheme: light
+  theme-shades(true)
+  --fg: #16161a
+  --body-bg: #e8eaed
+  --tint: 0 0 0
+  --halo: 255 255 255
+  --shadow-strength: 0
+  --emboss: 0 1px 0px rgba(white, 0.6)
+  --confirm: #3b9a0e
+  --cancel: #dc3838
+  --warn: #c27c00
+  --input-bg: white
+  --input-fg: #26262b
+  --viewport-bg-inner: #fbfcfd
+  --viewport-bg-outer: #cfd4da
+  --viewport-merge-inner: #eef8f9
+  --viewport-merge-outer: #bccdd1
+  // Inverted shades would put the light rim outside, so ring and rim swap colors,
+  // with a ring dark enough to stand out against the bright background
+  --ring: var(--dark1-1850)
+  --rim: var(--dark2-500)
+  --rim-top: var(--dark2-500)
+  --tip-rim: var(--dark2-500)
+  --switch-ring: var(--dark1-1850)
+  --switch-rim: var(--dark2-550)
+  // Darker, as the inverted shades barely stand out from the light panels
+  --treelet-border: var(--dark1-1850)
+  --treelet-border-hover: var(--dark1-2400)

@@ -29,11 +29,11 @@
 
   .confirm
     left: 2px
-    color: $confirm
+    color: var(--confirm)
 
   .cancel
     left: 30px
-    color: $cancel
+    color: var(--cancel)
 
 </style>
 

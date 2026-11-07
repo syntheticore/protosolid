@@ -220,15 +220,21 @@ impl Transaction<'_> {
                 start: spine.endpoint_seeds[0],
                 end: spine.endpoint_seeds[1],
             };
+            // The solver can return a principal angle while the edge trim
+            // uses another turn. Check the branch at the endpoint being moved.
+            let adjacent_trim_contains = |parameter| {
+                let local = adjacent_edge.curve.domain().nearest(parameter, adjacent_seed);
+                adjacent_edge.range.contains(local, tolerance)
+            };
             let on_retained_edges = |hit: &super::super::CurveCurveHit| {
                 retained_contact.contains(hit.first_parameter, tolerance)
-                    && adjacent_edge.range.contains(hit.second_parameter, tolerance)
+                    && adjacent_trim_contains(hit.second_parameter)
             };
             let search_retained = match &local_hit {
                 Ok(hit) => {
                     matches!(adjacent_edge.curve, Curve3::SurfaceIntersection(_))
                         && !retained_contact.contains(hit.first_parameter, tolerance)
-                        && !adjacent_edge.range.contains(hit.second_parameter, tolerance)
+                        && !adjacent_trim_contains(hit.second_parameter)
                 }
                 Err(_) => matches!(adjacent_edge.curve, Curve3::Circle(_)),
             };
@@ -305,8 +311,7 @@ impl Transaction<'_> {
                     })?;
                 (hit.first_parameter, hit.second_parameter, hit.point)
             };
-            let needs_extension = !adjacent_edge.range.contains(rail_parameter, tolerance);
-            allow_adjacent_extension[parent_index] = needs_extension;
+            allow_adjacent_extension[parent_index] = !adjacent_trim_contains(rail_parameter);
             // The intersection solver may return an equivalent point one turn
             // away. Keep both rails on the same local branch as their spine.
             contact_parameters[parent_index] = blend_parameter_near(

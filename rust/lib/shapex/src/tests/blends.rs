@@ -42,6 +42,33 @@ fn fillet_modes_build_and_tessellate_an_isolated_box_edge() {
 }
 
 #[test]
+fn fillet_between_joined_cylinders_respects_periodic_rim_trims() {
+    let tolerance = ModelTolerance::default();
+    let wire = Wire2::new(
+        [TrimmedCurve2::circle(Point2::origin(), 54.0).unwrap()],
+        tolerance,
+    )
+    .unwrap();
+    let plane = Plane3::new(Point3::origin(), Vec3::unit_x(), -Vec3::unit_z(), tolerance).unwrap();
+    let first = Profile::new(wire, [], tolerance).unwrap()
+        .extrude(plane, Vec3::unit_y() * 12.5).unwrap();
+    let second = first.transformed(
+        RigidTransform3::new(Matrix3::identity(), Vec3::unit_x() * 40.0, tolerance).unwrap(),
+    ).unwrap();
+    let body = first.union(&second).unwrap();
+    let corners = body.edges().filter(|edge| {
+        body.is_semantic_edge(edge) && matches!(edge.curve(), Curve3::Line(_))
+    }).cloned().collect::<Vec<_>>();
+    assert_eq!(corners.len(), 2);
+    for corner in corners {
+        let result = body.fillet_with_options(&[corner],
+            FilletOptions::new(0.1).with_tangent_propagation(true)).unwrap();
+        assert!(result.volume() > body.volume());
+        result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
+    }
+}
+
+#[test]
 fn fillet_modes_build_and_tessellate_a_closed_cylinder_rim() {
     let tolerance = ModelTolerance::default();
     let body = Profile::new(Wire2::new([TrimmedCurve2::circle(Point2::origin(), 5.0).unwrap()], tolerance).unwrap(),

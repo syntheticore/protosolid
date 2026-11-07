@@ -1,3 +1,5 @@
+import { TopologySelectionError } from './core/topological-naming.js'
+
 // Owns one editing panel's picker lifecycle. A click completes a normal pick;
 // a modifier hold completes on release, without advancing to another picker.
 export default class PickerSession {
@@ -10,7 +12,13 @@ export default class PickerSession {
     this.onPicked = item => {
       const session = this.active
       if(!session) return
-      callbacks.select(session.key, item)
+      try {
+        callbacks.select(session.key, item)
+      } catch(error) {
+        if(!(error instanceof TopologySelectionError)) throw error
+        bus.emit('toast', error.message)
+        return
+      }
       session.changed = true
       if(!bus.isCtrlPressed) this.finish(true)
     }

@@ -7,7 +7,7 @@ import * as THREE from 'three'
 import { withTopologyNaming } from '../js/core/topological-naming.js'
 import Serialize from '../js/core/serialize.js'
 import { Compound, Profile, Wire } from '../js/core/geom3d.js'
-import { Line, Circle } from '../js/core/geom2d.js'
+import { Arc, Circle, Line, Spline } from '../js/core/geom2d.js'
 import { EdgeReference, FaceReference, SolidReference, PatternInputReference } from '../js/core/references.js'
 import { Feature, SolidFeature, PlaneFeature, SplitFeature, ChamferFeature, FilletFeature, PatternFeature, BooleanFeature, RemoveSolidsFeature } from '../js/core/features.js'
 import { Timeline } from '../js/core/timeline.js'
@@ -82,6 +82,42 @@ test(`picking from an incomplete feature preview binds the upstream cached shape
   const edge = solid.edges().find(edge => edge.connectedFaces().includes(face))
   for(const ref of [new FaceReference(face), new EdgeReference(edge), new SolidReference(solid)]) {
     assert.equal(ref.update(tree(upstream)), undefined)
+  }
+})
+
+test(`extruded corners sharing both faces rebind using directed boundary uses`, () => {
+  const build = (owner, depth, workplane = new THREE.Matrix4()) => withTopologyNaming(owner, () => {
+    const arc = new Arc(new THREE.Vector3(), Math.SQRT2, Math.PI / 4, -Math.PI / 2)
+    const [top, bottom] = arc.endpoints()
+    const spline = new Spline([bottom, new THREE.Vector3(20, -1, 0), new THREE.Vector3(20, 30, 0), top])
+    arc.id = 'arc'
+    spline.id = 'spline'
+    const profile = new Profile({ workplane }, [new Wire([arc, spline])])
+    const result = profile.extrude('component', depth, owner.id)
+    result.restoreTopologySelections(owner)
+    return result
+  })
+  const owner = feature('extrusion')
+  const original = build(owner, 10)
+  const corners = original.edges().filter(edge => edge.isSemantic() && edge.getAxis())
+  assert.equal(corners.length, 2)
+  assert.deepEqual(corners[0].connectedFaces(), corners[1].connectedFaces())
+  const references = corners.map(edge => new EdgeReference(edge))
+  for(const { recipe } of owner.topologyNames.selections) {
+    assert.equal(recipe.sides[0].frame, 'boundary')
+  }
+  const restored = Serialize.parse(Serialize.stringify({ owner, references }))
+  const workplane = new THREE.Matrix4().makeRotationZ(Math.PI * 2 / 3).setPosition(4, -7, 3)
+  const inverse = workplane.clone().invert()
+  for(const depth of [12, -12]) {
+    const rebuilt = build(restored.owner, depth, workplane)
+    rebuilt.solids()[0].cachedEdges.reverse()
+    restored.references.forEach((reference, index) => {
+      assert.equal(reference.update(tree(rebuilt)), undefined)
+      const rebound = reference.getItem().center().applyMatrix4(inverse)
+      assert.ok(near(rebound.y, corners[index].center().y))
+      assert.ok(near(rebound.z, depth / 2))
+    })
   }
 })
 

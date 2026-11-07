@@ -1018,7 +1018,11 @@ export function createShapex(bindings) {
       const kind = this._raw().surfaceKind()
       const values = Array.from(this._raw().surfaceFrame())
       if(kind == 'plane') return { kind, value: Plane3.new(new Point3(...values.slice(0, 3)), new Vec3(...values.slice(3, 6)), new Vec3(...values.slice(6, 9))) }
-      if(kind == 'cylinder') return { kind, axis: Axis3.new(new Point3(...values.slice(0, 3)), new Vec3(...values.slice(3, 6))) }
+      if(kind == 'cylinder') return {
+        kind,
+        axis: Axis3.new(new Point3(...values.slice(0, 3)), new Vec3(...values.slice(3, 6))),
+        radialAxes: [new Vec3(...values.slice(6, 9)), new Vec3(...values.slice(9, 12))],
+      }
       if(kind == 'sphere') return { kind, center: new Point3(...values) }
       return { kind }
     }
@@ -1048,6 +1052,7 @@ export function createShapex(bindings) {
       return this.trimmedCurve()
     }
     trimmedCurve() { return new TrimmedCurve3(nativeCall(() => this._raw().trimmedCurve())) }
+    boundaryUses() { return nativeCall(() => this._raw().boundaryUses()) }
     connectedFaces() {
       const raw = nativeCall(() => this._raw().connectedFaces())
       try { return Array.from({ length: raw.length }, (_, index) => new Face(raw.get(index))) }

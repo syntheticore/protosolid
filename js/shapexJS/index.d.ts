@@ -363,7 +363,7 @@ export interface NativeValue {
 export interface Face extends NativeValue {
   id(): string
   orientation(): 'forward' | 'reversed'
-  surface(): { kind: string, value?: Plane3, axis?: Axis3, center?: Point3 }
+  surface(): { kind: string, value?: Plane3, axis?: Axis3, radialAxes?: readonly [Vec3, Vec3], center?: Point3 }
   boundaryEdges(): Edge[]
   tessellate(options?: TessellationOptions): TriangleMesh
 }
@@ -373,6 +373,7 @@ export interface Edge extends NativeValue {
   endpoints(): Point3[]
   curve(): Line3 | Circle3 | TrimmedCurve3
   trimmedCurve(): TrimmedCurve3
+  boundaryUses(): [face: string, previous: string, next: string, start: string][]
   connectedFaces(): Face[]
   vertices(): Vertex[]
   tessellate(options?: TessellationOptions): Polyline

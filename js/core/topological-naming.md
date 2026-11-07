@@ -116,10 +116,10 @@ Regeneration alone preserves failed references so they can recover if their
 upstream topology returns. Cancel restores the original selection and its cached
 editor bindings.
 
-Construction and incidence cannot distinguish every possible symmetric result.
-The picker accepts timeline geometry even when those identities are ambiguous.
-An explicit pick can supplement its producer recipe with oriented side constraints
-relative to named supporting faces. A through-bore's two rims, for example, lie
+An explicit pick can supplement its producer recipe with ordered boundary uses
+and oriented side constraints relative to named supporting faces. Two corners
+can share the same faces while following different edges around those faces.
+A through-bore's two rims, for example, lie
 on opposite axial sides of its cylindrical wall's center. A constraint identifies
 the supporting face by its construction anchors and records a frame axis and
 side; it stores neither coordinates nor an output index. The producer reevaluates
@@ -132,9 +132,8 @@ supports. Two cylindrical supports can also
 define a transverse direction to distinguish periodic rim segments; that direction
 rotates with the supports.
 Missing or conflicting evidence fails resolution even when only one candidate
-remains. Unsupported ambiguity produces an explicit selection error rather than
-silently hiding valid geometry. Display-only section boundaries remain excluded.
-There is no nearest-geometry or first-output choice.
+remains. Display-only section boundaries remain excluded. There is no
+nearest-geometry or first-output choice.
 Unnamed body branches receive persistent identities only when construction and
 complete distinguishing incidence identify them uniquely. Rebuilds process saved
 bindings even for a sole remaining body. Conflicting bindings stay unresolved,

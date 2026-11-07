@@ -316,6 +316,18 @@ impl EdgeHandle {
             })
             .collect()
     }
+    /// The face, neighboring edges and start vertex of each oriented boundary use.
+    pub fn boundary_uses(&self) -> KernelResult<Vec<[PersistentId; 4]>> {
+        let topology = self.state.topology();
+        topology.edge(self.edge)?.coedges().iter().map(|id| {
+            let coedge = topology.coedge(*id)?;
+            let face = topology.face(topology.loop_(coedge.loop_id())?.face())?;
+            let previous = topology.edge(topology.coedge(coedge.previous())?.edge())?;
+            let next = topology.edge(topology.coedge(coedge.next())?.edge())?;
+            let start = topology.vertex(topology.coedge_vertices(*id)?[0])?;
+            Ok([face.name(), previous.name(), next.name(), start.name()])
+        }).collect()
+    }
     /// Start and end vertices; a closed edge reports its single vertex twice.
     pub fn vertices(&self) -> KernelResult<Vec<VertexHandle>> {
         self.state

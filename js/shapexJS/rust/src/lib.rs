@@ -704,6 +704,12 @@ impl NativeFace {
                 surface.axis().x,
                 surface.axis().y,
                 surface.axis().z,
+                surface.x_radius().x,
+                surface.x_radius().y,
+                surface.x_radius().z,
+                surface.y_radius().x,
+                surface.y_radius().y,
+                surface.y_radius().z,
             ],
             Surface3::Sphere(surface) => point_values(surface.center()).to_vec(),
             _ => Vec::new(),
@@ -812,6 +818,13 @@ impl NativeEdge {
             .connected_faces()
             .map(|faces| NativeConnectedFaces { faces })
             .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = boundaryUses)]
+    pub fn boundary_uses(&self) -> Result<JsValue, JsValue> {
+        let uses = self.inner.boundary_uses().map_err(js_error)?
+            .into_iter().map(|ids| ids.map(id_string)).collect::<Vec<_>>();
+        JSON::parse(&serde_json::json!(uses).to_string())
     }
 
     pub fn vertices(&self) -> Result<NativeEdgeVertices, JsValue> {

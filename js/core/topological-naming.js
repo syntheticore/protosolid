@@ -15,6 +15,8 @@ const shortHash = text => hash(text).slice(0, 12)
 const ancestry = sources => unique(sources.flatMap(source =>
   [source.topology.identity, ...source.topology.ancestors]))
 
+export class TopologySelectionError extends Error {}
+
 export function topologyIncludesFeature(topology, feature) {
   return topology.origin.feature?.id == feature.id ||
     [topology.identity, ...topology.ancestors].some(name => name.startsWith(`${feature.id}/topology/`)) ||
@@ -283,20 +285,20 @@ export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
     const contexts = siblings.length > 1 ? siblings.map(contextFor) : []
     recipe.branch = siblings.length > 1 ? recipe.context.filter(path =>
       contexts.some(context => !context.has(path))) : []
-    const resolution = resolveRecipe(items, recipe, neighbors, sides, contextFor)
+    const resolution = resolveRecipe(items, recipe, contextFor, sides)
     origin.recipe = recipe
     origin.selectable = !!origin.feature && resolution.status == 'resolved' && resolution.items[0] === item
-    // Retain the producer's geometry, not a later modifier's preview. A pick
-    // can add oriented support constraints when named incidence is symmetric.
+    // Retain the producer's evidence for picks made after later modifiers.
     origin.pickRecipe = () => {
       const constraints = sides(item)
       const captured = { ...recipe, sides: [...constraints] }
+      const pickContext = incidenceContexts(neighbors)
       const resolved = () => {
-        const result = resolveRecipe(items, captured, neighbors, sides)
+        const result = resolveRecipe(items, captured, pickContext, sides)
         return result.status == 'resolved' && result.items[0] === item
       }
       if(!origin.feature || !constraints.length || !resolved()) {
-        throw new Error('The selected topology cannot be distinguished by its construction and boundaries')
+        throw new TopologySelectionError('The selected topology cannot be distinguished by its construction and boundaries')
       }
       // Keep only the evidence needed to identify this cell. In particular,
       // a bore rim needs its axial side, not unrelated supporting boundaries.
@@ -321,7 +323,7 @@ export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
     const matches = new Map(items.filter(item => item.topology.kind == 'body')
       .map(item => [item, []]))
     for(const binding of bindings) {
-      const result = resolveRecipe(items, binding.recipe, neighbors, sides, branchContextFor)
+      const result = resolveRecipe(items, binding.recipe, branchContextFor, sides)
       if(result.status == 'resolved' && matches.has(result.items[0])) {
         matches.get(result.items[0]).push(binding)
       }
@@ -359,10 +361,10 @@ export function captureTopologySelection(item, policy = 'single') {
   const origin = item.topology.origin
   const { feature } = origin
   if(!origin.selectable && !origin.pickRecipe) {
-    throw new Error('The selected topology cannot be distinguished by its construction and boundaries')
+    throw new TopologySelectionError('The selected topology cannot be distinguished by its construction and boundaries')
   }
   const recipe = origin.selectable ? origin.recipe : origin.pickRecipe()
-  if(!feature) throw new Error('Display-only topology cannot be referenced')
+  if(!feature) throw new TopologySelectionError('Display-only topology cannot be referenced')
   return withTopologyNaming(feature, () => {
     const identity = topologyIdentity(recipe.kind, 'selection', [selectionSource(recipe)])
     feature.topologyNames.selections ||= []
@@ -375,7 +377,7 @@ export function captureTopologySelection(item, policy = 'single') {
   })
 }
 
-function resolveRecipe(items, recipe, neighbors, sides = () => [], contextFor = incidenceContexts(neighbors)) {
+function resolveRecipe(items, recipe, contextFor, sides = () => []) {
   const constrained = items.filter(item => {
     if(!matchesSelection(item, recipe)) return false
     if(recipe.branch.length) {
@@ -392,7 +394,7 @@ export function restoreTopologySelections(feature, items, neighbors, sides) {
   const failures = new Map()
   for(const binding of feature.topologyNames.selections || []) {
     selectionContexts.set(binding.identity, binding.recipe.context)
-    const result = resolveRecipe(items, binding.recipe, neighbors, sides)
+    const result = resolveRecipe(items, binding.recipe, incidenceContexts(neighbors), sides)
     if(result.status == 'resolved') addName(result.items[0], binding.identity)
     else failures.set(binding.identity, result.status)
   }

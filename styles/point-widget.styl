@@ -1,0 +1,59 @@
+// Round buttons on a pill whose arrow points at a sketch point, as in RestartWidget.
+// The shape is an SVG path, pill and arrow as one outline so the border is seamless.
+.point-widget
+  pointer-events: auto
+  position: absolute
+  font-size: 12px
+  // Centered above the point, the arrow tip clear of its handle.
+  // Uses translate, leaving transform to the hide transition.
+  translate: -50% calc(-100% - 10px)
+
+  .shape
+    position: absolute
+    left: 0
+    top: 0
+    width: 100%
+    height: 100%
+    overflow: visible
+
+  .outline
+    fill: none
+    stroke: $dark2 * 0.5
+    stroke-width: 3
+    stroke-linejoin: round
+
+  .fill
+    fill: $dark2
+    stroke: $dark1 * 1.1
+    stroke-width: 1
+    stroke-linejoin: round
+
+  // Concentric with the pill's rounded ends
+  button
+    position: absolute
+    top: 2px
+    width: 26px
+    height: 26px
+    margin: 0
+    padding: 0
+    display: flex
+    align-items: center
+    justify-content: center
+    border: none
+    border-radius: 99px
+    background: none
+
+    &:hover
+      background: $dark1
+
+    &:active
+      background: $dark2 * 0.85
+
+.hide-point-widget-enter-active
+.hide-point-widget-leave-active
+  transition: opacity 0.2s, transform 0.2s
+
+.hide-point-widget-enter-from
+.hide-point-widget-leave-to
+  opacity: 0
+  transform: translateY(-6px)

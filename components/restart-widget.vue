@@ -1,13 +1,12 @@
 <template lang="pug">
 
-  Transition(name="hide-restart")
-    .restart-widget(
+  Transition(name="hide-point-widget")
+    .point-widget.restart-widget(
       v-if="pos"
       :style="{ top: pos.y + 'px', left: pos.x + 'px' }"
       @pointerdown.stop
       @wheel.prevent="emit('wheel', $event)"
     )
-      //- Pill and arrow as one outline, so the border is seamless
       svg.shape(viewBox="0 0 58 37")
         path.outline(:d="shape")
         path.fill(:d="shape")
@@ -22,74 +21,19 @@
 
 
 <style lang="stylus" scoped>
+  @import '../styles/point-widget.styl'
 
   .restart-widget
-    pointer-events: auto
-    position: absolute
     width: 58px
     height: 37px
-    font-size: 12px
-    // Centered above the point, the arrow tip clear of its handle.
-    // Uses translate, leaving transform to the hide transition.
-    translate: -50% calc(-100% - 10px)
 
-    .shape
-      position: absolute
-      left: 0
-      top: 0
-      width: 100%
-      height: 100%
-      overflow: visible
+  .confirm
+    left: 2px
+    color: $confirm
 
-    .outline
-      fill: none
-      stroke: $dark2 * 0.5
-      stroke-width: 3
-      stroke-linejoin: round
-
-    .fill
-      fill: $dark2
-      stroke: $dark1 * 1.1
-      stroke-width: 1
-      stroke-linejoin: round
-
-    // Concentric with the pill's rounded ends
-    button
-      position: absolute
-      top: 2px
-      width: 26px
-      height: 26px
-      margin: 0
-      padding: 0
-      display: flex
-      align-items: center
-      justify-content: center
-      border: none
-      border-radius: 99px
-      background: none
-
-      &:hover
-        background: $dark1
-
-      &:active
-        background: $dark2 * 0.85
-
-    .confirm
-      left: 2px
-      color: $confirm
-
-    .cancel
-      left: 30px
-      color: $cancel
-
-  .hide-restart-enter-active
-  .hide-restart-leave-active
-    transition: opacity 0.2s, transform 0.2s
-
-  .hide-restart-enter-from
-  .hide-restart-leave-to
-    opacity: 0
-    transform: translateY(-6px)
+  .cancel
+    left: 30px
+    color: $cancel
 
 </style>
 

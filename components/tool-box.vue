@@ -307,6 +307,8 @@
     GroupFeature,
   } from './../js/core/features.js'
 
+  import { hasSystemFonts } from './../js/core/sketch-text.js'
+
   import {
     ManipulationTool,
     PointTool,
@@ -316,6 +318,7 @@
     RectangleTool,
     SlotTool,
     PolygonTool,
+    TextTool,
     ArcTool,
     TrimTool,
     BreakTool,
@@ -431,7 +434,7 @@
               { title: 'Spline', tool: SplineTool, hotKey: 'B', keyCode: 66},
               { title: 'Slot', tool: SlotTool },
               { title: 'Polygon', tool: PolygonTool },
-              { title: 'Text', icon: 'font' },
+              { title: 'Text', tool: TextTool, isDisabled: () => !hasSystemFonts() },
             ]
           },
           {

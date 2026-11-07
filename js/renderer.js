@@ -4,6 +4,7 @@ import { createNanoEvents } from 'nanoevents'
 import { HDRCubeTextureLoader } from 'three/examples/jsm/loaders/HDRCubeTextureLoader.js'
 // import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // import { DragControls } from 'three/examples/jsm/controls/DragControls.js'
@@ -675,6 +676,20 @@ export default class Renderer {
     const geometry = new LineGeometry()
     geometry.setPositions(positions)
     // geometry.setColors(positions.map((pos, i) => i / positions.length ))
+    geometry.setColors(Array(positions.length).fill(1))
+    const line = new Line2(geometry, material)
+    line.computeLineDistances()
+    return line
+  }
+
+  // Several polylines as a single pickable object
+  convertLines(polylines, material) {
+    const positions = polylines.flatMap(polyline =>
+      polyline.slice(1).flatMap((vertex, index) => [...polyline[index], ...vertex])
+    )
+    if(!positions.length) return new THREE.Object3D()
+    const geometry = new LineSegmentsGeometry()
+    geometry.setPositions(positions)
     geometry.setColors(Array(positions.length).fill(1))
     const line = new Line2(geometry, material)
     line.computeLineDistances()

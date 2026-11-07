@@ -16,6 +16,7 @@ import {
   Spline,
   OffsetCurve,
   SketchPoint,
+  SketchText,
 } from './core/geom2d.js'
 
 import {
@@ -137,6 +138,7 @@ function captureSnap(snapper) {
 function isConstrainablePoint(elem, index) {
   if(elem instanceof SketchOrigin) return index == 0
   if(elem instanceof SketchPoint) return index == 0
+  if(elem instanceof SketchText) return index == 0
   if(elem instanceof ProjectedPoint) return index == 0
   if(elem instanceof Line) return index == 0 || index == 1
   if(elem instanceof Circle) return index == 0
@@ -612,7 +614,7 @@ export class ManipulationTool extends HighlightTool {
     this.preferPointObjects = true
     this.visibleEdgesOnly = !this.viewport.document.activeSketch
     this.probesSurface = this.visibleEdgesOnly
-    this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point'] : ['curve', 'point', 'face', 'edge', 'plane'])
+    this.setSelectors(this.viewport.document.activeSketch ? ['curve', 'point', 'text'] : ['curve', 'point', 'text', 'face', 'edge', 'plane'])
   }
 
   acceptsInput(item) {
@@ -671,6 +673,13 @@ export class ManipulationTool extends HighlightTool {
     selection.handle(item.solid, additive)
   }
 
+  async editTextAt(coords) {
+    const item = await this.getObject(coords, true)
+    if(item instanceof SketchText && this.viewport.document.activeSketch.elements.includes(item)) {
+      this.viewport.editText(item)
+    }
+  }
+
   async selectAt(coords, additive) {
     const item = await this.getObject(coords)
     if(item) {
@@ -708,7 +717,7 @@ export class ManipulationTool extends HighlightTool {
       !this.viewport.activeDimension &&
       !this.viewport.hoveredHandle &&
       !this.viewport.hoveredDimension &&
-      (object instanceof Line || object instanceof Circle || object instanceof Arc) &&
+      (object instanceof Line || object instanceof Circle || object instanceof Arc || object instanceof SketchText) &&
       this.viewport.document.activeSketch?.elements.includes(object) &&
       !object.projection
     ) {
@@ -824,7 +833,7 @@ export class ManipulationTool extends HighlightTool {
         handle.targets = this.curveDrag.group.flatMap(item => item.handles.map((point, index) => ({
           elem: item.elem, index, point: point.clone().add(delta),
         })))
-      } else if(handle.elem instanceof Line) {
+      } else if(handle.elem instanceof Line || handle.elem instanceof SketchText) {
         const delta = vec.clone().sub(this.curveDrag.pointer)
         handle.targets = originalHandles.map((point, index) => ({
           elem: handle.elem, index, point: point.clone().add(delta),
@@ -2486,6 +2495,22 @@ export class PolygonTool extends SketchTool {
     this.lines = []
     this.center = null
     this.radiusPoint = null
+  }
+}
+
+
+// Picks the start of a new text's baseline, then has the viewport ask for its content
+export class TextTool extends SketchTool {
+  static icon = 'font'
+
+  click(vec) {
+    const snap = this.pointerSnap()
+    const text = new SketchText(vec.clone())
+    this.sketch.add(text)
+    addCapturedSnapConstraint(this.sketch, snap, text, 0, true)
+    this.originSnapConstraint(text, 0, snap)
+    this.viewport.activateTool(ManipulationTool)
+    this.viewport.editText(text, true)
   }
 }
 

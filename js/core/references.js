@@ -347,8 +347,7 @@ export class ProfileReference extends Reference {
     // elements (for example, `circle-id/0`), not necessarily to the original
     // elements stored on the sketch. Recreate those segments before resolving
     // the saved ring IDs.
-    const elements = sketch.profileElements()
-    const segments = elements.flatMap(elem => elem.split(elements))
+    const segments = sketch.cutElements()
     const regions = dump.rings.map(ring =>
       ring.map(segId => segments.find(elem => elem.id == segId))
     )

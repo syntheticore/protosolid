@@ -111,6 +111,18 @@
         :position="pointerCoords"
       )
 
+      SketchTextInput(
+        v-if="textEditor"
+        :key="textEditor.text.id"
+        :text="textEditor.text"
+        :created="textEditor.created"
+        :fonts="textEditor.fonts"
+        :transform="activeComponentTransform"
+        @close="closeTextEditor"
+        @remove="removeEditedText"
+        @materialize="materializeEditedText"
+      )
+
       //- Ends the line or spline being drawn, to start a new one or exit the tool
       RestartWidget(
         v-if="isReady && document.activeSketch"
@@ -118,6 +130,15 @@
         :tool="activeTool"
         @restart="restartTool"
         @cancel="cancelTool"
+        @wheel="forwardWheelToCanvas"
+      )
+
+      //- Opens the floating input of selected texts
+      TextEditWidget(
+        v-if="isReady && sketchManipulation"
+        :document="document"
+        :editing="textEditor?.text"
+        @edit="editText"
         @wheel="forwardWheelToCanvas"
       )
 
@@ -288,6 +309,7 @@
   import { TransformGizmo } from './../js/three/gizmos.js'
   import SimulationFlow from '../js/three/simulation-flow.js'
   import { componentTriangles } from './../js/core/export.js'
+  import { listSystemFonts, preferredFont } from './../js/core/sketch-text.js'
   import {
     DummyTool,
     ManipulationTool,
@@ -371,6 +393,7 @@
         sketchSectionSide: false,
         pointerCoords: null,
         drawingInputHidden: false,
+        textEditor: null,
       }
     },
 
@@ -436,6 +459,11 @@
 
       activeComponentTransform: function() {
         return this.document.activeSketch ? worldTransform(this.document.activeComponent) : null
+      },
+
+      // No other sketch tool is in use
+      sketchManipulation: function() {
+        return !!this.document.activeSketch && this.activeTool instanceof ManipulationTool
       },
 
       sketchSectionPlane: function() {
@@ -878,8 +906,9 @@
         if(e.shiftKey || e.altKey) {
           this.commitCameraPreview()
           this.renderer.setPivot(coords)
-        } else if(this.activeTool instanceof ManipulationTool && !this.document.activeSketch) {
-          this.activeTool.doubleClick(coords, e)
+        } else if(this.activeTool instanceof ManipulationTool) {
+          if(this.document.activeSketch) this.activeTool.editTextAt(coords)
+          else this.activeTool.doubleClick(coords, e)
         }
       },
 
@@ -1257,6 +1286,34 @@
         elem.sketch.remove(elem)
         this.document.selection.delete(elem)
         this.updateRegions(true)
+      },
+
+      editText: async function(text, created = false) {
+        const fonts = markRaw(await listSystemFonts())
+        if(created && fonts.length) {
+          const { family, style } = preferredFont(fonts)
+          text.setFont(family, style)
+        }
+        this.textEditor = { text, created, fonts }
+      },
+
+      closeTextEditor: function() {
+        this.textEditor = null
+        this.updateRegions(true)
+      },
+
+      removeEditedText: function() {
+        this.deleteElement(this.textEditor.text)
+        this.textEditor = null
+      },
+
+      materializeEditedText: function() {
+        const { text } = this.textEditor
+        const curves = text.sketch.materializeText(text)
+        const selection = this.document.selection
+        selection.clear()
+        curves.forEach(curve => selection.add(curve))
+        this.closeTextEditor()
       },
 
       previewCamera: function(action) {

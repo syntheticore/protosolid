@@ -3,7 +3,7 @@ import { nextTick, toRaw, markRaw } from 'vue'
 
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
-import { Line, Circle, Arc, Spline, DerivedCurve, SketchElement, SketchPoint, supportsPointOnCurveConstraint } from './geom2d.js'
+import { Line, Circle, Arc, Spline, DerivedCurve, SketchElement, SketchPoint, SketchText, supportsPointOnCurveConstraint } from './geom2d.js'
 import { buildOffsetCurves, nearestOffsetFrame } from './sketch-offset.js'
 import { Wire, Profile, Edge, Face, Vertex, spatialCurve } from './geom3d.js'
 import { AxisHelper, PointHelper } from './helpers.js'
@@ -355,19 +355,42 @@ export class Sketch {
     return replacements
   }
 
+  // Replaces the text by its outline. Keeping the ids of the outline's curves
+  // retains profiles that refer to them.
+  materializeText(text) {
+    const curves = text.curves()
+    this.remove(text)
+    curves.forEach(curve => {
+      curve.isReference = text.isReference
+      this.add(curve)
+    })
+    return curves
+  }
+
   profiles(comp, includeOuter) {
-    const elements = this.profileElements()
-    const cutElements = elements.flatMap(elem => elem.split(elements) )
-    const wires = this.getWires(cutElements, includeOuter)
+    const wires = this.getWires(this.cutElements(), includeOuter)
     const profiles = this.buildProfiles(comp, wires)
 
     return profiles
   }
 
+  // Exact intersections are expensive, and sketches with text have many curves
+  cutElements() {
+    const elements = this.profileElements()
+    const bounds = elements.map(elem => elem.bounds().expandByScalar(EPSILON * 10))
+    return elements.flatMap((elem, index) =>
+      elem.split(elements.filter((_, other) => bounds[index].intersectsBox(bounds[other])))
+    )
+  }
+
   profileElements() {
     const projections = this.projectedElements()
       .filter(elem => elem instanceof SketchElement)
-    return this.removeEmpties([...this.elements, ...projections])
+    const elements = this.elements.flatMap(elem => {
+      if(!(elem instanceof SketchText)) return [elem]
+      return elem.isReference ? [] : elem.curves()
+    })
+    return this.removeEmpties([...elements, ...projections])
   }
 
   removeEmpties(elements) {
@@ -581,8 +604,9 @@ export class Sketch {
     const primitives = solverElements.concat(projections).flatMap(elem => {
       let primitives
 
-      if(elem instanceof SketchPoint) {
-        primitives = [{ id: `${id++}`, type: 'point', x: elem.point.x, y: elem.point.y }]
+      if(elem instanceof SketchPoint || elem instanceof SketchText) {
+        const [{ x, y }] = elem.handles()
+        primitives = [{ id: `${id++}`, type: 'point', x, y }]
 
       } else if(elem instanceof Line) {
         const p1 = { id: `${id++}`, type: 'point', x: elem.points[0].x, y: elem.points[0].y, fixed: elem.projection }

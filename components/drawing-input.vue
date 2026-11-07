@@ -1,47 +1,61 @@
 <template lang="pug">
 
-  .drawing-input(:style="{ left: Math.round(position.x) + 18 + 'px', top: Math.round(position.y) + 22 + 'px' }")
+  .drawing-input(:style="{ left: Math.round(position.x) + 'px', top: Math.round(position.y) + 'px' }")
 
-    .field(
-      v-for="(field, index) in fields"
-      v-pixel-snap
-      :key="field.key"
-      :class="{ locked: field.key in tool.locks, focused: focused == index, problem: problems[field.key] }"
-    )
-      span.label
-        span(:class="{ 'diameter-symbol': field.key == 'diameter' }") {{ field.label }}
+    .panel.bordered.tipped
 
-      .value(:style="{ width: Math.max(2, display(field).length * 10.5) + 'px' }")
+      .field(
+        v-for="(field, index) in fields"
+        v-pixel-snap
+        :key="field.key"
+        :class="{ locked: field.key in tool.locks, focused: focused == index, problem: problems[field.key] }"
+      )
+        span.label
+          span(:class="{ 'diameter-symbol': field.key == 'diameter' }") {{ field.label }}
 
-        input(
-          type="text"
-          :ref="el => inputs[index] = el"
-          :value="display(field)"
-          spellcheck="false"
-          @input="drafts[field.key] = $event.target.value"
-          @keydown="keydown($event, index)"
-          @keyup="$event.key.length == 1 && !isShortcut($event) && $event.stopPropagation()"
-          @focus="focused = index"
-          @blur="blur(index)"
-        )
+        .value(:style="{ width: Math.max(2, display(field).length * 10.5) + 'px' }")
+
+          input(
+            type="text"
+            :ref="el => inputs[index] = el"
+            :value="display(field)"
+            spellcheck="false"
+            @input="drafts[field.key] = $event.target.value"
+            @keydown="keydown($event, index)"
+            @keyup="$event.key.length == 1 && !isShortcut($event) && $event.stopPropagation()"
+            @focus="focused = index"
+            @blur="blur(index)"
+          )
 
 </template>
 
 
 <style lang="stylus" scoped>
 
+  // Fields and box keep the same distance all around, including at the corners
+  radius = 3px
+  spacing = 4px
+
   .drawing-input
     position: absolute
     pointer-events: none
+
+  // The tip of the arrow points at the cursor, leaving room for its pointer below
+  .panel
     display: flex
-    gap: 4px
+    gap: spacing
+    width: max-content
+    margin-top: 29px
+    margin-left: -23px
+    padding: spacing
+    border-radius: radius + spacing
 
   .field
     display: flex
     align-items: center
     height: 20px
     padding-left: 6px
-    border-radius: 3px
+    border-radius: radius
     background: $bright1
     border: 2px solid transparent
     box-shadow: 0 1px 3px rgba(black, 0.5)

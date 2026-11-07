@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { markRaw } from 'vue'
 import Serialize from './serialize.js'
 import { makeID } from './id.js'
 import { AxialReference, CurveReference, PointReference } from './references.js'
@@ -7,6 +8,11 @@ import { shapex as sx, point2, modelTolerance, sketchTessellationOptions } from 
 import { isModelingFailure } from './errors.js'
 
 const vector = point => new THREE.Vector3(point.x, point.y, 0)
+
+const circleBounds = ({ x, y }, radius) => new THREE.Box2(
+  new THREE.Vector2(x - radius, y - radius),
+  new THREE.Vector2(x + radius, y + radius),
+)
 
 export class SketchElement {
   constructor() {
@@ -61,6 +67,10 @@ export class SketchElement {
 
   length() { return this.geom ? this.geom().length(modelTolerance) : 0 }
 
+  // Box containing the curve, unbounded unless cheaply known
+  bounds() {
+    return new THREE.Box2(new THREE.Vector2(-Infinity, -Infinity), new THREE.Vector2(Infinity, Infinity))
+  }
 
   tesselate() {
     if(!this.geom) return
@@ -193,6 +203,8 @@ export class Line extends SketchElement {
     return this.points[0].clone().add(this.points[1]).divideScalar(2.0)
   }
 
+  bounds() { return new THREE.Box2().setFromPoints(this.points) }
+
   center() { return this.midpoint() }
 
   handles() {
@@ -277,6 +289,8 @@ export class Circle extends SketchElement {
   snapPoints() {
     return [this._center]
   }
+
+  bounds() { return circleBounds(this._center, this.radius) }
 
   center() { return this._center.clone() }
 
@@ -372,6 +386,8 @@ export class Arc extends SketchElement {
   snapPoints() {
     return [this._center, ...this.endpoints()]
   }
+
+  bounds() { return circleBounds(this._center, this.radius) }
 
   handles() {
     return [this._center, ...this.endpoints()]
@@ -501,6 +517,9 @@ export class Spline extends SketchElement {
     return this.endpoints()
   }
 
+  // A B-spline stays within the convex hull of its control points
+  bounds() { return new THREE.Box2().setFromPoints(this.points) }
+
   handles() {
     return [...this.points]
   }
@@ -557,6 +576,104 @@ export class Spline extends SketchElement {
 }
 
 Serialize.register(Spline, 'Spline')
+
+
+// Text positioned by a single handle at the start of its baseline. Its outline
+// is only replaced as a whole, or turned into separate curves by materializing.
+// Pieces hold the Bézier control points [x, y, x, y, ...] of a text with size 1,
+// and are saved along with the text, so that sketches load without the font.
+export class SketchText extends SketchElement {
+  typename() { return 'Text' }
+
+  constructor(position, content = '', size = 10, pieces = [], fontFamily = 'Inter', fontStyle = 'Regular') {
+    super()
+    this.position = position
+    this.content = content
+    this.size = size
+    this.pieces = markRaw(pieces)
+    this.fontFamily = fontFamily
+    this.fontStyle = fontStyle
+    this.cache = markRaw({})
+  }
+
+  center() { return this.position.clone() }
+  endpoints() { return [this.position] }
+  snapPoints() { return [this.position] }
+  handles() { return [this.position] }
+
+  setHandles(handles) {
+    this.position = handles[0]
+    this.cache.curves = null
+  }
+
+  setOutline(content, pieces) {
+    this.content = content
+    this.pieces = markRaw(pieces)
+    this.cache = markRaw({})
+  }
+
+  // Names the font of the outline, which setOutline replaces
+  setFont(family, style) {
+    this.fontFamily = family
+    this.fontStyle = style
+  }
+
+  setSize(size) {
+    this.size = size
+    this.cache = markRaw({})
+  }
+
+  pieceCurve(piece, { x, y }) {
+    const points = []
+    for(let i = 0; i < piece.length; i += 2) {
+      points.push(new THREE.Vector3(x + piece[i] * this.size, y + piece[i + 1] * this.size, 0))
+    }
+    return points.length == 2 ? new Line(...points) : new Spline(points)
+  }
+
+  // The outline as ordinary sketch curves, not being part of the sketch.
+  // A slash would mark them as splits of one curve, sharing a topology source.
+  curves() {
+    return this.cache.curves ||= this.pieces.map((piece, index) => {
+      const curve = this.pieceCurve(piece, this.position)
+      curve.id = `${this.id}-${index}`
+      curve.sketch = this.sketch
+      return curve
+    })
+  }
+
+  polylines() {
+    const { x, y } = this.position
+    this.cache.outline ||= this.pieces.map(piece => this.pieceCurve(piece, { x: 0, y: 0 }).tesselate())
+    return this.cache.outline.map(polyline => polyline.map(point => [point[0] + x, point[1] + y, 0]))
+  }
+
+  tesselate() { return this.polylines().flat() }
+
+  _clone() { return new SketchText(this.position, this.content, this.size, this.pieces, this.fontFamily, this.fontStyle) }
+
+  dump() {
+    return {
+      id: this.id,
+      position: this.position,
+      content: this.content,
+      size: this.size,
+      pieces: this.pieces,
+      fontFamily: this.fontFamily,
+      fontStyle: this.fontStyle,
+      isReference: this.isReference,
+    }
+  }
+
+  static undump(dump) {
+    const text = new SketchText(dump.position, dump.content, dump.size, dump.pieces, dump.fontFamily, dump.fontStyle)
+    text.id = dump.id
+    text.isReference = dump.isReference || false
+    return text
+  }
+}
+Serialize.register(SketchText, 'SketchText')
+
 
 // Exact derived geometry regenerated by an offset constraint or projection.
 // Its source owns edits; the curve has no independent control points.

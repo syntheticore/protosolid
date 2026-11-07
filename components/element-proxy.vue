@@ -4,7 +4,7 @@
 
   import * as THREE from 'three'
   import materials from '../js/materials.js'
-  import { SketchPoint, Spline } from '../js/core/geom2d.js'
+  import { SketchPoint, SketchText, Spline } from '../js/core/geom2d.js'
   import { Constraint } from '../js/core/sketch.js'
   import { ScreenPointObject } from '../js/three/helper-objects.js'
   import HiddenLine from '../js/three/hidden-line.js'
@@ -50,6 +50,8 @@
 
     if(props.element instanceof SketchPoint) {
       mesh = new ScreenPointObject(26)
+    } else if(props.element instanceof SketchText) {
+      mesh = window.alcRenderer.convertLines(props.element.polylines(), materials.line)
     } else {
       const vertices = props.element.tesselate()
       if(!vertices) return
@@ -64,10 +66,11 @@
       }
     }
     updateTransform()
+    // Text is no curve, to keep it out of the tools working on curves
     mesh.alcTypes = props.element instanceof SketchPoint ?
       ['point']
       :
-      ['curve', 'path', props.element.getAxis && 'axis']
+      props.element instanceof SketchText ? ['text'] : ['curve', 'path', props.element.getAxis && 'axis']
     mesh.material = getMaterial()
     mesh.alcObject = props.element
     if(!(props.element instanceof SketchPoint)) {

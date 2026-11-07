@@ -139,6 +139,14 @@
     font-weight: inherit
     transition: background 0.25s
 
+    // Sits on panels that blur already, and the backdrop layer of .bordered would cover the hover background
+    .blurry &
+      isolation: auto
+      background: $dark2
+
+      &::after
+        display: none
+
     &:hover
     &:focus-visible
     &[aria-expanded="true"]

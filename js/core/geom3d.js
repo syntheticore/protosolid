@@ -261,8 +261,7 @@ export class Profile {
     return new Compound(componentId, geometry).seedProfileTopology([this], featureId, railSources)
   }
   update() {
-    const elements = this.sketch.profileElements()
-    const cutElements = elements.flatMap(elem => elem.split(elements))
+    const cutElements = this.sketch.cutElements()
     const newWires = this.sketch.getWires(cutElements, false)
     if (this.serializedRingIds) {
       const rings = this.serializedRingIds.map(ring => ring.map(segId => cutElements.find(elem => elem.id == segId)))

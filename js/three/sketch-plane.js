@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { SketchText } from '../core/geom2d.js'
 
 const VIRTUAL_GRID_SIZE = 99999
 const MAX_HULL_POINTS = 64
@@ -202,12 +203,17 @@ export default class SketchPlane extends THREE.Object3D {
       start: element.start,
       sweep: element.sweep,
       trim: element.trim,
+      position: element.position,
+      content: element.content,
+      fontFamily: element.fontFamily,
+      fontStyle: element.fontStyle,
+      size: element.size,
     })))
   }
 
   sampleSketch(elements) {
     const points = elements.flatMap(element => {
-      if(!element.tesselate || !element.geom) {
+      if(!element.tesselate || !(element.geom || element instanceof SketchText)) {
         return (element.handles?.() || []).map(point => point.clone())
       }
 

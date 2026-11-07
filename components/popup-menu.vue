@@ -71,6 +71,12 @@
   const rows = ref([])
   const openIndex = ref(-1)
   const style = ref({ visibility: 'hidden' })
+  let upwards = false
+
+  // Slides in from the anchor, like the transitions of dialogs and panels
+  const timing = { duration: 150, easing: 'ease-out' }
+  const hidden = () => ({ opacity: 0, transform: `translateY(${upwards ? 6 : -6}px)` })
+  const shown = { opacity: 1, transform: 'none' }
 
   function isSelected(option) {
     if(option.heading) return false
@@ -93,7 +99,7 @@
     }
     const below = window.innerHeight - rect.bottom - 8
     const above = rect.top - 8
-    const upwards = below < Math.min(height, 240) && above > below
+    upwards = below < Math.min(height, 240) && above > below
     style.value = {
       minWidth: `${rect.width}px`,
       maxWidth: `${window.innerWidth - 16}px`,
@@ -134,13 +140,24 @@
     place()
     nextTick(reveal)
     if(props.nested) return
+    menu.value.animate([hidden(), shown], timing)
     window.addEventListener('pointerdown', outside, true)
     window.addEventListener('keydown', keydown, true)
     window.addEventListener('resize', close)
     window.addEventListener('scroll', scroll, true)
   })
 
+  // Owners remove the menu at once, so a copy of it fades out instead
+  function fadeOut() {
+    const copy = menu.value.cloneNode(true)
+    copy.style.pointerEvents = 'none'
+    document.body.append(copy)
+    copy.scrollTop = menu.value.scrollTop
+    copy.animate([shown, hidden()], timing).finished.then(() => copy.remove())
+  }
+
   onBeforeUnmount(() => {
+    if(!props.nested) fadeOut()
     window.removeEventListener('pointerdown', outside, true)
     window.removeEventListener('keydown', keydown, true)
     window.removeEventListener('resize', close)
@@ -156,6 +173,9 @@
     z-index: 10000
     box-sizing: border-box
     overflow: auto
+    // Like the tree view. The track is square, so a colored one would cover the rounded border.
+    scrollbar-color: $dark1 * 1.15 transparent
+    scrollbar-width: thin
     color: $bright1
     font-size: 11px
     font-weight: 600

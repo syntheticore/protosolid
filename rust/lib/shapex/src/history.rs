@@ -181,9 +181,10 @@ pub enum CreationRole {
     },
 }
 
-/// Authored surface regions needed when one generator produces multiple faces.
+/// Authored chart coverage used to name a generator's faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceChart {
+    FullTurn,
     TurnStart,
     TurnEnd,
     SectionPositive,

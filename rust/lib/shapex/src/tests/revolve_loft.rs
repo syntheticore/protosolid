@@ -529,7 +529,31 @@ fn feature_conical_revolution() {
         )
         .unwrap();
     assert!((body.volume() - 32.0 / 3.0 * std::f64::consts::PI).abs() < 1.0e-5);
+    assert_eq!(body.faces().count(), 3);
+    assert_eq!(body.edges().filter(|edge| body.is_semantic_edge(edge)).count(), 3);
     mesh(&body);
+}
+
+#[test]
+fn full_revolution_with_one_pole() {
+    let tolerance = ModelTolerance::default();
+    let bottom = Point2::origin();
+    let rim = Point2::new(2.0, 0.0);
+    let top = Point2::new(0.0, 2.0);
+    let wire = Wire2::new([
+        TrimmedCurve2::line(bottom, rim).unwrap(),
+        TrimmedCurve2::arc_through(rim, Point2::new(2.0_f64.sqrt(), 2.0_f64.sqrt()), top).unwrap(),
+        TrimmedCurve2::line(top, bottom).unwrap(),
+    ], tolerance).unwrap();
+    let profile = Profile::new(wire, [], tolerance).unwrap();
+    let axis = Axis3::new(Point3::origin(), Vec3::unit_y()).unwrap();
+    for angle in [std::f64::consts::TAU, -std::f64::consts::TAU] {
+        let body = profile.revolve(Plane3::xy(), axis, angle).unwrap();
+        assert_eq!(body.faces().count(), 2);
+        assert_eq!(body.edges().filter(|edge| body.is_semantic_edge(edge)).count(), 1);
+        assert!((body.volume() - 16.0 / 3.0 * std::f64::consts::PI).abs() < 1.0e-5);
+        mesh(&body);
+    }
 }
 #[test]
 fn draft_preserves_neutral_section_and_sets_angle() {
@@ -1186,6 +1210,11 @@ fn feature_edge_cases() {
     .unwrap()
     .revolve(Plane3::xy(), axis, std::f64::consts::TAU)
     .unwrap();
+    assert_eq!(cone.faces().count(), 2);
+    let rims = cone.edges().filter(|edge| cone.is_semantic_edge(edge)).collect::<Vec<_>>();
+    assert_eq!(rims.len(), 1);
+    assert!(matches!(rims[0].curve(), Curve3::Circle(_)));
+    assert!((rims[0].range().unwrap().span().abs() - std::f64::consts::TAU).abs() < t.parameter);
     assert!((cone.volume() - 12.0 * std::f64::consts::PI).abs() < 1.0e-5);
     mesh(&cone);
     let p = Profile::new(

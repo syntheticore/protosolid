@@ -121,6 +121,7 @@ pub(super) fn revolve(
     let (profile, frame) = radial_profile(profile, plane, axis)?;
     let tolerance = profile.tolerance();
     let full = (angle.abs() - std::f64::consts::TAU).abs() <= tolerance.parameter;
+    let angle = if full { std::f64::consts::TAU.copysign(angle) } else { angle };
     let low = angle.min(0.0);
     let high = angle.max(0.0);
     let section_plane = |a: f64| {
@@ -150,55 +151,56 @@ pub(super) fn revolve(
             {
                 continue;
             }
+            let role = |chart| CreationRole::ProfileSide {
+                generators: vec![[0, ring, profile.generator(ring, segment_index)]],
+                chart,
+            };
+            if full && matches!(segment.curve(), Curve2::Line(line)
+                if line.direction().y.abs() <= tolerance.linear)
+            {
+                patches.push(revolve_radial_line(frame, first, last, low, high, tolerance)?);
+                roles.push(role(Some(SurfaceChart::FullTurn)));
+                continue;
+            }
             let t0 = segment.range().start.min(segment.range().end);
             let t1 = segment.range().start.max(segment.range().end);
             let surface: Surface3 =
                 RevolvedSurface3::new(frame, segment.curve().clone(), range(t0, t1)?, tolerance)?
                     .into();
-            // Split a complete turn to disambiguate closed-edge welding.
-            // Partial turns retain their directed parameter interval.
-            let spans = if full { 2 } else { 1 };
-            let angles = (0..=spans)
-                .map(|i| low + (high - low) * i as f64 / spans as f64)
-                .collect::<Vec<_>>();
-            for span in angles.windows(2) {
-                let a = span[0];
-                let b = span[1];
+            // With two poles there is no material rim to bound the chart.
+            // Section and Boolean arrangements use two angular charts in that case.
+            let two_poles = full && first.x <= tolerance.linear && last.x <= tolerance.linear;
+            let middle = (low + high) * 0.5;
+            let halves = [(low, middle), (middle, high)];
+            let whole = [(low, high)];
+            let spans = if two_poles { halves.as_slice() } else { whole.as_slice() };
+            for &(a, b) in spans {
                 let mut edges = Vec::new();
-                for (t, start, end) in [(t0, a, b), (t1, b, a)] {
+                for (t, next_t, start, end) in [(t0, t1, a, b), (t1, t0, b, a)] {
                     let rz = segment.curve().evaluate(t)?.point;
-                    if rz.x <= tolerance.linear {
-                        continue;
-                    }
-                    let curve = Circle3::new(
-                        frame.origin() + frame.z() * rz.y,
-                        frame.x() * rz.x,
-                        frame.y() * rz.x,
-                        tolerance,
-                    )?
-                    .into();
-                    edges.push((
-                        if t == t0 { 0 } else { 2 },
-                        BrepPatchSegment {
+                    if rz.x > tolerance.linear {
+                        edges.push(BrepPatchSegment {
                             provenance: Default::default(),
-                            curve,
+                            curve: Circle3::new(
+                                frame.origin() + frame.z() * rz.y,
+                                frame.x() * rz.x,
+                                frame.y() * rz.x,
+                                tolerance,
+                            )?.into(),
                             pcurve: Line2::new(Point2::new(0.0, t), Vec2::unit_x())?.into(),
                             range: range(start, end)?,
-                        },
-                    ));
+                        });
+                    }
+                    // Both uses of a full turn's seam share one spatial curve.
+                    // Their p-curves retain the two sides of the periodic chart.
+                    let meridian = if full && !two_poles { 0.0 } else { end };
+                    edges.push(BrepPatchSegment {
+                        provenance: Default::default(),
+                        curve: section_plane(meridian)?.lift_trimmed_curve(segment, tolerance)?,
+                        pcurve: Line2::new(Point2::new(end, 0.0), Vec2::unit_y())?.into(),
+                        range: range(t, next_t)?,
+                    });
                 }
-                for (index, a, start, end) in [(1, b, t0, t1), (3, a, t1, t0)] {
-                    edges.push((
-                        index,
-                        BrepPatchSegment {
-                            provenance: Default::default(),
-                            curve: section_plane(a)?.lift_trimmed_curve(segment, tolerance)?,
-                            pcurve: Line2::new(Point2::new(a, 0.0), Vec2::unit_y())?.into(),
-                            range: range(start, end)?,
-                        },
-                    ));
-                }
-                edges.sort_by_key(|(index, _)| *index);
                 let mut patch = BrepPatch {
                     preserved: Vec::new(),
                     sources: Vec::new(),
@@ -206,7 +208,7 @@ pub(super) fn revolve(
                     orientation: FaceOrientation::Forward,
                     loops: vec![BrepPatchLoop {
                         kind: LoopKind::Outer,
-                        segments: edges.into_iter().map(|(_, s)| s).collect(),
+                        segments: edges,
                     }],
                 };
                 if segment.range().span() < 0.0 {
@@ -214,8 +216,11 @@ pub(super) fn revolve(
                 }
                 promote_revolution(&mut patch, frame, segment, tolerance)?;
                 patches.push(patch);
-                roles.push(CreationRole::ProfileSide { generators: vec![[0, ring, profile.generator(ring, segment_index)]],
-                    chart: if full { Some(if (a == low) == (angle > 0.0) { SurfaceChart::TurnStart } else { SurfaceChart::TurnEnd }) } else { None } });
+                roles.push(role(if two_poles {
+                    Some(if (a == low) == (angle > 0.0) { SurfaceChart::TurnStart } else { SurfaceChart::TurnEnd })
+                } else {
+                    full.then_some(SurfaceChart::FullTurn)
+                }));
             }
         }
     }
@@ -224,6 +229,49 @@ pub(super) fn revolve(
         return publish_shells_with_roles(patches, roles, tolerance);
     }
     publish_with_roles(patches, roles, tolerance)
+}
+
+/// A radial line sweeps a disk or annulus bounded directly by closed circles.
+fn revolve_radial_line(
+    frame: Frame3,
+    first: Point2,
+    last: Point2,
+    low: f64,
+    high: f64,
+    tolerance: ModelTolerance,
+) -> KernelResult<BrepPatch> {
+    let (outer, inner, orientation, outer_range) = if first.x > last.x {
+        (first, last, FaceOrientation::Forward, range(low, high)?)
+    } else {
+        (last, first, FaceOrientation::Reversed, range(high, low)?)
+    };
+    let center = frame.origin() + frame.z() * outer.y;
+    let plane = Plane3::new(center, frame.x(), frame.y(), tolerance)?;
+    let mut loops = Vec::new();
+    for (radius, kind, range) in [
+        (outer.x, LoopKind::Outer, outer_range),
+        (inner.x, LoopKind::Inner, outer_range.reversed()),
+    ] {
+        if radius > tolerance.linear {
+            loops.push(BrepPatchLoop {
+                kind,
+                segments: vec![BrepPatchSegment {
+                    provenance: Default::default(),
+                    curve: Circle3::new(center, frame.x() * radius, frame.y() * radius, tolerance)?
+                        .into(),
+                    pcurve: Circle2::new(Point2::origin(), radius)?.into(),
+                    range,
+                }],
+            });
+        }
+    }
+    Ok(BrepPatch {
+        preserved: Vec::new(),
+        sources: Vec::new(),
+        surface: plane.into(),
+        orientation,
+        loops,
+    })
 }
 
 fn promote_revolution(

@@ -412,7 +412,7 @@ export interface CreationRole {
   readonly segment?: number
   readonly part?: number
   readonly generators: readonly [number, number, number][]
-  readonly chart?: 'turn-start' | 'turn-end' | 'section-positive' | 'section-negative'
+  readonly chart?: 'full-turn' | 'turn-start' | 'turn-end' | 'section-positive' | 'section-negative'
 }
 
 export interface Compound extends NativeValue {

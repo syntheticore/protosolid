@@ -1155,6 +1155,7 @@ fn creation_role(role: &CreationRole) -> NativeCreationRole {
         CreationRole::ProfileSide { generators, chart } => NativeCreationRole {
             kind: "profile-side".into(), boundary: None, hole_index: None, segment: None,
             part: None, generators: generators.clone(), chart: chart.map(|chart| match chart {
+                SurfaceChart::FullTurn => "full-turn",
                 SurfaceChart::TurnStart => "turn-start",
                 SurfaceChart::TurnEnd => "turn-end",
                 SurfaceChart::SectionPositive => "section-positive",

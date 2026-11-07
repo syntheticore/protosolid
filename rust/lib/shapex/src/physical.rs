@@ -398,11 +398,10 @@ pub(super) fn integrate_face<const TERMS: usize>(
                             // metric before recognizing a complete seam turn.
                             // At a collapsed pole retain the explicit UV span.
                             let speed = tangent.magnitude();
-                            let epsilon = if speed > linear {
-                                (linear / speed).max(tolerance.parameter * 64.0)
-                            } else {
-                                tolerance.parameter * 64.0
-                            };
+                            if speed <= linear {
+                                return 0.0;
+                            }
+                            let epsilon = (linear / speed).max(tolerance.parameter * 64.0);
                             if (value - candidate).abs() <= epsilon {
                                 candidate
                             } else {

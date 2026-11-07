@@ -1612,11 +1612,19 @@ fn surface_edge_error(
     let first = evaluate(0.25)?;
     let middle = evaluate(0.5)?;
     let last = evaluate(0.75)?;
-    let chord_error = first
+    let mut chord_error = first
         .0
         .distance(first.1)
         .max(middle.0.distance(middle.1))
         .max(last.0.distance(last.1));
+    // A thin triangle next to a protected edge can evaluate near either end
+    // of that chord. Include those positions for nonuniform blend charts.
+    if matches!(surface, super::Surface3::Ruled(_)) {
+        for fraction in [1.0 / 6.0, 5.0 / 6.0] {
+            let (point, chord, _) = evaluate(fraction)?;
+            chord_error = chord_error.max(point.distance(chord));
+        }
+    }
     let angular_error = first.2.angle(last.2).0;
     Ok((chord_error, angular_error))
 }

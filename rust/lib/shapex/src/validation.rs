@@ -970,14 +970,12 @@ fn loop_areas(
         if let (Ok(next), Ok(end)) = (topology.coedge(coedge.next), &end) {
             if let Ok(start) = next.pcurve.evaluate(next.range.start) {
                 let (end, start) = (end.point, start.point);
-                if !domains[0].equivalent(end.x, start.x, tolerance.parameter)
-                    || !domains[1].equivalent(end.y, start.y, tolerance.parameter)
-                {
+                if end.distance2(start) > tolerance.parameter.powi(2) {
                     match collapsed_bridge(face, tolerance, end, start) {
                         // A surface pole can collapse a finite parameter-space
                         // interval to one topological vertex. Account for that
                         // implicit bridge in the loop winding without inventing
-                        // a zero-length 3D edge.
+                        // a zero-length 3D edge, even if it spans a full turn.
                         Some(bridge_start) => {
                             let bridge = 0.5 * (end.x * bridge_start.y - bridge_start.x * end.y);
                             uncertainty += f64::EPSILON * 8.0
@@ -985,7 +983,10 @@ fn loop_areas(
                             lifted_area += bridge;
                             principal_area += bridge;
                         }
-                        None => report.geometry(coedge.name, "consecutive p-curves are not continuous in parameter space or across a collapsed surface interval"),
+                        None if !domains[0].equivalent(end.x, start.x, tolerance.parameter)
+                            || !domains[1].equivalent(end.y, start.y, tolerance.parameter) =>
+                            report.geometry(coedge.name, "consecutive p-curves are not continuous in parameter space or across a collapsed surface interval"),
+                        None => {},
                     }
                 }
             }

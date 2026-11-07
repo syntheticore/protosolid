@@ -143,8 +143,10 @@ export class Feature {
 
       const setting = this.settings[key]
       const { references, error } = this.resolveInputReferences(key, tree)
-      const items = references.flatMap(ref => ref.getItems())
+      let items = references.flatMap(ref => ref.getItems())
       if(error) errors.push(error)
+      // Saved selections of separate patches may resolve to the same cell.
+      if(setting.multi && (setting.type == 'face' || setting.type == 'edge')) items = [...new Set(items)]
       results[key] = setting.multi ? items : items[0]
     })
 

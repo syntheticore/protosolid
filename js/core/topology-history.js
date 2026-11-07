@@ -6,6 +6,7 @@ import { topologyItems, topologyNeighbors, identifyTopology, seedRoles } from '.
 // semantic roles and named incidence reach the document identity layer.
 export function seedProfileTopology(compound, profiles, owner, extraSources = []) {
   const constructionRoles = compound.geom().topologyHistory().constructionRoles
+  const turnAliases = new Map()
   const sources = [...profiles.flatMap(profile => profile.rings.flatMap(ring =>
     ring.segments.map(segment => profile.getBaseId(segment)))), ...extraSources]
   for(const face of compound.faces()) {
@@ -14,18 +15,42 @@ export function seedProfileTopology(compound, profiles, owner, extraSources = []
       if(role.kind.endsWith('-end')) return { role: 'profile-end', sources }
       const generators = role.generators?.length ? role.generators : [[0,
         role.boundary == 'outer' ? 0 : role.holeIndex + 1, role.segment]]
-      return { role: role.chart ? `profile-side/${role.chart}` : 'profile-side', sources: [...generators.map(generator => {
+      const generatorSources = [...generators.map(generator => {
         const [section, ring, segment] = generator
         const profile = profiles[section]
         return profile.getBaseId(profile.rings[ring].segments[segment])
-      }), ...extraSources] }
+      }), ...extraSources]
+      if(role.chart == 'full-turn') {
+        turnAliases.set(face, ['turn-start', 'turn-end'].map(chart => {
+          const half = {}
+          nameTopology(half, 'face', `profile-side/${chart}`, generatorSources, owner)
+          return half.topology
+        }))
+        return { role: 'profile-side', sources: generatorSources }
+      }
+      return { role: role.chart ? `profile-side/${role.chart}` : 'profile-side', sources: generatorSources }
     })
     seedRoles(face, 'face', roles, 'profile/unclassified', sources, owner)
+    if(turnAliases.has(face)) {
+      face.topology.names.push(...turnAliases.get(face).flatMap(half => half.names))
+      face.topology.names.sort()
+    }
   }
   for(const solid of compound.solids()) {
     for(const edge of solid.edges()) {
-      nameTopology(edge, 'edge', 'profile/boundary',
-        edge.connectedFaces().flatMap(face => face.topology.anchors), owner)
+      const faces = edge.connectedFaces()
+      nameTopology(edge, 'edge', 'profile/boundary', faces.flatMap(face => face.topology.anchors), owner)
+      // The old half-turn rims used the incidence of their corresponding
+      // face halves. Both saved references now resolve to the closed rim.
+      if(faces.length == 2 && faces.every(face => turnAliases.has(face))) {
+        for(const half of [0, 1]) {
+          const arc = {}
+          nameTopology(arc, 'edge', 'profile/boundary',
+            faces.flatMap(face => turnAliases.get(face)[half].anchors), owner)
+          edge.topology.names.push(...arc.topology.names)
+        }
+        edge.topology.names.sort()
+      }
     }
     for(const vertex of solid.vertices()) {
       nameTopology(vertex, 'vertex', 'profile/boundary',

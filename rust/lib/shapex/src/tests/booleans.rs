@@ -3,6 +3,35 @@
 use super::*;
 
 #[test]
+fn swept_pipe_cut_sews_one_vertex_at_the_saddle() {
+    use crate::{NurbsCurve3, TrimmedCurve3, Wire3};
+    let tolerance = ModelTolerance::default();
+    let rail = NurbsCurve3::new(3, vec![
+        Point3::origin(), Point3::new(0.0, 0.0, 8.0),
+        Point3::new(8.0, 0.0, 12.0), Point3::new(14.0, 0.0, 14.0),
+    ], vec![1.0; 4], vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+    let rail = TrimmedCurve3::new(rail, ParameterRange::new(0.0, 1.0).unwrap()).unwrap();
+    let rail = Wire3::new([rail], tolerance).unwrap();
+    let circle = |center, radius| {
+        Wire2::new([TrimmedCurve2::circle(center, radius).unwrap()], tolerance).unwrap()
+    };
+    let pipe = Profile::new(circle(Point2::origin(), 2.0), [], tolerance).unwrap()
+        .sweep(Plane3::xy(), &rail).unwrap();
+    let center = Point2::new(3.0, 2.0);
+    let tube = Profile::new(circle(center, 7.0), [circle(center, 4.0)], tolerance).unwrap()
+        .extrude(Plane3::xy(), Vec3::unit_z() * 12.0).unwrap();
+    let cut = pipe.difference(&tube).unwrap();
+    // At the bottom of the swept circle the bore is tangent at x = 3.
+    let vertices = cut.vertices().filter(|vertex| {
+        let point = vertex.point();
+        (point.x - 3.0).hypot(point.y + 2.0) < tolerance.linear * 0.1
+    }).count();
+    assert_eq!(vertices, 1);
+    assert!(cut.volume() > 0.0 && cut.volume() < pipe.volume());
+    assert!(!cut.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap().is_empty());
+}
+
+#[test]
 fn boolean_cut_keeps_whole_periodic_shell_rims() {
     let body = cut_shell_before_lower_corner_fillets();
     let edges = upper_cut_shell_rims(&body);

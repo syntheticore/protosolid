@@ -2362,6 +2362,52 @@ fn trace_surface_intersections_in_domains(
         }
     }
 
+    // Blend jets use finite differences at their contact limits, where the
+    // resulting normal derivatives cannot certify a stationary contact.
+    let procedural = |surface: &Surface3| matches!(surface, Surface3::RollingBall(_) | Surface3::Blend(_))
+        || matches!(surface, Surface3::Offset(value) if matches!(value.base(), Surface3::RollingBall(_) | Surface3::Blend(_)));
+    let refine_contacts = !std::ptr::eq(first, second) && !procedural(first) && !procedural(second);
+    let cross = |v: [f64; 4]| -> KernelResult<Vec3> {
+        let (_, a, b) = first.first_order(v[0], v[1])?;
+        let (_, c, d) = second.first_order(v[2], v[3])?;
+        Ok(a.cross(b).normalize().cross(c.cross(d).normalize()))
+    };
+    let mut split_traces = Vec::new();
+    for trace in traced {
+        if !refine_contacts {
+            split_traces.push(trace);
+            continue;
+        }
+        let mut current = vec![trace[0]];
+        let mut previous_normal_cross = cross(trace[0])?;
+        for pair in trace.windows(2) {
+            let normal_cross = cross(pair[1])?;
+            // Across a saddle the oriented tangent reverses even when the
+            // trace continues in the same direction.
+            if previous_normal_cross.dot(normal_cross) < 0.0 {
+                let seed = std::array::from_fn(|i| (pair[0][i] + pair[1][i]) * 0.5);
+                if let Some(root) = refine_surface_tangency(first, second, seed, first_domains, second_domains, tolerance)? {
+                    let chord = std::array::from_fn::<_, 4, _>(|i| pair[1][i] - pair[0][i]);
+                    let length2 = chord.iter().map(|v| v * v).sum::<f64>();
+                    let fraction = root.iter().zip(pair[0]).zip(chord).map(|((r, a), d)| (r - a) * d).sum::<f64>() / length2;
+                    let closest = std::array::from_fn(|i| pair[0][i] + chord[i] * fraction);
+                    let point = first.first_order(root[0], root[1])?.0;
+                    if (0.0..=1.0).contains(&fraction)
+                        && parameter_distance(root, closest) <= length2.sqrt() * 0.25
+                        && point.distance(first.first_order(pair[0][0], pair[0][1])?.0) > tolerance.linear * 8.0
+                        && point.distance(first.first_order(pair[1][0], pair[1][1])?.0) > tolerance.linear * 8.0 {
+                        current.push(root);
+                        split_traces.push(current);
+                        current = vec![root];
+                    }
+                }
+            }
+            previous_normal_cross = normal_cross;
+            current.push(pair[1]);
+        }
+        split_traces.push(current);
+    }
+    let traced = split_traces;
     let curves = traced
         .into_iter()
         .map(|parameters| {
@@ -2440,6 +2486,49 @@ fn trace_surface_intersections_in_domains(
     } else {
         IntersectionSet::Isolated(curves)
     })
+}
+
+/// At an isolated tangency, position equations lose a constraint. Normal
+/// equality supplies the missing differential information and isolates the
+/// contact without accepting a square-root positional residual as a vertex.
+fn refine_surface_tangency(first: &Surface3, second: &Surface3, mut parameters: [f64; 4],
+    first_bounds: [super::ParameterRange; 2], second_bounds: [super::ParameterRange; 2],
+    tolerance: ModelTolerance) -> KernelResult<Option<[f64; 4]>>
+{
+    let normal_jet = |value: super::SurfaceEvaluation| -> Option<(Vec3, Vec3, Vec3)> {
+        let cross = value.du.cross(value.dv);
+        let length = cross.magnitude();
+        if length <= tolerance.linear_at_scale(value.point.to_vec().magnitude())
+            * value.du.magnitude().max(value.dv.magnitude()) { return None; }
+        let normal = cross / length;
+        let derivative = |v: Vec3| (v - normal * normal.dot(v)) / length;
+        Some((normal, derivative(value.duu.cross(value.dv) + value.du.cross(value.duv)),
+            derivative(value.duv.cross(value.dv) + value.du.cross(value.dvv))))
+    };
+    for _ in 0..32 {
+        let a = first.evaluate(parameters[0], parameters[1])?;
+        let b = second.evaluate(parameters[2], parameters[3])?;
+        let Some((n, nu, nv)) = normal_jet(a) else { return Ok(None); };
+        let Some((m, mu, mv)) = normal_jet(b) else { return Ok(None); };
+        let scale = a.point.to_vec().magnitude().max(b.point.to_vec().magnitude()).max(1.0);
+        let position = a.point - b.point;
+        let angle = n.cross(m);
+        if position.magnitude() <= f64::EPSILON * scale * 2048.0
+            && angle.magnitude() <= tolerance.angular * 8.0 { return Ok(Some(parameters)); }
+        let normal_columns = [nu.cross(m), nv.cross(m), n.cross(mu), n.cross(mv)];
+        let position_columns = [a.du, a.dv, -b.du, -b.dv];
+        let columns: [[f64; 6]; 4] = std::array::from_fn(|i| {
+            let p = position_columns[i];
+            let n = normal_columns[i] * scale;
+            [p.x, p.y, p.z, n.x, n.y, n.z]
+        });
+        let residual = [position.x, position.y, position.z, angle.x * scale, angle.y * scale, angle.z * scale];
+        let matrix: [[f64; 4]; 4] = std::array::from_fn(|i| std::array::from_fn(|j| columns[i].iter().zip(columns[j]).map(|(a, b)| a * b).sum()));
+        let rhs: [f64; 4] = std::array::from_fn(|i| -columns[i].iter().zip(residual).map(|(a, b)| a * b).sum::<f64>());
+        let Some(step) = solve_linear(matrix, rhs) else { return Ok(None); };
+        parameters = clamp_parameters(std::array::from_fn(|i| parameters[i] + step[i]), first_bounds, second_bounds);
+    }
+    Ok(None)
 }
 
 /// Replace an isoparametric plane section with its exact rational

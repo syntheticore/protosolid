@@ -1367,7 +1367,7 @@ fn arrange_regions(
     let mut pieces = Vec::<DirectedPiece>::new();
     let weld_node = |nodes: &mut Vec<Point2>, point: Point2| -> KernelResult<usize> {
         let value = surface.evaluate(point.x, point.y)?;
-        let linear = tolerance.linear_at_scale(value.point.to_vec().magnitude()) * 2.0;
+        let linear = tolerance.linear_at_scale(value.point.to_vec().magnitude());
         for (index, candidate) in nodes.iter().enumerate() {
             let delta = *candidate - point;
             // Intersection solvers converge in model units, not UV units.

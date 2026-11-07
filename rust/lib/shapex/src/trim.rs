@@ -809,17 +809,20 @@ pub(super) fn curve_intersections_sampled<P, Q>(
         });
         hits
     };
-    let same_support_pair = if let (Curve3::SurfaceIntersection(a), Curve3::SurfaceIntersection(b)) =
+    if let (Curve3::SurfaceIntersection(a), Curve3::SurfaceIntersection(b)) =
         (&first.curve, &second.curve)
     {
-        if a == b {
-            return Ok(deduplicate(endpoint_hits()?));
-        }
-        (coincident_supports(a.first_surface(), b.first_surface(), tolerance)?
+        if (coincident_supports(a.first_surface(), b.first_surface(), tolerance)?
             && coincident_supports(a.second_surface(), b.second_surface(), tolerance)?)
             || (coincident_supports(a.first_surface(), b.second_surface(), tolerance)?
                 && coincident_supports(a.second_surface(), b.first_surface(), tolerance)?)
-    } else { false };
+        {
+            // Two guides of the same regular support intersection can overlap.
+            // Intersecting their approximation splines invents crossings along
+            // that overlap; only trim endpoints subdivide the common curve.
+            return Ok(deduplicate(endpoint_hits()?));
+        }
+    }
     if matches!(first.curve, Curve3::Line(_) | Curve3::Circle(_))
         && matches!(second.curve, Curve3::Line(_) | Curve3::Circle(_))
     {
@@ -860,13 +863,6 @@ pub(super) fn curve_intersections_sampled<P, Q>(
     let mut hits = Vec::<(f64, f64)>::new();
     for first_pair in first_samples.windows(2) {
         for second_pair in second_samples.windows(2) {
-            if same_support_pair {
-                let first_direction = (first_pair[1].1 - first_pair[0].1).normalize();
-                let second_direction = (second_pair[1].1 - second_pair[0].1).normalize();
-                if first_direction.dot(second_direction).abs() >= 1.0 - 1e-5 {
-                    continue;
-                }
-            }
             let Some((first_fraction, second_fraction)) = segment_intersection_parameters(
                 first_pair[0].1,
                 first_pair[1].1,
@@ -881,19 +877,10 @@ pub(super) fn curve_intersections_sampled<P, Q>(
                 second_pair[0].0
                     + (second_pair[1].0 - second_pair[0].0) * second_fraction.clamp(0.0, 1.0),
             ];
-            let mut closest = (f64::INFINITY, parameters);
             for _ in 0..24 {
                 let first_value = first.pcurve.first_order(parameters[0])?;
                 let second_value = second.pcurve.first_order(parameters[1])?;
                 let residual = first_value.0 - second_value.0;
-                if same_support_pair {
-                    let a = first.curve.first_order(parameters[0])?.0;
-                    let b = second.curve.first_order(parameters[1])?.0;
-                    let distance = a.distance(b);
-                    if distance < closest.0 {
-                        closest = (distance, parameters);
-                    }
-                }
                 if residual.magnitude() <= tolerance.parameter * 16.0 {
                     break;
                 }
@@ -915,29 +902,10 @@ pub(super) fn curve_intersections_sampled<P, Q>(
                     second.range.start.max(second.range.end),
                 );
             }
-            if same_support_pair {
-                parameters = closest.1;
-            }
             let first_point = first.pcurve.evaluate(parameters[0])?.point;
             let second_point = second.pcurve.evaluate(parameters[1])?.point;
-            let within_tolerance = if same_support_pair {
-                // Overlapping guides share the local tangent of a regular
-                // support intersection. Distinct branches can instead cross
-                // where the supports are tangent and the intersection has a
-                // saddle. Subdivide both branches at that chart vertex.
-                let (Curve3::SurfaceIntersection(a), Curve3::SurfaceIntersection(b)) =
-                    (&first.curve, &second.curve) else { unreachable!() };
-                let first = first.curve.first_order(parameters[0])?.0;
-                let second = second.curve.first_order(parameters[1])?.0;
-                let linear = tolerance.linear_at_scale(first.to_vec().magnitude().max(second.to_vec().magnitude()));
-                let uv_span = first_pair[0].1.distance(first_pair[1].1)
-                    .min(second_pair[0].1.distance(second_pair[1].1));
-                first.distance(second) <= linear * 2.0
-                    && first_point.distance(second_point) < uv_span * 0.01
-                    && a.positional_uncertainty(parameters[0])?.max(b.positional_uncertainty(parameters[1])?) > linear
-            } else if first_point.distance(second_point) <= tolerance.parameter * 64.0 {
-                true
-            } else {
+            let uv_error = first_point.distance(second_point);
+            let within_tolerance = if uv_error <= tolerance.parameter * 64.0 { true } else {
                 // Implicit supports converge in model units. Their rounded
                 // inverse charts need not attain the absolute UV tolerance.
                 let (a, da) = first.curve.first_order(parameters[0])?;
@@ -945,7 +913,7 @@ pub(super) fn curve_intersections_sampled<P, Q>(
                 let linear = tolerance.linear_at_scale(a.to_vec().magnitude().max(b.to_vec().magnitude()));
                 let first_rate = first.pcurve.first_order(parameters[0])?.1.magnitude() / da.magnitude();
                 let second_rate = second.pcurve.first_order(parameters[1])?.1.magnitude() / db.magnitude();
-                a.distance(b) <= linear && first_point.distance(second_point) <= linear * first_rate.max(second_rate)
+                a.distance(b) <= linear && uv_error <= linear * first_rate.max(second_rate)
             };
             if within_tolerance
                 && !hits.iter().any(|(a, b)| {

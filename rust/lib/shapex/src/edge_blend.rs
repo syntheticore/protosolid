@@ -214,8 +214,8 @@ struct BlendRewrite {
     cap_uses: BTreeMap<(EdgeId, usize), Vec<CoedgeId>>,
     /// The unordered boundary uses and construction winding of each rolling face.
     blend_cycles: Vec<(LoopId, Vec<CoedgeId>, FaceOrientation)>,
-    /// The transition edge shared by two rolling patches at a smooth junction.
-    smooth_edges: BTreeMap<VertexId, (EdgeId, Curve3)>,
+    /// The transition edge and the mate's p-curve when supplied by its construction.
+    smooth_edges: BTreeMap<VertexId, (EdgeId, Option<Curve2>)>,
     contact_parent_uses: BTreeMap<(EdgeId, usize), CoedgeId>,
 }
 

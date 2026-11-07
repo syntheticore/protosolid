@@ -261,6 +261,26 @@ impl EdgeBlendSurface3 {
         self.radius
     }
 
+    /// Plane contacts on a straight, constant-radius spine give a quintic
+    /// section that translates rigidly along the spine.
+    pub(crate) fn translating_quintic(&self, parameter: f64) -> KernelResult<Option<([Point3; 6], Vec3)>> {
+        let Curve3::Line(spine) = self.center_curve.as_ref() else { return Ok(None); };
+        if !self.curvature_continuous || self.variable_radius
+            || !matches!((self.first_surface(), self.second_surface()), (Surface3::Plane(_), Surface3::Plane(_)))
+        {
+            return Ok(None);
+        }
+        for (surface, pcurve) in [(self.first_surface(), self.first_pcurve()), (self.second_surface(), self.second_pcurve())] {
+            let (Surface3::Plane(plane), Curve2::Line(rail)) = (surface, pcurve) else { return Ok(None); };
+            if (plane.vector_at(rail.direction()) - spine.direction()).magnitude()
+                > f64::EPSILON * spine.direction().magnitude() * 128.0
+            {
+                return Ok(None);
+            }
+        }
+        Ok(self.section(parameter)?.curvature.map(|controls| (controls, spine.direction())))
+    }
+
     pub(super) fn contact(
         surface: &Surface3,
         pcurve: &Curve2,

@@ -389,6 +389,77 @@ pub(super) fn reparameterize_join_intersection(
         second_pcurve: exact[1].clone(), achieved_error: intersection.achieved_error })
 }
 
+type OffsetBoundary = crate::trim::FaceCurve<SegmentProvenance>;
+
+fn outward_corner(
+    center: Point3,
+    radius: f64,
+    mut sections: Vec<OffsetBoundary>,
+    tolerance: crate::ModelTolerance,
+) -> KernelResult<Option<(Surface3, Vec<OffsetBoundary>)>> {
+    // Smooth continuations of a crease produce matching end sections. Only
+    // the unpaired arcs bound a spherical vertex patch.
+    let points = |curve: &OffsetBoundary| -> KernelResult<[Point3; 3]> {
+        let at = |t| curve.curve.first_order(t).map(|sample| sample.0);
+        Ok([at(curve.range.start)?, at(curve.range.middle())?, at(curve.range.end)?])
+    };
+    let linear = tolerance.linear_at_scale(center.to_vec().magnitude()) * 8.0;
+    let mut unpaired = Vec::<(OffsetBoundary, [Point3; 3])>::new();
+    for section in sections.drain(..) {
+        let sample = points(&section)?;
+        if sample[0].distance(sample[2]) <= linear { continue; }
+        if let Some(mate) = unpaired.iter().position(|(_, other)| {
+            crate::boolean::same_unoriented_edge(sample, *other, linear)
+        }) {
+            unpaired.swap_remove(mate);
+        } else {
+            unpaired.push((section, sample));
+        }
+    }
+    let Some(first) = unpaired.pop() else { return Ok(None); };
+    let mut ordered = vec![first];
+    while !unpaired.is_empty() {
+        let end = ordered.last().unwrap().1[2];
+        let next = unpaired.iter().position(|(_, points)| {
+            points[0].distance(end).min(points[2].distance(end)) <= linear
+        }).ok_or_else(|| topology_error("rounded offset vertex has an open normal contour"))?;
+        let mut next = unpaired.swap_remove(next);
+        if next.1[0].distance(end) > linear {
+            next.0.range = next.0.range.reversed();
+            next.1.reverse();
+        }
+        ordered.push(next);
+    }
+    if ordered[0].1[0].distance(ordered.last().unwrap().1[2]) > linear {
+        return Err(topology_error("rounded offset vertex has an open normal contour"));
+    }
+    // Put the normal contour around the equator, away from both chart poles.
+    let radial = ordered.iter().map(|(_, points)| points[1] - center).sum::<crate::Vec3>().normalize();
+    if ordered.iter().flat_map(|(_, points)| points).any(|point| (*point - center).dot(radial) <= linear) {
+        return Err(not_implemented("rounded offset of a vertex whose normals do not fit one hemisphere"));
+    }
+    let frame = crate::Frame3::from_z(center, radial)?;
+    let sphere: Surface3 = crate::Sphere3::new(
+        center, radial * radius, frame.x() * radius, frame.y() * radius, tolerance,
+    )?.into();
+    let mut boundary = Vec::new();
+    for (mut section, _) in ordered {
+        let range = section.range;
+        let guide = (0..=8).map(|index| {
+            let parameter = range.start + range.span() * index as f64 / 8.0;
+            let point = section.curve.first_order(parameter)?.0;
+            let (u, v) = sphere.project(point, tolerance)?.parameters;
+            Ok(Point2::new(crate::ParameterDomain::ANGLE.nearest(u, 0.0), v))
+        }).collect::<KernelResult<Vec<_>>>()?;
+        section.pcurve = SurfaceProjectionPcurve2::new(section.curve.clone(), sphere.clone(),
+            crate::intersection::smooth_nurbs_guide(&guide, range)?.into(), range, tolerance)?.into();
+        section.parameter_seam = false;
+        boundary.push(section);
+    }
+    boundary.last_mut().unwrap().loop_end = true;
+    Ok(Some((sphere, boundary)))
+}
+
 /// Arrange offset supports and optional rolling joins when their boundary graph
 /// changes. Intersections between newly adjacent faces trim overlaps after a
 /// smaller blend disappears or opposing offset caps cross.
@@ -397,13 +468,16 @@ pub(super) fn offset_regions_with_joins(
     offset: Option<&Compound>,
     joins: &[EdgeId],
     openings: &BTreeSet<FaceId>,
-    radius: f64,
+    offset_distance: f64,
     sharp: bool,
+    retrim: bool,
 ) -> KernelResult<Compound> {
     use crate::trim::{FaceCurve, align_pcurve_to_face_chart, face_boundary_curves, intersection_chart_copies,
         face_parameter_bounds as trim_bounds, point_in_trim, trim_to_faces};
     use crate::brep_classification::{BrepClassifier, PointClassification};
     let tolerance = source.tolerance();
+    let radius = offset_distance.abs();
+    let outward = offset_distance > 0.0;
     let topology = source.topology();
     let skin = offset.unwrap_or(source);
     let skin_topology = skin.topology();
@@ -418,13 +492,16 @@ pub(super) fn offset_regions_with_joins(
             face.surface().clone()
         } else {
             let sign = value.orientation().sign();
-            let bounds = face_parameter_bounds(topology, face.topology_id(), tolerance)?;
-            let base = extended_support(face.surface(), bounds, -radius, tolerance)?;
-            let distance = -radius * sign;
-            if collapsed_support(&base, distance, tolerance)?.is_some() {
+            let base = if outward {
+                face.surface().clone()
+            } else {
+                let bounds = face_parameter_bounds(topology, face.topology_id(), tolerance)?;
+                extended_support(face.surface(), bounds, offset_distance, tolerance)?
+            };
+            if collapsed_support(&base, offset_distance * sign, tolerance)?.is_some() {
                 continue;
             }
-            base.offset(distance, tolerance)?
+            base.offset(offset_distance * sign, tolerance)?
         };
         let boundary = face_boundary_curves(skin_topology, face.topology_id(), tolerance)?.into_iter().map(|mut curve| {
             let mut provenance = SegmentProvenance::from_coedge(skin_topology, curve.provenance)?;
@@ -447,6 +524,7 @@ pub(super) fn offset_regions_with_joins(
     let by_source = ancestry.iter().enumerate().map(|(index, names)| (names[0], index)).collect::<BTreeMap<_, _>>();
     let mut curves = boundaries.clone();
     let mut parents = Vec::new();
+    let mut corner_sections = BTreeMap::<VertexId, Vec<(usize, OffsetBoundary)>>::new();
     let candidate = |curve: Curve3, pcurve: Curve2, range: ParameterRange, seam: bool| FaceCurve {
         provenance: SegmentProvenance::default(), curve, pcurve, range,
         loop_end: false, loop_kind: crate::LoopKind::Outer, parameter_seam: seam,
@@ -474,9 +552,9 @@ pub(super) fn offset_regions_with_joins(
             neighbors.insert(face.topology_id(), adjacent);
         }
         for (index, face) in skin_faces.iter().enumerate() {
-            if !sharp && !extended_faces.contains(&face.topology_id()) { continue; }
+            if !sharp && !retrim && !extended_faces.contains(&face.topology_id()) { continue; }
             let original = trim_bounds(&boundaries[index], tolerance)?;
-            let mut bounds = expanded_offset_bounds(&supports[index], original, -radius, tolerance)?;
+            let mut bounds = expanded_offset_bounds(&supports[index], original, offset_distance, tolerance)?;
             // Surviving tangent neighbors retain their isoparametric contact
             // rails. Expand across consumed blends, while keeping these chart
             // limits so an intersection stops at the shared corner.
@@ -512,7 +590,7 @@ pub(super) fn offset_regions_with_joins(
                 let shared = topology.face_edges(first_id)?.into_iter().find(|edge| {
                     topology.edge_faces(*edge).unwrap().contains(&second_id)
                 });
-                if !sharp && !neighbors[&first_id].contains(&second_id)
+                if !sharp && !retrim && !neighbors[&first_id].contains(&second_id)
                     && !extended_faces.contains(&first_id) && !extended_faces.contains(&second_id) { continue; }
                 if let Some(edge) = shared {
                     if !sharp && (joins.contains(&edge) || !tangent_contact(topology, edge, first_id, second_id, tolerance)?.is_empty()) { continue; }
@@ -558,15 +636,15 @@ pub(super) fn offset_regions_with_joins(
             // A consumed face still defines the contact direction of its
             // adjacent concave-edge envelope. Keep that continuation solely
             // as a rail support; it cannot contribute an offset face.
-            crate::OffsetSurface3::new(face.surface().clone(), -radius * sign, tolerance).map(Surface3::Offset)
+            crate::OffsetSurface3::new(face.surface().clone(), offset_distance * sign, tolerance).map(Surface3::Offset)
         }).collect::<KernelResult<Vec<_>>>()?;
         let range = edge.range();
         let closed = edge.vertices()[0] == edge.vertices()[1];
-        let center = if offset.is_none() {
+        let center = if offset.is_none() && !outward {
             rounded_join_center(topology, *edge_id, tolerance)?
         } else { edge.curve().clone() };
         let contact_guides = uses.iter().map(|coedge| {
-            if offset.is_some() { return Ok(coedge.pcurve().clone()); }
+            if offset.is_some() || outward { return Ok(coedge.pcurve().clone()); }
             let face = topology.face(topology.loop_(coedge.loop_id())?.face())?;
             Ok(crate::SurfaceProjectionPcurve2::new(center.clone(), face.surface().clone(),
                 coedge.pcurve().clone(), range, tolerance)?.into())
@@ -587,13 +665,20 @@ pub(super) fn offset_regions_with_joins(
             boundary.push(candidate(curve, pcurve, trim, seam));
         }
         boundary.last_mut().unwrap().loop_end = true;
+        if outward && !closed {
+            for (vertex, section) in edge.vertices().into_iter().zip([&boundary[3], &boundary[1]]) {
+                let mut section = section.clone();
+                section.loop_end = false;
+                corner_sections.entry(vertex).or_default().push((supports.len(), section));
+            }
+        }
         if offset.is_none() {
             for (side, coedge) in uses.iter().enumerate() {
                 if parent_indices[side].is_some() { continue; }
                 let face_id = topology.loop_(coedge.loop_id())?.face();
                 let face = topology.face(face_id)?;
                 let sign = face.orientation().sign();
-                if !matches!(collapsed_support(face.surface(), -radius * sign, tolerance)?, Some((_, false))) { continue; }
+                if !matches!(collapsed_support(face.surface(), offset_distance * sign, tolerance)?, Some((_, false))) { continue; }
                 // At exact collapse the join's constructive contact rail lies
                 // on the surviving tangent support. Share that rail directly;
                 // projecting a different curve onto the singular join corner
@@ -629,10 +714,28 @@ pub(super) fn offset_regions_with_joins(
         boundaries.push(boundary);
     }
     let base_count = skin_faces.len();
+    let join_end = supports.len();
+    for (vertex, sections) in corner_sections {
+        let center = topology.vertex(vertex)?.point();
+        let mut adjacent = sections.iter().map(|(parent, _)| *parent).collect::<Vec<_>>();
+        let faces = topology.vertex_faces(vertex)?;
+        let names = faces.iter().map(|face| topology.face(*face).map(|face| face.name()))
+            .collect::<KernelResult<Vec<_>>>()?;
+        adjacent.extend(names.iter().filter_map(|name| by_source.get(name).copied()));
+        if let Some((sphere, boundary)) = outward_corner(
+            center, radius, sections.into_iter().map(|(_, section)| section).collect(), tolerance,
+        )? {
+            supports.push(sphere);
+            ancestry.push(names);
+            parents.push(adjacent);
+            curves.push(boundary.clone());
+            boundaries.push(boundary);
+        }
+    }
     for first in base_count..supports.len() {
         for second in 0..first {
             if parents[first - base_count].contains(&second) { continue; }
-            let shared_section = if second >= base_count {
+            let shared_section = if second >= base_count && first < join_end {
                 let a = topology.edge(joins[first - base_count])?;
                 let b = topology.edge(joins[second - base_count])?;
                 a.vertices().iter().position(|vertex| b.vertices().contains(vertex))
@@ -723,7 +826,7 @@ pub(super) fn offset_regions_with_joins(
                         if !visited.insert(id) { continue; }
                         let face = topology.face(id)?;
                         let sign = face.orientation().sign();
-                        if collapsed_support(face.surface(), -radius * sign, tolerance)?.is_none() {
+                        if collapsed_support(face.surface(), offset_distance * sign, tolerance)?.is_none() {
                             contacts.insert(id);
                             continue;
                         }
@@ -776,7 +879,7 @@ pub(super) fn offset_regions_with_joins(
                     if !point_in_trim(original_uv, original)? { return Ok(None); }
                 }
                 let point = surface.evaluate(uv.x, uv.y)?.point;
-                if index >= base_count {
+                if index >= base_count && index < join_end {
                     let Surface3::RollingBall(blend) = surface else { unreachable!() };
                     let center = blend.center_curve().evaluate(uv.x)?;
                     let bend = (point - center.point).dot(center.second_derivative);
@@ -788,7 +891,10 @@ pub(super) fn offset_regions_with_joins(
                         return Ok(None);
                     }
                 }
-                if classifier.classify(point)? == PointClassification::Outside {
+                let location = classifier.classify(point)?;
+                if (outward && location != PointClassification::Outside)
+                    || (!outward && location == PointClassification::Outside)
+                {
                     return Ok(None);
                 }
                 let distance = distance_to_source(point)?;
@@ -803,15 +909,17 @@ pub(super) fn offset_regions_with_joins(
                         && distance <= radius + tolerance.linear * 8.0
                 };
                 if !retained { return Ok(None); }
-                let orientation = if index >= base_count {
+                let orientation = if index >= join_end {
+                    FaceOrientation::Forward
+                } else if index >= base_count {
                     let Surface3::RollingBall(blend) = surface else { unreachable!() };
                     let center = blend.center_curve().evaluate(uv.x)?.point;
                     let normal = surface.normal(uv.x, uv.y)?;
                     // Continuing across consumed blends can reverse the join's
                     // chart normal along the source edge. Orient each retained
-                    // region toward its center, rather than using one sample
-                    // for the entire support.
-                    if normal.dot(point - center) < 0.0 { FaceOrientation::Forward }
+                    // region away from the center for outward offsets and
+                    // toward it for inward offsets.
+                    if normal.dot(point - center) * offset_distance > 0.0 { FaceOrientation::Forward }
                     else { FaceOrientation::Reversed }
                 } else { orientations[index] };
                 Ok(Some(orientation))
@@ -819,7 +927,7 @@ pub(super) fn offset_regions_with_joins(
         for region in &mut regions { region.sources = ancestry[index].clone(); }
         patches.extend(regions);
     }
-    if sharp { regularize_coincident_offset_faces(&mut patches, -radius, tolerance)?; }
+    if sharp { regularize_coincident_offset_faces(&mut patches, offset_distance, tolerance)?; }
     let mut kernel = Kernel::new(tolerance)?;
     let mut transaction = kernel.begin_operation();
     transaction.brep_shell(&patches)?;
@@ -856,6 +964,7 @@ pub(crate) fn shell(
     let topology = source.topology();
     let mut divergent = BTreeSet::new();
     let mut divergent_edges = Vec::new();
+    let mut converging = false;
     for (edge_id, edge) in topology.edges() {
         if edge.coedges().len() != 2 {
             continue;
@@ -894,13 +1003,14 @@ pub(crate) fn shell(
         let angular = if faces.iter().any(|face| matches!(face.surface(), Surface3::Blend(_))) {
             source.tolerance().angular.max(f64::EPSILON.sqrt()) * 8.0
         } else { source.tolerance().angular };
-        if tangent.dot(normals[0].cross(normals[1])) * distance.signum()
-            > angular
-        {
+        let dihedral = tangent.dot(normals[0].cross(normals[1])) * distance.signum();
+        if dihedral > angular {
             let mut pair = [faces[0].name(), faces[1].name()];
             pair.sort();
             divergent.insert(pair);
             divergent_edges.push(edge_id);
+        } else if dihedral < -angular {
+            converging = true;
         }
     }
     let closed_joins = divergent_edges.iter().try_fold(true, |closed, id| {
@@ -958,22 +1068,50 @@ pub(crate) fn shell(
         // disappeared, or caps that have passed each other. Arrange the sharp
         // support envelope directly at those topology transitions.
         let raw_offset = if disjoint_contacts || crossed_caps {
-            offset_regions_with_joins(source, None, &divergent_edges, &opening_ids, distance.abs(), true)?
+            offset_regions_with_joins(source, None, &divergent_edges, &opening_ids, distance, true, false)?
         } else { offset_body(source, &opening_ids, distance, false, None)?.0 };
         return assemble_shell_boundary(source, &raw_offset, &opening_ids, distance);
     }
     if distance < 0.0 && curved_open_join {
-        let rounded = offset_regions_with_joins(source, None, &divergent_edges, &opening_ids, distance.abs(), false)?;
+        let rounded = offset_regions_with_joins(source, None, &divergent_edges, &opening_ids, distance, false, false)?;
         return assemble_shell_boundary(source, &rounded, &opening_ids, distance);
     }
-    let (raw_offset, has_vanished_blends) = offset_body(source, &opening_ids, distance, false, None)?;
+    let outward_envelope = |error| {
+        if distance <= 0.0 || !opening_ids.is_empty() || converging || divergent_edges.is_empty() {
+            return Err(error);
+        }
+        // Convex outward joins already have their centers on the source
+        // edges and vertices, even when the sharp intermediate is invalid.
+        let rounded = offset_regions_with_joins(source, None, &divergent_edges, &opening_ids,
+            distance, false, false)?;
+        assemble_shell_boundary(source, &rounded, &opening_ids, distance)
+    };
+    let (raw_offset, has_vanished_blends) = match offset_body(source, &opening_ids, distance, false, None) {
+        Ok(offset) => offset,
+        Err(error) if distance < 0.0 && opening_ids.is_empty()
+            && error.diagnostics().iter().all(|diagnostic| matches!(
+                diagnostic.kind, DiagnosticKind::GeometryInvariant | DiagnosticKind::TopologyInvariant
+            )) =>
+        {
+            // A previously disjoint offset can meet the rest of the skin
+            // after the shift. Rebuild the regions on all nearby supports
+            // when the original edge graph no longer bounds a valid face.
+            let rounded = offset_regions_with_joins(source, None, &divergent_edges, &opening_ids,
+                distance, false, true)?;
+            return assemble_shell_boundary(source, &rounded, &opening_ids, distance);
+        }
+        Err(error) => return outward_envelope(error),
+    };
     if distance < 0.0 && has_vanished_blends && closed_joins
         && !divergent_edges.is_empty()
     {
-        let rounded = offset_regions_with_joins(source, Some(&raw_offset), &divergent_edges, &opening_ids, distance.abs(), false)?;
+        let rounded = offset_regions_with_joins(source, Some(&raw_offset), &divergent_edges, &opening_ids, distance, false, false)?;
         return assemble_shell_boundary(source, &rounded, &opening_ids, distance);
     }
-    let shell = assemble_shell_boundary(source, &raw_offset, &opening_ids, distance)?;
+    let shell = match assemble_shell_boundary(source, &raw_offset, &opening_ids, distance) {
+        Ok(shell) => shell,
+        Err(error) => return outward_envelope(error),
+    };
     let offset_surfaces = raw_offset
         .faces()
         .filter(|face| {
@@ -1016,4 +1154,5 @@ pub(crate) fn shell(
         &joins,
         crate::FilletOptions::new(distance.abs()).with_tangent_propagation(false),
     ).map(|result| result.with_construction_roles_from(&[&shell], &[]))
+        .or_else(outward_envelope)
 }

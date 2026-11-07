@@ -17,6 +17,7 @@ pub(super) fn offset_body(
     let mut bounds = BTreeMap::new();
     let mut collapsed = BTreeMap::new();
     let mut vanished_blends = BTreeSet::new();
+    let mut vanished_corners = Vec::new();
     for face_id in &source_faces {
         let face = topology.face(*face_id)?;
         let face_bounds = face_parameter_bounds(topology, *face_id, tolerance)?;
@@ -29,10 +30,13 @@ pub(super) fn offset_body(
                 FaceOrientation::Reversed => -1.0,
             };
             if let Some((support, past_radius)) = collapsed_support(&base, distance * orientation, tolerance)? {
-                collapsed.insert(*face_id, support);
                 if past_radius {
-                    vanished_blends.insert(*face_id);
+                    match &support {
+                        CollapsedSupport::Curve(_) => { vanished_blends.insert(*face_id); }
+                        CollapsedSupport::Point(center) => vanished_corners.push((*face_id, *center)),
+                    }
                 }
+                collapsed.insert(*face_id, support);
                 continue;
             }
             base.offset(distance * orientation, tolerance)?
@@ -42,7 +46,7 @@ pub(super) fn offset_body(
         bounds.insert(*face_id, expanded);
     }
 
-    let has_vanished_blends = !vanished_blends.is_empty();
+    let has_vanished_blends = !vanished_blends.is_empty() || !vanished_corners.is_empty();
     let mut corner_blends = Vec::new();
     for face_id in vanished_blends {
         let neighbors = tangent_neighbors(topology, face_id, tolerance, |face| supports.contains_key(&face))?
@@ -79,6 +83,22 @@ pub(super) fn offset_body(
             &supports[first], &supports[second], guide, range, period, tolerance,
         )?;
         collapsed.insert(face_id, CollapsedSupport::Curve(curve));
+    }
+
+    // Beyond the radius of a spherical corner blend, its original center
+    // no longer belongs to the offset skin. The replacement corner is where
+    // the replacement rails of its incident edge blends meet.
+    for (face_id, center) in vanished_corners {
+        let neighbors = tangent_neighbors(topology, face_id, tolerance, |_| true)?;
+        let constraints = neighbors.iter().filter_map(|neighbor| match collapsed.get(neighbor) {
+            Some(CollapsedSupport::Curve(curve)) => Some(CornerConstraint::Curve(curve)),
+            _ => supports.get(neighbor).map(|surface| CornerConstraint::Surface(surface, None)),
+        }).collect::<Vec<_>>();
+        if constraints.len() < 2 {
+            return Err(not_implemented("removal of a corner blend without surviving contact constraints"));
+        }
+        let point = refine_support_corner(center, &constraints, tolerance)?;
+        collapsed.insert(face_id, CollapsedSupport::Point(point));
     }
     for (face_id, contact) in corner_blends {
         let range = face_parameter_bounds(topology, face_id, tolerance)?;
@@ -457,8 +477,8 @@ pub(super) fn collapsed_support(
                 None
             }
         }
-        Surface3::Sphere(sphere) if zero(sphere.radius() + distance) => {
-            Some((CollapsedSupport::Point(sphere.center()), false))
+        Surface3::Sphere(sphere) if sphere.radius() + distance <= tolerance.linear => {
+            Some((CollapsedSupport::Point(sphere.center()), sphere.radius() + distance < -tolerance.linear))
         }
         Surface3::Torus(torus) if torus.minor_radius() + distance <= tolerance.linear => {
             Some((CollapsedSupport::Curve(

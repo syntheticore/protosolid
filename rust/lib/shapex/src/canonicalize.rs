@@ -425,6 +425,7 @@ impl Transaction<'_> {
                 .working
                 .face(self.working.loop_(keep.loop_id)?.face)?
                 .surface;
+            let domains = surface.domains();
             let valid = (0..=16).all(|i| {
                 let fraction = i as f64 / 16.0;
                 let t = range.start + range.span() * fraction;
@@ -432,10 +433,12 @@ impl Transaction<'_> {
                 let point = first.curve.evaluate(t);
                 match (uv, point) {
                     (Ok(uv), Ok(point)) => {
-                        surface.evaluate(uv.point.x, uv.point.y).is_ok_and(|value| {
-                            value.point.distance(point.point)
-                                <= tol.linear_at_scale(point.point.to_vec().magnitude()) * 8.0
-                        })
+                        domains[0].contains(uv.point.x, tol.parameter)
+                            && domains[1].contains(uv.point.y, tol.parameter)
+                            && surface.evaluate(uv.point.x, uv.point.y).is_ok_and(|value| {
+                                value.point.distance(point.point)
+                                    <= tol.linear_at_scale(point.point.to_vec().magnitude()) * 8.0
+                            })
                     }
                     _ => false,
                 }

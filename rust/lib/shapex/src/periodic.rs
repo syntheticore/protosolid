@@ -339,7 +339,10 @@ impl Transaction<'_> {
         }
         let loops = self.kemr(seam_id, seam.coedges[0])?;
         let mut outgoing = Vec::new();
-        for (edge, parameter, vertex, _) in rings {
+        // KEMR puts the successor of the first seam use in the inner
+        // ring. On a doubly periodic face the two rings can visit a
+        // common vertex, so recover each outgoing use from its own ring.
+        for ((edge, parameter, vertex, _), ring) in rings.into_iter().zip([loops.inner_loop, loops.outer_loop]) {
             let vertex = match vertex {
                 Some(vertex) => vertex,
                 None => self.split_periodic_boundary(edge, parameter, roles)?,
@@ -349,16 +352,9 @@ impl Transaction<'_> {
                 .vertex_edges(vertex)?
                 .into_iter()
                 .flat_map(|edge| self.working.edge(edge).unwrap().coedges.clone())
-                .find(|id| {
-                    self.working.coedge_vertices(*id).unwrap()[0] == vertex
-                        && self
-                            .working
-                            .loop_(self.working.coedge(*id).unwrap().loop_id)
-                            .unwrap()
-                            .face
-                            == face
-                })
-                .unwrap();
+                .find(|id| self.working.coedge_vertices(*id).unwrap()[0] == vertex
+                    && self.working.coedge(*id).unwrap().loop_id == ring)
+                .ok_or_else(|| super::topology_error("relocated seam endpoint is absent from its boundary ring"))?;
             outgoing.push(id);
         }
         outgoing.sort_by_key(|id| self.working.coedge(*id).unwrap().loop_id != loops.outer_loop);

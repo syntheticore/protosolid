@@ -576,6 +576,9 @@ impl Transaction<'_> {
     ) -> KernelResult<BlendBoundary> {
         let tolerance = self.kernel.tolerance;
         let unit = ParameterRange::new(0.0, 1.0)?;
+        if let Some(boundary) = planar_quintic_miter(blend_surface, &terminating_surface, contact_points, tolerance)? {
+            return Ok(boundary);
+        }
         if let Some(boundary) = self.implicit_end_boundary(
             blend_surface,
             &terminating_surface,
@@ -656,4 +659,69 @@ impl Transaction<'_> {
             range: unit,
         })
     }
+}
+
+/// Two translating quintic fillets can meet in a planar miter. Project both
+/// section polygons along their spines and compare their Bernstein controls.
+/// This avoids an ill-conditioned surface solve near the shared tangent rail.
+fn planar_quintic_miter(
+    first: &Surface3,
+    second: &Surface3,
+    contacts: [Point3; 2],
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<BlendBoundary>> {
+    let (Surface3::Blend(first), Surface3::Blend(second)) = (first, second) else { return Ok(None); };
+    let first_u = first.center_range().middle();
+    let second_u = second.center_range().middle();
+    let Some((first_controls, first_direction)) = first.translating_quintic(first_u)? else { return Ok(None); };
+    let Some((second_controls, second_direction)) = second.translating_quintic(second_u)? else { return Ok(None); };
+    let scale = contacts.iter().chain(&first_controls).chain(&second_controls)
+        .map(|point| point.to_vec().magnitude()).fold(1.0_f64, f64::max);
+    let linear = (f64::EPSILON * scale * 2048.0).min(tolerance.linear);
+    for support in [first.first_surface(), first.second_surface()] {
+        let Surface3::Plane(plane) = support else { unreachable!(); };
+        let normal = (contacts[1] - contacts[0]).cross(plane.normal());
+        if normal.magnitude() <= linear { continue; }
+        let normal = normal.normalize();
+        let project = |controls: [Point3; 6], u: f64, direction: Vec3| {
+            let speed = normal.dot(direction);
+            if speed.abs() <= tolerance.angular * direction.magnitude() { return None; }
+            Some(controls.map(|point| {
+                let shift = normal.dot(contacts[0] - point) / speed;
+                (point + direction * shift, u + shift)
+            }))
+        };
+        let Some(first_section) = project(first_controls, first_u, first_direction) else { continue; };
+        let Some(second_section) = project(second_controls, second_u, second_direction) else { continue; };
+        let first_reversed = first_section[5].0.distance(contacts[0]) < first_section[0].0.distance(contacts[0]);
+        let second_reversed = second_section[5].0.distance(contacts[0]) < second_section[0].0.distance(contacts[0]);
+        let orient = |mut section: [(Point3, f64); 6], reversed| {
+            if reversed { section.reverse(); }
+            section
+        };
+        let first_section = orient(first_section, first_reversed);
+        let second_section = orient(second_section, second_reversed);
+        if first_section[0].0.distance(contacts[0]) > linear
+            || first_section[5].0.distance(contacts[1]) > linear
+            || first_section.iter().zip(second_section).any(|(a, b)| a.0.distance(b.0) > linear)
+            || first_section.iter().any(|(_, u)| !first.center_range().contains(*u, tolerance))
+            || second_section.iter().any(|(_, u)| !second.center_range().contains(*u, tolerance))
+        {
+            continue;
+        }
+        let knots = [vec![0.0; 6], vec![1.0; 6]].concat();
+        let chart = |section: [(Point3, f64); 6], reversed| -> KernelResult<Curve2> {
+            let points = section.into_iter().enumerate().map(|(index, (_, u))| {
+                Point2::new(u, if reversed { 5 - index } else { index } as f64 / 5.0)
+            }).collect();
+            Ok(crate::NurbsCurve2::new(5, points, vec![1.0; 6], knots.clone())?.into())
+        };
+        return Ok(Some(BlendBoundary {
+            curve: crate::NurbsCurve3::new(5, first_section.map(|(point, _)| point).to_vec(), vec![1.0; 6], knots.clone())?.into(),
+            blend_pcurve: chart(first_section, first_reversed)?,
+            parent_pcurve: chart(second_section, second_reversed)?,
+            range: ParameterRange::new(0.0, 1.0)?,
+        }));
+    }
+    Ok(None)
 }

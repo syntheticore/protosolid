@@ -280,6 +280,22 @@ fn promote_revolution(
                 )
             }
         }
+        // A circular meridian centered on the axis already uses the sphere's
+        // longitude/latitude chart, including at its poles.
+        Curve2::Circle(circle) if circle.center().x.abs() <= tolerance.linear => (
+            crate::Sphere3::new(
+                frame.origin() + frame.z() * circle.center().y,
+                frame.x() * circle.radius(),
+                frame.y() * circle.radius(),
+                frame.z() * circle.radius(),
+                tolerance,
+            )?
+            .into(),
+            Some((
+                -(segment.range().middle() / std::f64::consts::TAU).round() * std::f64::consts::TAU,
+                1.0,
+            )),
+        ),
         Curve2::Circle(circle) if circle.center().x > circle.radius() + tolerance.linear => (
             Torus3::new(
                 frame.origin() + frame.z() * circle.center().y,

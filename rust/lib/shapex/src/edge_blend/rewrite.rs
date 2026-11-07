@@ -611,10 +611,11 @@ impl Transaction<'_> {
                         } else {
                             boundary.range
                         };
-                        let (edge, curve, same_direction, pcurve) = if let Some((edge, curve)) =
+                        let (edge, same_direction, pcurve) = if let Some((edge, mate_pcurve)) =
                             smooth_edges.get(vertex).cloned()
                         {
-                            let edge_vertices = self.working.edge(edge)?.vertices;
+                            let retained = self.working.edge(edge)?;
+                            let edge_vertices = retained.vertices;
                             let same_direction = if edge_vertices == vertices {
                                 true
                             } else if edge_vertices == [vertices[1], vertices[0]] {
@@ -622,32 +623,36 @@ impl Transaction<'_> {
                             } else {
                                 return Err(topology_error("smooth blend transition patches do not share contact vertices"));
                             };
-                            let first = patch.contact_parameters[endpoint_index][0];
-                            let second = patch.contact_parameters[endpoint_index][1];
-                            let guide = patch.blend_parameterization.oriented_end_pcurve(
-                                first,
-                                second,
-                                same_direction,
-                            )?;
-                            let start = guide.evaluate(0.0)?.point;
-                            let direction = (guide.evaluate(1.0)?.point - start) / unit.span();
-                            let guide =
-                                Line2::new(start - direction * unit.start, direction)?.into();
-                            let projected: Curve2 = SurfaceProjectionPcurve2::new(
-                                curve.clone(),
-                                patch.blend_surface.clone(),
-                                guide,
-                                unit,
-                                tolerance,
-                            )?
-                            .into();
-                            let pcurve = super::super::features::exact_pcurve(
-                                &curve,
-                                &patch.blend_surface,
-                                &projected,
-                                tolerance,
-                            )?;
-                            (edge, curve, same_direction, pcurve)
+                            let pcurve = if let Some(pcurve) = mate_pcurve {
+                                pcurve
+                            } else {
+                                let first = patch.contact_parameters[endpoint_index][0];
+                                let second = patch.contact_parameters[endpoint_index][1];
+                                let guide = patch.blend_parameterization.oriented_end_pcurve(
+                                    first,
+                                    second,
+                                    same_direction,
+                                )?;
+                                let start = guide.evaluate(0.0)?.point;
+                                let direction = (guide.evaluate(1.0)?.point - start) / unit.span();
+                                let guide =
+                                    Line2::new(start - direction * unit.start, direction)?.into();
+                                let projected: Curve2 = SurfaceProjectionPcurve2::new(
+                                    retained.curve.clone(),
+                                    patch.blend_surface.clone(),
+                                    guide,
+                                    unit,
+                                    tolerance,
+                                )?
+                                .into();
+                                super::super::features::exact_pcurve(
+                                    &retained.curve,
+                                    &patch.blend_surface,
+                                    &projected,
+                                    tolerance,
+                                )?
+                            };
+                            (edge, same_direction, pcurve)
                         } else {
                             let edge_name = self.names.next_derived(kind.role(BlendRole::TransitionEdge))?;
                             let edge =
@@ -657,15 +662,11 @@ impl Transaction<'_> {
                                 [selected_name],
                                 kind.role(BlendRole::TransitionEdge),
                             );
-                            smooth_edges.insert(*vertex, (edge, boundary.curve.clone()));
-                            (
-                                edge,
-                                boundary.curve.clone(),
-                                true,
-                                boundary.blend_pcurve.clone(),
-                            )
+                            let mate_pcurve = matches!(junctions[vertex].kind, BlendJunctionKind::Miter { .. })
+                                .then(|| boundary.parent_pcurve.clone());
+                            smooth_edges.insert(*vertex, (edge, mate_pcurve));
+                            (edge, true, boundary.blend_pcurve.clone())
                         };
-                        let _ = curve;
                         let blend_forward = if same_direction {
                             desired_current_forward
                         } else {

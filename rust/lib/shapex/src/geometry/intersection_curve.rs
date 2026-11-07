@@ -449,6 +449,19 @@ impl SurfaceProjectionPcurve2 {
         let target = self.curve.first_order(parameter)?.0;
         let guide = self.guide.first_order(parameter)?.0;
         let domains = self.surface.domains();
+        if matches!(self.surface.as_ref(), Surface3::Sphere(_)) {
+            let projection = self.surface.project(target, self.tolerance)?;
+            if projection.distance <= self.tolerance.linear_at_scale(target.to_vec().magnitude()) {
+                let (u, v) = projection.parameters;
+                let u = if v.cos().abs() <= f64::EPSILON * 128.0 {
+                    // Longitude is free at a pole. Keep the incident chart.
+                    guide.x
+                } else {
+                    domains[0].nearest(u, guide.x)
+                };
+                return Ok((u + lift.x, v + lift.y));
+            }
+        }
         let constrain = |domain: ParameterDomain, value: f64| {
             if domain.period.is_some() {
                 value

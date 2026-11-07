@@ -82,13 +82,134 @@ pub(crate) fn boolean_brep(
     arrangement.overlay_coincident_boundaries()?;
     let mut patches = arrangement.face_patches()?;
     super::sew::conform_brep_interfaces(&mut patches, tolerance)?;
+    remove_retraced_trim_spurs(&mut patches, tolerance)?;
     deduplicate_patches(&mut patches, tolerance)?;
     // Let the Euler weld choose the simplest exact representation when more
     // than two supports meet on one edge (for example a planar line tangent to
     // a NURBS extrusion).  This is geometry canonicalization, independent of
     // operand or feature order.
     patches.sort_by_key(patch_complexity_key);
-    let mut components = patch_components(patches, tolerance)?;
+    match publish_boolean(first, second, kind, &patches) {
+        Err(error) if error.diagnostics().iter().any(|diagnostic| diagnostic.kind == DiagnosticKind::GeometryInvariant) => {
+            if let Some(mut partitioned) = partition_tangent_trims(&patches, tolerance)? {
+                super::sew::conform_brep_interfaces(&mut partitioned, tolerance)?;
+                publish_boolean(first, second, kind, &partitioned)
+            } else {
+                Err(error)
+            }
+        }
+        result => result,
+    }
+}
+
+/// Independently imprinted trims can retrace a support's own boundary at a
+/// tangential junction. Once the endpoints conform, cancel the backtrack in
+/// that chart. A backtrack between two outer regions separates their loops.
+/// A periodic seam has distinct chart copies and must be kept.
+fn remove_retraced_trim_spurs(patches: &mut Vec<BrepPatch>, tolerance: ModelTolerance) -> KernelResult<()> {
+    let mut split_patches = Vec::new();
+    for patch in patches.iter_mut() {
+        let simple = patch.loops.len() == 1;
+        let mut split_loops = Vec::new();
+        for loop_ in &mut patch.loops {
+            let mut index = 0;
+            while loop_.segments.len() > 1 && index < loop_.segments.len() {
+                let first = &loop_.segments[index];
+                let uv = |segment: &BrepPatchSegment, t: f64| {
+                    segment.pcurve.first_order(t).map(|value| value.0)
+                };
+                let same_uv = |a: Point2, b: Point2| -> KernelResult<bool> {
+                    let domains = patch.surface.domains();
+                    if (0..2).any(|axis| domains[axis].period.is_some_and(|period|
+                        (a[axis] - b[axis]).abs() >= period * 0.5)) {
+                        return Ok(false);
+                    }
+                    let first = patch.surface.first_order(a.x, a.y)?.0;
+                    let second = patch.surface.first_order(b.x, b.y)?.0;
+                    Ok(first.distance(second) <= tolerance.linear_at_scale(first.to_vec().magnitude()) * 4.0)
+                };
+                let mut retraced = None;
+                for (other, second) in loop_.segments.iter().enumerate().skip(index + 1) {
+                    if !simple && other != index + 1 && (index != 0 || other + 1 != loop_.segments.len()) {
+                        continue;
+                    }
+                    if !same_uv(uv(first, first.range.start)?, uv(second, second.range.end)?)?
+                        || !same_uv(uv(first, first.range.end)?, uv(second, second.range.start)?)?
+                    {
+                        continue;
+                    }
+                    let mut retraces = true;
+                    for fraction in [0.25, 0.5, 0.75] {
+                        let t = first.range.start + first.range.span() * fraction;
+                        let point = first.curve.first_order(t)?.0;
+                        let projection = second.curve.project_on_trim(point, second.range, tolerance)?;
+                        let parameter = second.curve.domain().nearest(projection.parameter, second.range.middle());
+                        if projection.distance > tolerance.linear_at_scale(point.to_vec().magnitude()) * 4.0
+                            || !same_uv(uv(first, t)?, uv(second, parameter)?)?
+                        {
+                            retraces = false;
+                            break;
+                        }
+                    }
+                    if retraces {
+                        let separate_loops = other != index + 1
+                            && (index != 0 || other + 1 != loop_.segments.len());
+                        if separate_loops {
+                            let inside = trim_loop_area(
+                                loop_.segments[index + 1..other].iter(), tolerance,
+                            )?;
+                            let outside = trim_loop_area(
+                                loop_.segments[..index].iter().chain(&loop_.segments[other + 1..]),
+                                tolerance,
+                            )?;
+                            let sign = patch.orientation.sign();
+                            if inside * sign <= 0.0 || outside * sign <= 0.0 {
+                                continue;
+                            }
+                        }
+                        retraced = Some(other);
+                        break;
+                    }
+                }
+                if let Some(other) = retraced {
+                    let segments = loop_.segments.drain(index..=other).skip(1)
+                        .take(other - index - 1).collect::<Vec<_>>();
+                    if !segments.is_empty() && !loop_.segments.is_empty() {
+                        split_loops.push(BrepPatchLoop { kind: loop_.kind, segments });
+                    } else if loop_.segments.is_empty() {
+                        loop_.segments = segments;
+                    }
+                    index = index.saturating_sub(1);
+                } else {
+                    index += 1;
+                }
+            }
+        }
+        patch.loops.retain(|loop_| !loop_.segments.is_empty());
+        for loop_ in split_loops {
+            split_patches.push(BrepPatch {
+                preserved: Vec::new(), sources: patch.sources.clone(), surface: patch.surface.clone(),
+                orientation: patch.orientation, loops: vec![loop_],
+            });
+        }
+    }
+    patches.retain(|patch| patch.loops.iter().any(|loop_| loop_.kind == LoopKind::Outer));
+    patches.extend(split_patches);
+    Ok(())
+}
+
+fn trim_loop_area<'a>(
+    mut segments: impl Iterator<Item = &'a BrepPatchSegment>,
+    tolerance: ModelTolerance,
+) -> KernelResult<f64> {
+    segments.try_fold(0.0, |area, edge| {
+        edge.pcurve.signed_area_contribution(edge.range, tolerance.parameter).map(|value| area + value)
+    })
+}
+
+fn publish_boolean(first: &Compound, second: &Compound, kind: BooleanKind, patches: &[BrepPatch]) -> KernelResult<Compound> {
+    let tolerance = first.tolerance();
+    let mut components = patch_components(patches.to_vec(), tolerance)?;
     for component in &mut components {
         component.sort_by_key(patch_complexity_key);
     }
@@ -1033,6 +1154,167 @@ pub(super) fn arrange_surface_regions(
         tolerance.linear * 16.0, None, orientation_at)
 }
 
+struct TrimContact {
+    indices: [usize; 2],
+    parameters: [f64; 2],
+}
+
+/// Split a curved chart at a self-touching trim vertex when both resulting
+/// contours bound outer regions of the original face.
+fn partition_tangent_trims(
+    patches: &[BrepPatch],
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<Vec<BrepPatch>>> {
+    let mut result = Vec::new();
+    let mut changed = false;
+    for patch in patches {
+        if patch.loops.len() != 1 || matches!(patch.surface, Surface3::Plane(_)) {
+            result.push(patch.clone());
+            continue;
+        }
+        let domains = patch.surface.domains();
+        let mut previous = None;
+        let segments = &patch.loops[0].segments;
+        let boundary = segments.iter().enumerate().map(|(index, segment)| {
+            let mut pcurve = segment.pcurve.clone();
+            if let Some(end) = previous {
+                let start = pcurve.first_order(segment.range.start)?.0;
+                let shift = super::whole_periods(domains, end - start);
+                if shift.magnitude2() > 0.0 {
+                    pcurve = super::trim::translate_pcurve(&pcurve, shift, tolerance)?;
+                }
+            }
+            previous = Some(pcurve.first_order(segment.range.end)?.0);
+            Ok(FaceCurve {
+                provenance: segment.provenance.clone(),
+                curve: segment.curve.clone(),
+                pcurve,
+                range: segment.range,
+                loop_end: index + 1 == segments.len(),
+                loop_kind: LoopKind::Outer,
+                parameter_seam: false,
+            })
+        }).collect::<KernelResult<Vec<_>>>()?;
+        let mut pinch = pinched_trim_contact(&boundary, tolerance)?;
+        if pinch.is_none() {
+            let starts = boundary.iter().map(|edge| edge.pcurve.first_order(edge.range.start).map(|value| value.0))
+                .collect::<KernelResult<Vec<_>>>()?;
+            'contact: for (first, point) in starts.iter().enumerate() {
+                for (second, other) in starts.iter().enumerate().skip(first + 2) {
+                    if first == 0 && second + 1 == starts.len() { continue; }
+                    if point.distance(*other) <= tolerance.parameter * 64.0 {
+                        pinch = Some(TrimContact {
+                            indices: [first, second],
+                            parameters: [boundary[first].range.start, boundary[second].range.start],
+                        });
+                        break 'contact;
+                    }
+                }
+            }
+        }
+        let Some(pinch) = pinch else {
+            result.push(patch.clone());
+            continue;
+        };
+        let [first, second] = pinch.indices;
+        let mut segments = segments.clone();
+        let mut tails = [segments[first].clone(), segments[second].clone()];
+        for ((index, parameter), tail) in pinch.indices.into_iter().zip(pinch.parameters).zip(&mut tails) {
+            let segment = &mut segments[index];
+            let range = segment.range;
+            segment.range.end = parameter;
+            tail.range.start = parameter;
+            segment.provenance = segment.provenance.trimmed(range, segment.range);
+            tail.provenance = tail.provenance.trimmed(range, tail.range);
+        }
+        let [first_tail, second_tail] = tails;
+        let mut regions = [
+            [vec![first_tail], segments[first + 1..=second].to_vec()].concat(),
+            [vec![second_tail], segments[second + 1..].to_vec(), segments[..=first].to_vec()].concat(),
+        ];
+        for segments in &mut regions {
+            segments.retain(|segment| segment.range.span().abs() > tolerance.parameter * 64.0);
+        }
+        let sign = patch.orientation.sign();
+        if trim_loop_area(regions[0].iter(), tolerance)? * sign <= tolerance.parameter
+            || trim_loop_area(regions[1].iter(), tolerance)? * sign <= tolerance.parameter
+        {
+            result.push(patch.clone());
+            continue;
+        }
+        result.extend(regions.into_iter().map(|segments| BrepPatch {
+            preserved: Vec::new(),
+            sources: patch.sources.clone(),
+            surface: patch.surface.clone(),
+            orientation: patch.orientation,
+            loops: vec![BrepPatchLoop { kind: LoopKind::Outer, segments }],
+        }));
+        changed = true;
+    }
+    Ok(changed.then_some(result))
+}
+
+fn pinched_trim_contact(
+    boundary: &[FaceCurve],
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<TrimContact>> {
+    let bounds = boundary.iter().map(|edge| super::bounds::curve3(&edge.curve, edge.range).ok())
+        .collect::<Vec<_>>();
+    for (index, first) in boundary.iter().enumerate() {
+        let a = super::TrimmedCurve2::new(first.pcurve.clone(), first.range)?;
+        for (other, second) in boundary.iter().enumerate().skip(index + 1) {
+            if bounds_separated(bounds[index], bounds[other], tolerance) { continue; }
+            let b = super::TrimmedCurve2::new(second.pcurve.clone(), second.range)?;
+            let intersection = super::wire::curve_pair_intersection(&a, &b, tolerance)?;
+            for hit in intersection.hits {
+                let mut parameters = [
+                    first.pcurve.domain().nearest(hit.first_parameter, first.range.middle()),
+                    second.pcurve.domain().nearest(hit.second_parameter, second.range.middle()),
+                ];
+                let tangent = first.pcurve.first_order(parameters[0])?.1.normalize();
+                // At a pinch the oriented boundary tangents point in
+                // opposite directions. Resolve their tangency separately
+                // from the ill-conditioned crossing of two parallel curves.
+                for _ in 0..12 {
+                    let a = first.pcurve.evaluate(parameters[0])?;
+                    let b = second.pcurve.evaluate(parameters[1])?;
+                    let da = a.first_derivative;
+                    let db = b.first_derivative;
+                    let cross = |a: Vec2, b: Vec2| a.x * b.y - a.y * b.x;
+                    if da.dot(db) * first.range.span() * second.range.span() >= 0.0
+                        || cross(da.normalize(), db.normalize()).abs() > 1.0e-3
+                    {
+                        break;
+                    }
+                    let separation = (a.point - b.point).dot(tangent);
+                    let sine = cross(da, db);
+                    let Some(step) = crate::linalg::solve_linear([
+                        [da.dot(tangent), -db.dot(tangent)],
+                        [cross(a.second_derivative, db), cross(da, b.second_derivative)],
+                    ], [-separation, -sine]) else { break; };
+                    if step[0].abs().max(step[1].abs()) <= tolerance.parameter * 64.0 {
+                        if a.point.distance(b.point) > tolerance.linear * 0.125 { break; }
+                        let interior = |edge: &FaceCurve, t: f64| {
+                            t > edge.range.start.min(edge.range.end) + tolerance.parameter * 64.0
+                                && t < edge.range.start.max(edge.range.end) - tolerance.parameter * 64.0
+                        };
+                        let adjacent = other == index + 1 || (index == 0 && other + 1 == boundary.len());
+                        if !adjacent || interior(first, parameters[0]) || interior(second, parameters[1]) {
+                            return Ok(Some(TrimContact { indices: [index, other], parameters }));
+                        }
+                        break;
+                    }
+                    parameters[0] += step[0];
+                    parameters[1] += step[1];
+                    if !first.range.contains(parameters[0], tolerance)
+                        || !second.range.contains(parameters[1], tolerance) { break; }
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
 pub(super) fn arrange_section_regions(
     surface: &Surface3,
     curves: &[FaceCurve],
@@ -1085,7 +1367,7 @@ fn arrange_regions(
     let mut pieces = Vec::<DirectedPiece>::new();
     let weld_node = |nodes: &mut Vec<Point2>, point: Point2| -> KernelResult<usize> {
         let value = surface.evaluate(point.x, point.y)?;
-        let linear = tolerance.linear_at_scale(value.point.to_vec().magnitude());
+        let linear = tolerance.linear_at_scale(value.point.to_vec().magnitude()) * 2.0;
         for (index, candidate) in nodes.iter().enumerate() {
             let delta = *candidate - point;
             // Intersection solvers converge in model units, not UV units.
@@ -1903,11 +2185,11 @@ fn deduplicate_patches(
             if !coincident_supports(&patches[first].surface, &patches[second].surface, tolerance)? {
                 continue;
             }
-            if patch_contains_patch(&patches[first], &samples[second], tolerance)? {
+            if patch_contains_patch(&patches[first], &patches[second], &samples[second], tolerance)? {
                 let sources = patches[second].sources.clone();
                 patches[first].sources.extend(sources);
                 duplicate.insert(second);
-            } else if patch_contains_patch(&patches[second], &samples[first], tolerance)? {
+            } else if patch_contains_patch(&patches[second], &patches[first], &samples[first], tolerance)? {
                 let sources = patches[first].sources.clone();
                 patches[second].sources.extend(sources);
                 duplicate.insert(first);
@@ -2027,37 +2309,50 @@ fn patch_uses_face(
 
 fn patch_contains_patch(
     container: &BrepPatch,
+    candidate: &BrepPatch,
     candidate_edges: &[[Point3; 3]],
     tolerance: ModelTolerance,
 ) -> KernelResult<bool> {
-    let boundary = container
-        .loops
-        .iter()
-        .flat_map(|loop_| &loop_.segments)
-        .map(|segment| FaceCurve {
-            provenance: Default::default(),
-            curve: segment.curve.clone(),
-            pcurve: segment.pcurve.clone(),
-            range: segment.range,
-            loop_end: false,
-            loop_kind: LoopKind::Outer,
-            parameter_seam: false,
-        })
-        .collect::<Vec<_>>();
+    let boundaries = |patch: &BrepPatch| {
+        patch.loops.iter().flat_map(|loop_| loop_.segments.iter().enumerate().map(|(index, segment)| FaceCurve {
+            provenance: Default::default(), curve: segment.curve.clone(),
+            pcurve: segment.pcurve.clone(), range: segment.range,
+            loop_end: index + 1 == loop_.segments.len(), loop_kind: loop_.kind, parameter_seam: false,
+        })).collect::<Vec<_>>()
+    };
+    let boundary = boundaries(container);
     let samples = trim_samples(&boundary)?;
-    for point in candidate_edges.iter().flatten() {
-        let projection = container.surface.project(*point, tolerance)?;
-        if projection.distance > tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0
-            || !point_in_sampled_trim(
-                Point2::new(projection.parameters.0, projection.parameters.1),
-                &boundary,
-                &samples,
-            )?
-        {
-            return Ok(false);
+    let bounds = face_parameter_bounds(&boundary, tolerance)?;
+    let contains = |point: Point3| -> KernelResult<bool> {
+        let projection = container.surface.project(point, tolerance)?;
+        let domains = container.surface.domains();
+        let uv = nearest_uv(domains, Point2::new(projection.parameters.0, projection.parameters.1), box_center(bounds));
+        Ok(projection.distance <= tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0
+            && point_in_sampled_periodic_trim(uv, &boundary, &samples, domains, bounds, tolerance)?)
+    };
+    for &point in candidate_edges.iter().flatten() {
+        if !contains(point)? { return Ok(false); }
+    }
+    // Coincident chart boundaries do not imply coincident material. Two
+    // complementary patches of a closed support can have the same rim.
+    let candidate_boundary = boundaries(candidate);
+    let candidate_samples = trim_samples(&candidate_boundary)?;
+    let mut interior = false;
+    for edge in candidate_boundary.iter().filter(|edge| edge.loop_kind == LoopKind::Outer) {
+        let (uv, tangent) = edge.pcurve.first_order(edge.range.middle())?;
+        if tangent.magnitude2() <= tolerance.parameter.powi(2) { continue; }
+        let inward = Vec2::new(-tangent.y, tangent.x).normalize()
+            * (candidate.orientation.sign() * edge.range.span().signum());
+        let (point, du, dv) = candidate.surface.first_order(uv.x, uv.y)?;
+        let speed = (du * inward.x + dv * inward.y).magnitude();
+        if speed <= tolerance.linear { continue; }
+        let probe = uv + inward * (tolerance.linear_at_scale(point.to_vec().magnitude()) * 32.0 / speed);
+        if point_in_sampled_trim(probe, &candidate_boundary, &candidate_samples)? {
+            if !contains(candidate.surface.first_order(probe.x, probe.y)?.0)? { return Ok(false); }
+            interior = true;
         }
     }
-    Ok(true)
+    Ok(interior)
 }
 
 pub(super) fn patch_components(

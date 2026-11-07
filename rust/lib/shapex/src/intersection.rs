@@ -796,6 +796,10 @@ impl Surface3 {
                 }
             }
             (Self::Plane(first), Self::Plane(second)) => plane_plane(*first, *second, tolerance),
+            (Self::Plane(plane), Self::Sphere(sphere)) => plane_sphere(*plane, *sphere, tolerance),
+            (Self::Sphere(sphere), Self::Plane(plane)) => {
+                Ok(swap_surface_curves(plane_sphere(*plane, *sphere, tolerance)?))
+            }
             (Self::Plane(first), Self::Cylinder(second)) => {
                 plane_cylinder(*first, *second, tolerance)
             }
@@ -843,8 +847,11 @@ impl Surface3 {
         domains: [super::ParameterRange; 2], plane_domains: [super::ParameterRange; 2],
         tolerance: ModelTolerance) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
         match self {
-            Self::Sphere(sphere) => Ok(swap_surface_curves(plane_sphere(plane, *sphere, tolerance)?)),
             Self::Cylinder(cylinder) => Ok(swap_surface_curves(plane_cylinder_impl(plane, *cylinder, tolerance, true)?)),
+            Self::Revolved(revolved) => match regular_revolution_section(revolved, plane, tolerance)? {
+                Some(curves) => Ok(IntersectionSet::Isolated(curves)),
+                None => self.intersect_bounded(&Self::Plane(plane), domains, plane_domains, tolerance, true),
+            },
             Self::Torus(torus) if plane.normal().cross(torus.normal()).magnitude() < 0.01 =>
                 Ok(swap_surface_curves(section_plane_torus(plane, *torus, domains, tolerance)?)),
             _ => self.intersect_bounded(&Self::Plane(plane), domains, plane_domains, tolerance, true),
@@ -863,7 +870,8 @@ impl Surface3 {
         second_domains: [super::ParameterRange; 2],
         tolerance: ModelTolerance,
     ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
-        self.intersect_bounded(other, first_domains, second_domains, tolerance, false)
+        let interpolate_guides = matches!(self, Self::Swept(_)) || matches!(other, Self::Swept(_));
+        self.intersect_bounded(other, first_domains, second_domains, tolerance, interpolate_guides)
     }
 
     fn intersect_bounded(&self, other: &Self, first_domains: [super::ParameterRange; 2],
@@ -1066,12 +1074,46 @@ fn cylinder_cone(
     tolerance: ModelTolerance,
 ) -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
     let axis = cylinder.axis().normalize();
-    if axis.dot(cone.axis().normalize()).abs() < 1.0 - tolerance.angular
-        || (cone.apex() - cylinder.origin()).cross(axis).magnitude() > tolerance.linear
-    {
+    if axis.cross(cone.axis().normalize()).magnitude() > tolerance.angular {
         return Err(unsupported(
-            "noncoaxial cylinder/cone intersection requires bounded tracing",
+            "nonparallel cylinder/cone intersection requires bounded tracing",
         ));
+    }
+    let eccentricity = (cone.apex() - cylinder.origin()).cross(axis).magnitude();
+    if eccentricity > tolerance.linear {
+        // Each cylinder generator meets the positive cone sheet at the
+        // axial height set by its radial distance from the cone axis.
+        if (eccentricity - cylinder.radius()).abs() <= tolerance.linear {
+            return Err(unsupported("cylinder/cone intersection through the cone apex requires bounded tracing"));
+        }
+        let mut cylinder_points = Vec::new();
+        let mut cone_points = Vec::new();
+        let mut achieved_error = 0.0_f64;
+        let cone_surface: Surface3 = cone.into();
+        for index in 0..=64 {
+            let u = std::f64::consts::TAU * index as f64 / 64.0;
+            let base = cylinder.evaluate(u, 0.0)?.point;
+            let delta = base - cone.apex();
+            let radial = delta - axis * delta.dot(axis);
+            let cone_v = radial.magnitude() / cone.reference_radius();
+            let cone_u = radial.dot(cone.y_radius()).atan2(radial.dot(cone.x_radius()));
+            let cylinder_v = (cone.axis() * cone_v - delta).dot(axis) / cylinder.axis().magnitude();
+            let point = cylinder.evaluate(u, cylinder_v)?.point;
+            achieved_error = achieved_error.max(point.distance(cone_surface.first_order(cone_u, cone_v)?.0));
+            cylinder_points.push(Point2::new(u, cylinder_v));
+            cone_points.push(Point2::new(cone_u, cone_v));
+        }
+        unwrap_periodic_points(&mut cone_points, cone_surface.domains());
+        let curve = SurfaceIntersectionCurve::new(
+            cylinder.into(), cone_surface,
+            closed_interpolating_guide(&cylinder_points)?.into(),
+            closed_interpolating_guide(&cone_points)?.into(),
+            super::ParameterRange::new(0.0, 1.0)?, tolerance, achieved_error,
+        )?;
+        let [first_pcurve, second_pcurve] = curve.exact_pcurves();
+        return Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
+            curve: curve.into(), first_pcurve, second_pcurve, achieved_error,
+        }]));
     }
     let v = cylinder.radius() / cone.reference_radius();
     let center = cone.apex() + cone.axis() * v;
@@ -1309,26 +1351,45 @@ fn plane_sphere(
     if radius2 <= tolerance.linear.powi(2) { return Ok(IntersectionSet::Empty); }
     let axis = sphere.z_radius().normalize();
     let mut curves = Vec::new();
-    if normal.dot(axis).abs() <= tolerance.angular && height.abs() <= tolerance.linear {
+    let pole_error = f64::EPSILON * sphere.center().to_vec().magnitude().max(sphere.radius()) * 128.0;
+    let pole_heights = [-1.0, 1.0].map(|sign| (sign * sphere.z_radius().dot(normal) - height).abs());
+    if pole_heights.iter().all(|distance| *distance <= pole_error) {
         let radial = axis.cross(normal).normalize();
         for radial in [radial, -radial] {
-            let circle: Curve3 = Circle3::new(sphere.center(), radial * sphere.radius(),
-                sphere.z_radius(), tolerance)?.into();
-            let range = super::ParameterRange::new(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2)?;
+            let curve: Curve3 = Circle3::new(sphere.center(), -sphere.z_radius(),
+                radial * sphere.radius(), tolerance)?.into();
+            let range = super::ParameterRange::new(0.0, std::f64::consts::PI)?;
             let angle = radial.dot(sphere.y_radius()).atan2(radial.dot(sphere.x_radius()));
-            curves.push(SurfaceSurfaceCurve { first_pcurve: plane.parameterized_curve_image(&circle, range, tolerance)?,
-                second_pcurve: Line2::new(Point2::new(angle, 0.0), crate::Vec2::unit_y())?.into(),
-                curve: circle, achieved_error: height.abs() });
+            let first_pcurve = plane.parameterized_curve_image(&curve, range, tolerance)?;
+            // Retain an analytic circle on the plane, with a bounded linear
+            // p-curve on the sphere to keep just this pole-to-pole arc.
+            let second_pcurve = interpolating_nurbs_guide(&[
+                Point2::new(angle, -std::f64::consts::FRAC_PI_2),
+                Point2::new(angle, std::f64::consts::FRAC_PI_2),
+            ], &[range.start, range.end])?.into();
+            curves.push(SurfaceSurfaceCurve { first_pcurve, second_pcurve, curve, achieved_error: height.abs() });
         }
     } else {
         let center = sphere.center() + normal * height;
         let radius = radius2.sqrt();
-        let circle: Curve3 = Circle3::new(center, plane.u().normalize() * radius,
-            normal.cross(plane.u()).normalize() * radius, tolerance)?.into();
+        // If the circle passes through a pole, put the chart discontinuity at
+        // the seam and take the longitude at either end from the one-sided tangent.
+        let pole = pole_heights.iter().position(|distance| *distance <= pole_error);
+        let radial = pole.map_or_else(|| plane.u().normalize(), |index| {
+            let delta = sphere.z_radius() * if index == 0 { -1.0 } else { 1.0 };
+            (delta - normal * delta.dot(normal)).normalize()
+        });
+        let circle: Curve3 = Circle3::new(center, radial * radius,
+            normal.cross(radial).normalize() * radius, tolerance)?.into();
         let range = super::ParameterRange::new(0.0, std::f64::consts::TAU)?;
         let mut points = (0..=64).map(|index| {
-            let point = circle.evaluate(range.end * index as f64 / 64.0)?.point;
-            let projection = Surface3::Sphere(sphere).project(point, tolerance)?;
+            let sample = circle.evaluate(range.end * index as f64 / 64.0)?;
+            if let Some(pole) = pole.filter(|_| index == 0 || index == 64) {
+                let tangent = sample.first_derivative * if index == 0 { 1.0 } else { -1.0 };
+                return Ok(Point2::new(tangent.dot(sphere.y_radius()).atan2(tangent.dot(sphere.x_radius())),
+                    if pole == 0 { -std::f64::consts::FRAC_PI_2 } else { std::f64::consts::FRAC_PI_2 }));
+            }
+            let projection = Surface3::Sphere(sphere).project(sample.point, tolerance)?;
             Ok(Point2::new(projection.parameters.0, projection.parameters.1))
         }).collect::<KernelResult<Vec<_>>>()?;
         unwrap_periodic_points(&mut points, Surface3::Sphere(sphere).domains());
@@ -1338,6 +1399,63 @@ fn plane_sphere(
             second_pcurve: pcurve, curve: circle, achieved_error: 0.0 });
     }
     Ok(IntersectionSet::Isolated(curves))
+}
+
+/// When a plane crosses every parallel of a spline revolution transversely,
+/// the two longitude solutions run continuously over the full meridian.
+/// The meridian control hull proves that neither solution can turn or vanish.
+fn regular_revolution_section(
+    revolved: &super::RevolvedSurface3,
+    plane: Plane3,
+    tolerance: ModelTolerance,
+) -> KernelResult<Option<Vec<SurfaceSurfaceCurve>>> {
+    let Curve2::Nurbs(profile) = revolved.profile() else { return Ok(None); };
+    let frame = revolved.frame();
+    let normal = plane.normal();
+    let x = normal.dot(frame.x());
+    let y = normal.dot(frame.y());
+    let axial = normal.dot(frame.z());
+    let radial = x.hypot(y);
+    let phase = y.atan2(x);
+    let offset = normal.dot(frame.origin() - plane.origin());
+    if profile.control_points().iter().any(|p| {
+        (offset + axial * p.y).abs() + tolerance.linear >= radial * p.x
+    }) {
+        return Ok(None);
+    }
+    let range = revolved.profile_range();
+    let range = super::ParameterRange::new(range.start.min(range.end), range.start.max(range.end))?;
+    let mut spans = vec![range.start];
+    spans.extend(revolved.profile().integration_breakpoints(range));
+    spans.push(range.end);
+    spans.sort_by(f64::total_cmp);
+    spans.dedup();
+    let parameters = spans.windows(2).flat_map(|span| {
+        (0..32).map(move |index| span[0] + (span[1] - span[0]) * index as f64 / 32.0)
+    }).chain([range.end]).collect::<Vec<_>>();
+    let surface: Surface3 = revolved.clone().into();
+    let curves = [-1.0, 1.0].into_iter().map(|sign| {
+        let mut first = Vec::new();
+        let mut second = Vec::new();
+        let mut error = 0.0_f64;
+        for &v in &parameters {
+            let p = revolved.profile().first_order(v)?.0;
+            let u = phase + sign * (-(offset + axial * p.y) / (radial * p.x)).acos();
+            let projection = plane.project(surface.first_order(u, v)?.0)?;
+            first.push(Point2::new(u, v));
+            second.push(Point2::new(projection.parameters.0, projection.parameters.1));
+            error = error.max(projection.distance);
+        }
+        let guide = |points: &[Point2]| {
+            smooth_interpolating_guide(&interpolating_nurbs_guide(points, &parameters)?)
+        };
+        let curve = SurfaceIntersectionCurve::new(
+            surface.clone(), plane.into(), guide(&first)?, guide(&second)?, range, tolerance, error,
+        )?;
+        let [first_pcurve, second_pcurve] = curve.exact_pcurves();
+        Ok(SurfaceSurfaceCurve { curve: curve.into(), first_pcurve, second_pcurve, achieved_error: error })
+    }).collect::<KernelResult<Vec<_>>>()?;
+    Ok(Some(curves))
 }
 
 /// Solve the torus plane equation analytically for its minor angle. The
@@ -1938,11 +2056,15 @@ fn trace_surface_intersections_in_domains(
         let second_cells = rational_surface_cells(second, second_domains)?;
         for first_cell in rational_surface_cells(first, first_domains)? {
             for second_cell in &second_cells {
-                stack.push((first_cell.clone(), second_cell.clone(), 0_u8));
+                let transverse = first_cell.ruled_direction().zip(second_cell.ruled_direction())
+                    .map(|(first, second)| first.cross(second))
+                    .filter(|normal| normal.magnitude() > tolerance.angular)
+                    .map(|normal| normal.normalize());
+                stack.push((first_cell.clone(), second_cell.clone(), transverse, 0_u8));
             }
         }
         let mut visited = 0_usize;
-        while let Some((first_cell, second_cell, depth)) = stack.pop() {
+        while let Some((first_cell, second_cell, transverse, depth)) = stack.pop() {
             visited += 1;
             if visited > 500_000 {
                 return Err(KernelError::new(
@@ -1964,7 +2086,7 @@ fn trace_surface_intersections_in_domains(
             // Boxes cannot separate tilted, nearly parallel cells whose gap
             // grows only quadratically away from a tangential contact. Their
             // control hulls also bound them along either cell's normal.
-            if [first_cell.normal(first)?, second_cell.normal(second)?].into_iter().flatten().any(|normal| {
+            if [transverse, first_cell.normal(first)?, second_cell.normal(second)?].into_iter().flatten().any(|normal| {
                 let [first_low, first_high] = first_cell.extent_along(normal);
                 let [second_low, second_high] = second_cell.extent_along(normal);
                 first_high + tolerance.linear < second_low || second_high + tolerance.linear < first_low
@@ -1989,12 +2111,12 @@ fn trace_surface_intersections_in_domains(
             }
             if first_max_flat >= second_max_flat {
                 let (left, right) = first_cell.split_direction(first_flat);
-                stack.push((right, second_cell.clone(), depth + 1));
-                stack.push((left, second_cell, depth + 1));
+                stack.push((right, second_cell.clone(), transverse, depth + 1));
+                stack.push((left, second_cell, transverse, depth + 1));
             } else {
                 let (left, right) = second_cell.split_direction(second_flat);
-                stack.push((first_cell.clone(), right, depth + 1));
-                stack.push((first_cell, left, depth + 1));
+                stack.push((first_cell.clone(), right, transverse, depth + 1));
+                stack.push((first_cell, left, transverse, depth + 1));
             }
         }
     } else {
@@ -2041,18 +2163,7 @@ fn trace_surface_intersections_in_domains(
         if covered {
             continue;
         }
-        let backward = trace_surface_intersection_direction(
-            first,
-            second,
-            seed,
-            -1.0,
-            base_step,
-            first_domains,
-            second_domains,
-            tolerance,
-            interpolate_guides,
-        )?;
-        let forward = trace_surface_intersection_direction(
+        let (mut forward, mut closed) = trace_surface_intersection_direction(
             first,
             second,
             seed,
@@ -2063,7 +2174,21 @@ fn trace_surface_intersections_in_domains(
             tolerance,
             interpolate_guides,
         )?;
-        let mut parameters = backward.into_iter().rev().collect::<Vec<_>>();
+        let mut parameters = if closed {
+            Vec::new()
+        } else {
+            let (backward, backward_closed) = trace_surface_intersection_direction(
+                first, second, seed, -1.0, base_step, first_domains, second_domains,
+                tolerance, interpolate_guides,
+            )?;
+            if backward_closed {
+                forward = backward;
+                closed = true;
+                Vec::new()
+            } else {
+                backward.into_iter().rev().collect::<Vec<_>>()
+            }
+        };
         if parameters
             .last()
             .is_some_and(|last| parameter_distance(*last, seed) <= tolerance.parameter * 16.0)
@@ -2187,11 +2312,9 @@ fn trace_surface_intersections_in_domains(
             }
             Ok(())
         };
-        if let Some(value) = parameters.first_mut() {
-            snap(value)?;
-        }
-        if let Some(value) = parameters.last_mut() {
-            snap(value)?;
+        if !closed {
+            snap(parameters.first_mut().unwrap())?;
+            snap(parameters.last_mut().unwrap())?;
         }
         // Snapping both ends of a short tangency trace to the same trim
         // corner can leave only A-B-A. This retraces one segment, rather than
@@ -2567,6 +2690,22 @@ impl RationalSurfaceCell {
         [low - self.padding, high + self.padding]
     }
 
+    // The common transverse axis of two extruded strips ignores their full
+    // longitudinal spans, which otherwise keep distant control hulls in play.
+    // This supplies a candidate axis only; the actual test uses both hulls.
+    fn ruled_direction(&self) -> Option<Vec3> {
+        let start = self.controls[0][0];
+        let end = if self.controls.len() == 2 {
+            self.controls[1][0]
+        } else if self.controls[0].len() == 2 {
+            self.controls[0][1]
+        } else {
+            return None;
+        };
+        let direction = end.truncate() / end.w - start.truncate() / start.w;
+        (direction.magnitude2() > 0.0).then(|| direction.normalize())
+    }
+
     fn directional_flatness(&self) -> KernelResult<[f64; 2]> {
         let control_flatness = |controls: Vec<Vec4>| -> KernelResult<f64> {
             let points = controls
@@ -2911,11 +3050,12 @@ fn trace_surface_intersection_direction(
     second_domains: [super::ParameterRange; 2],
     tolerance: ModelTolerance,
     adaptive: bool,
-) -> KernelResult<Vec<[f64; 4]>> {
+) -> KernelResult<(Vec<[f64; 4]>, bool)> {
     let poles = collapsed_plane_join_poles(first, second, first_domains, second_domains, tolerance)?;
     let mut result = Vec::new();
     let mut current = seed;
     let mut previous_tangent = None;
+    let mut initial_tangent = [0.0; 4];
     let domains = [first.domains(), second.domains()].concat();
     for _ in 0..512 {
         let (_, first_du, first_dv) = first.first_order(current[0], current[1])?;
@@ -2947,6 +3087,7 @@ fn trace_surface_intersection_direction(
             }
         } else {
             tangent = tangent.map(|value| value * direction);
+            initial_tangent = tangent;
         }
         // Near a turn, the tangent plane can meet the intersection far beyond
         // the predictor. Keep corrections local so the guide does not skip
@@ -2973,11 +3114,13 @@ fn trace_surface_intersection_direction(
                 tolerance,
             )?;
             match corrected {
-                None if adaptive => { local_step *= 0.5; }
-                Some(value) if adaptive && parameter_distance(value, predicted) > local_step * 0.1 => {
-                    local_step *= 0.5;
-                }
-                Some(value) if parameter_distance(value, current) > local_step * 2.0 => {
+                // Solve for the exact trim endpoint when the predictor
+                // leaves the box rather than accumulating near-bound samples.
+                None if !adaptive && !parameters_in_ranges(
+                    predicted, first_domains, second_domains, tolerance.parameter,
+                ) => break,
+                None => { local_step *= 0.5; }
+                Some(value) if parameter_distance(value, predicted) > local_step * 0.25 => {
                     local_step *= 0.5;
                 }
                 value => {
@@ -3061,6 +3204,24 @@ fn trace_surface_intersection_direction(
         if parameter_distance(next, current) <= tolerance.parameter * 16.0 {
             break;
         }
+        // A closed branch crosses the starting transverse plane in the
+        // original direction. Confirm that the crossing is the starting root
+        // before closing, then use the exact seed as the shared endpoint.
+        let seed_plane = |point: [f64; 4]| {
+            (0..4).map(|axis| (point[axis] - seed[axis]) * initial_tangent[axis]).sum::<f64>()
+        };
+        let before = seed_plane(current);
+        let after = seed_plane(next);
+        if before < 0.0 && after >= 0.0 && parameter_distance(next, seed) <= local_step * 2.0 {
+            let fraction = -before / (after - before);
+            let crossing = std::array::from_fn(|axis| current[axis] + (next[axis] - current[axis]) * fraction);
+            if correct_surface_pair_with_gauge(
+                first, second, crossing, initial_tangent, first_domains, second_domains, tolerance,
+            )?.is_some_and(|root| parameter_distance(root, seed) <= tolerance.parameter * 64.0) {
+                result.push(seed);
+                return Ok((result, true));
+            }
+        }
         result.push(next);
         // Stop on the first trim reached, excluding full-period seams.
         // Continuing along a trim can switch branches at a collapsing blend
@@ -3081,13 +3242,10 @@ fn trace_surface_intersection_direction(
         {
             break;
         }
-        if result.len() > 12 && parameter_distance(next, seed) <= local_step * 0.75 {
-            break;
-        }
         current = next;
         previous_tangent = Some(tangent);
     }
-    Ok(result)
+    Ok((result, false))
 }
 
 pub(crate) fn correct_surface_pair_with_gauge(

@@ -791,18 +791,16 @@ export class Compound extends Volumetric {
   }
   split(plane, keep) {
     if (!this.geom) return this
-    const operations = ['left', 'right'].map(branch => ({
+    const cut = planeFromMatrix(plane)
+    const operations = (keep == 'both' ? ['left', 'right'] : [keep]).map(branch => ({
       branch,
       operation: 'split',
-      compound: new Compound(this.componentId, this.geom().split(planeFromMatrix(plane), branch))
+      compound: new Compound(this.componentId, this.geom().split(cut, branch))
     }))
     const nonempty = operations.map(operation => operation.compound).filter(compound => compound.solids().length)
     if (!nonempty.length) return new Compound(this.componentId)
     const out = new Compound(this.componentId, nonempty[0].geom().combined(nonempty.slice(1).map(compound => compound.geom())))
-    trackOperations(out, [this], operations)
-    if (keep == 'both') return out
-    const retained = new Set(operations[keep == 'left' ? 0 : 1].compound.solids().map(solid => solid.kernelId))
-    return out.subset(out.solids().filter(solid => retained.has(solid.kernelId))).cloneCached()
+    return trackOperations(out, [this], operations)
   }
   halfCut(plane, side) {
     if(!this.geom) return this

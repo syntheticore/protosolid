@@ -363,6 +363,25 @@ fn surface_patch(support: &Surface3, uv: Bounds) -> KernelResult<Bounds> {
             )
         }
         Surface3::Offset(s) => Ok(surface_patch(s.base(), uv)?.expanded(s.maximum_distance())),
+        Surface3::Blend(blend) => {
+            let u = blend.center_range().middle();
+            let (controls, direction) = blend.translating_quintic(u)?.ok_or_else(unavailable)?;
+            // Restrict the Bernstein polygon to the chart box. The blossom
+            // also handles trims on an extension of the nominal section.
+            let section = (0..=5).map(|upper_count| {
+                let mut points = controls;
+                for level in 0..5 {
+                    let v = if level < upper_count { uv.1.y } else { uv.0.y };
+                    for index in 0..5 - level {
+                        points[index] = points[index] + (points[index + 1] - points[index]) * v;
+                    }
+                }
+                points[0]
+            });
+            Ok(Bounds::points(section.flat_map(|point| {
+                [point + direction * (uv.0.x - u), point + direction * (uv.1.x - u)]
+            })))
+        }
         _ => surface(support, None),
     }
 }
@@ -451,6 +470,20 @@ fn surface(s: &Surface3, boundary: Option<Bounds>) -> KernelResult<Bounds> {
 
 pub(crate) fn face(topology: &super::Topology, id: super::FaceId) -> KernelResult<Bounds> {
     let face = topology.face(id)?;
+    if matches!(face.surface(), Surface3::Blend(_)) {
+        let chart = || -> KernelResult<Bounds> {
+            let mut bounds: Option<Bounds> = None;
+            for loop_id in face.loops() {
+                for use_id in topology.loop_coedges(*loop_id)? {
+                    let coedge = topology.coedge(use_id)?;
+                    let edge = curve2(coedge.pcurve(), coedge.range())?;
+                    bounds = Some(bounds.map_or(edge, |old| old.union(edge)));
+                }
+            }
+            surface_patch(face.surface(), bounds.ok_or_else(unavailable)?)
+        };
+        if let Ok(bounds) = chart() { return Ok(bounds); }
+    }
     surface(face.surface(), None).or_else(|_| {
             let mut boundary: Option<Bounds> = None;
             for id in topology.face_edges(id)? {

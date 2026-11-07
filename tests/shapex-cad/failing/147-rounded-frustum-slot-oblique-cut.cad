@@ -1,0 +1,785 @@
+{
+  "lastId": "1247n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 7,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-1006",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-1007",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-1001",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [0,0,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [7,0,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-1002",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [7,0,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [3,12,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-1003",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [3,12,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [0,12,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-1004",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [0,12,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [0,0,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-1005",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [0,-50,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [0,50,0]
+                }
+              ],
+              "isReference": true
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "RevolveFeature",
+        "id": "id-1017",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "angle",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-1016",
+              "sketchId": "id-1007",
+              "rings": [
+                ["id-1004","id-1001","id-1002","id-1003"]
+              ]
+            }
+          ],
+          "axis": {
+            "$class": "AxialReference",
+            "item": {
+              "$class": "CurveReference",
+              "componentId": "id-0",
+              "sketchId": "id-1007",
+              "isProjection": false,
+              "itemId": "id-1005",
+              "outputIndex": 0
+            }
+          },
+          "angle": 360,
+          "offset": 0,
+          "fromFace": null,
+          "limitFace": null,
+          "side": true,
+          "operation": "join"
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2,
+          "selections": [
+            {
+              "identity": "id-1017/topology/4673676eaeb3",
+              "recipe": {
+                "version": 1,
+                "kind": "edge",
+                "identity": "id-1017/topology/5880cffb722e",
+                "anchors": ["id-1017/topology/1f6c1ca43fb3","id-1017/topology/925d7a934701"],
+                "policy": "single",
+                "context": [
+                  ["id-1017/topology/56faaefae921","id-1017/topology/1f6c1ca43fb3"],
+                  ["id-1017/topology/56faaefae921","id-1017/topology/649d10ab70ae"],
+                  ["id-1017/topology/56faaefae921"],
+                  ["id-1017/topology/5d05f6e47dde","id-1017/topology/3762663872f8"],
+                  ["id-1017/topology/5d05f6e47dde","id-1017/topology/925d7a934701"],
+                  ["id-1017/topology/5d05f6e47dde","id-1017/topology/bd9a6f5084eb"],
+                  ["id-1017/topology/5d05f6e47dde"]
+                ],
+                "branch": []
+              }
+            },
+            {
+              "identity": "id-1017/topology/f84f8fde3aa9",
+              "recipe": {
+                "version": 1,
+                "kind": "edge",
+                "identity": "id-1017/topology/45172b5bd3b3",
+                "anchors": ["id-1017/topology/649d10ab70ae","id-1017/topology/bd9a6f5084eb"],
+                "policy": "single",
+                "context": [
+                  ["id-1017/topology/62947d8fdcf3","id-1017/topology/1f6c1ca43fb3"],
+                  ["id-1017/topology/62947d8fdcf3","id-1017/topology/649d10ab70ae"],
+                  ["id-1017/topology/62947d8fdcf3"],
+                  ["id-1017/topology/b389495db302","id-1017/topology/8ab0a20e36db"],
+                  ["id-1017/topology/b389495db302","id-1017/topology/925d7a934701"],
+                  ["id-1017/topology/b389495db302","id-1017/topology/bd9a6f5084eb"],
+                  ["id-1017/topology/b389495db302"]
+                ],
+                "branch": []
+              }
+            },
+            {
+              "identity": "id-1017/topology/78b651bfea52",
+              "recipe": {
+                "version": 1,
+                "kind": "edge",
+                "identity": "id-1017/topology/5dce51b4e680",
+                "anchors": ["id-1017/topology/3762663872f8","id-1017/topology/925d7a934701"],
+                "policy": "single",
+                "context": [
+                  ["id-1017/topology/5d05f6e47dde","id-1017/topology/1f6c1ca43fb3"],
+                  ["id-1017/topology/5d05f6e47dde","id-1017/topology/925d7a934701"],
+                  ["id-1017/topology/5d05f6e47dde","id-1017/topology/bd9a6f5084eb"],
+                  ["id-1017/topology/5d05f6e47dde"],
+                  ["id-1017/topology/6cac7ce54755","id-1017/topology/3762663872f8"],
+                  ["id-1017/topology/6cac7ce54755","id-1017/topology/8ab0a20e36db"],
+                  ["id-1017/topology/6cac7ce54755"]
+                ],
+                "branch": []
+              }
+            },
+            {
+              "identity": "id-1017/topology/6d5736771b53",
+              "recipe": {
+                "version": 1,
+                "kind": "edge",
+                "identity": "id-1017/topology/ddef4950afcf",
+                "anchors": ["id-1017/topology/8ab0a20e36db","id-1017/topology/bd9a6f5084eb"],
+                "policy": "single",
+                "context": [
+                  ["id-1017/topology/b389495db302","id-1017/topology/649d10ab70ae"],
+                  ["id-1017/topology/b389495db302","id-1017/topology/925d7a934701"],
+                  ["id-1017/topology/b389495db302","id-1017/topology/bd9a6f5084eb"],
+                  ["id-1017/topology/b389495db302"],
+                  ["id-1017/topology/e4555f9f606e","id-1017/topology/3762663872f8"],
+                  ["id-1017/topology/e4555f9f606e","id-1017/topology/8ab0a20e36db"],
+                  ["id-1017/topology/e4555f9f606e"]
+                ],
+                "branch": []
+              }
+            }
+          ]
+        },
+        "topologyDescriptions": {
+          "id-1017/topology/56faaefae921": ["face","profile-side/turn-start",["id-1001"],"id-1017"],
+          "id-1017/topology/62947d8fdcf3": ["face","profile-side/turn-end",["id-1001"],"id-1017"],
+          "id-1017/topology/5d05f6e47dde": ["face","profile-side/turn-start",["id-1002"],"id-1017"],
+          "id-1017/topology/b389495db302": ["face","profile-side/turn-end",["id-1002"],"id-1017"],
+          "id-1017/topology/6cac7ce54755": ["face","profile-side/turn-start",["id-1003"],"id-1017"],
+          "id-1017/topology/e4555f9f606e": ["face","profile-side/turn-end",["id-1003"],"id-1017"],
+          "id-1017/topology/6b107f68c6a6": ["edge","profile/boundary",["id-1017/topology/56faaefae921","id-1017/topology/62947d8fdcf3"],"id-1017"],
+          "id-1017/topology/1f6c1ca43fb3": ["edge","profile/boundary",["id-1017/topology/56faaefae921"],"id-1017"],
+          "id-1017/topology/649d10ab70ae": ["edge","profile/boundary",["id-1017/topology/62947d8fdcf3"],"id-1017"],
+          "id-1017/topology/5880cffb722e": ["edge","profile/boundary",["id-1017/topology/56faaefae921","id-1017/topology/5d05f6e47dde"],"id-1017"],
+          "id-1017/topology/925d7a934701": ["edge","profile/boundary",["id-1017/topology/5d05f6e47dde"],"id-1017"],
+          "id-1017/topology/45172b5bd3b3": ["edge","profile/boundary",["id-1017/topology/62947d8fdcf3","id-1017/topology/b389495db302"],"id-1017"],
+          "id-1017/topology/bd9a6f5084eb": ["edge","profile/boundary",["id-1017/topology/b389495db302"],"id-1017"],
+          "id-1017/topology/46d4e8a729b5": ["edge","profile/boundary",["id-1017/topology/5d05f6e47dde","id-1017/topology/b389495db302"],"id-1017"],
+          "id-1017/topology/5dce51b4e680": ["edge","profile/boundary",["id-1017/topology/5d05f6e47dde","id-1017/topology/6cac7ce54755"],"id-1017"],
+          "id-1017/topology/3762663872f8": ["edge","profile/boundary",["id-1017/topology/6cac7ce54755"],"id-1017"],
+          "id-1017/topology/ddef4950afcf": ["edge","profile/boundary",["id-1017/topology/b389495db302","id-1017/topology/e4555f9f606e"],"id-1017"],
+          "id-1017/topology/8ab0a20e36db": ["edge","profile/boundary",["id-1017/topology/e4555f9f606e"],"id-1017"],
+          "id-1017/topology/86f760ee7452": ["edge","profile/boundary",["id-1017/topology/6cac7ce54755","id-1017/topology/e4555f9f606e"],"id-1017"],
+          "id-1017/topology/36eef9c9ca48": ["vertex","profile/boundary",["id-1017/topology/1f6c1ca43fb3","id-1017/topology/649d10ab70ae"],"id-1017"],
+          "id-1017/topology/7f6297f13f0f": ["vertex","profile/boundary",["id-1017/topology/1f6c1ca43fb3"],"id-1017"],
+          "id-1017/topology/92516563afcd": ["vertex","profile/boundary",["id-1017/topology/649d10ab70ae"],"id-1017"],
+          "id-1017/topology/79b65436eda6": ["vertex","profile/boundary",["id-1017/topology/1f6c1ca43fb3","id-1017/topology/649d10ab70ae","id-1017/topology/925d7a934701","id-1017/topology/bd9a6f5084eb"],"id-1017"],
+          "id-1017/topology/c23fe582228c": ["vertex","profile/boundary",["id-1017/topology/925d7a934701"],"id-1017"],
+          "id-1017/topology/f6f03c8d8214": ["vertex","profile/boundary",["id-1017/topology/bd9a6f5084eb"],"id-1017"],
+          "id-1017/topology/c57d88f99d44": ["vertex","profile/boundary",["id-1017/topology/3762663872f8","id-1017/topology/8ab0a20e36db","id-1017/topology/925d7a934701","id-1017/topology/bd9a6f5084eb"],"id-1017"],
+          "id-1017/topology/5fbd620c1c8a": ["vertex","profile/boundary",["id-1017/topology/3762663872f8"],"id-1017"],
+          "id-1017/topology/fab922eeb876": ["vertex","profile/boundary",["id-1017/topology/8ab0a20e36db"],"id-1017"],
+          "id-1017/topology/c46cd12962a8": ["vertex","profile/boundary",["id-1017/topology/3762663872f8","id-1017/topology/8ab0a20e36db"],"id-1017"],
+          "id-1017/topology/5eb057a6004e": ["body","profile/body",["id-1001","id-1002","id-1003","id-1004"],"id-1017"],
+          "id-1017/topology/859d4bbf5a7a": ["body","profile/body",["id-1004"],"id-1017"],
+          "id-1017/topology/55e9b2a835ed": ["body","profile/body",["id-1001"],"id-1017"],
+          "id-1017/topology/7daaa891102b": ["body","profile/body",["id-1002"],"id-1017"],
+          "id-1017/topology/4681b4353f4c": ["body","profile/body",["id-1003"],"id-1017"],
+          "id-1017/topology/4673676eaeb3": ["edge","selection",["1eab51ef598f"],"id-1017"],
+          "id-1017/topology/f84f8fde3aa9": ["edge","selection",["ecbc8d9f964d"],"id-1017"],
+          "id-1017/topology/78b651bfea52": ["edge","selection",["6608e0b508c1"],"id-1017"],
+          "id-1017/topology/6d5736771b53": ["edge","selection",["a106df86c1f0"],"id-1017"]
+        }
+      },
+      {
+        "$class": "FilletFeature",
+        "id": "id-1057",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "edges": [
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "selection": {
+                "version": 1,
+                "kind": "edge",
+                "identity": "id-1017/topology/4673676eaeb3",
+                "policy": "single"
+              }
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "selection": {
+                "version": 1,
+                "kind": "edge",
+                "identity": "id-1017/topology/f84f8fde3aa9",
+                "policy": "single"
+              }
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "selection": {
+                "version": 1,
+                "kind": "edge",
+                "identity": "id-1017/topology/78b651bfea52",
+                "policy": "single"
+              }
+            },
+            {
+              "$class": "EdgeReference",
+              "componentId": "id-0",
+              "selection": {
+                "version": 1,
+                "kind": "edge",
+                "identity": "id-1017/topology/6d5736771b53",
+                "policy": "single"
+              }
+            }
+          ],
+          "filletType": "radius",
+          "radius": 1.1,
+          "width": 1,
+          "continuity": "g1",
+          "propagation": "tangent"
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "topologyDescriptions": {
+          "id-1057/topology/384c58af33d7": ["face","fillet/generated",["id-1017/topology/1f6c1ca43fb3","id-1017/topology/56faaefae921","id-1017/topology/5d05f6e47dde","id-1017/topology/925d7a934701"],"id-1057"],
+          "id-1057/topology/4bc0d5da7306": ["face","fillet/generated",["id-1017/topology/56faaefae921"],"id-1057"],
+          "id-1057/topology/815853d29826": ["face","fillet/generated",["id-1017/topology/5d05f6e47dde"],"id-1057"],
+          "id-1057/topology/9442373232d0": ["face","fillet/generated",["id-1017/topology/1f6c1ca43fb3"],"id-1057"],
+          "id-1057/topology/f6dddadf25b1": ["face","fillet/generated",["id-1017/topology/925d7a934701"],"id-1057"],
+          "id-1057/topology/dbab6ea8e221": ["face","fillet/generated",["id-1017/topology/62947d8fdcf3","id-1017/topology/649d10ab70ae","id-1017/topology/b389495db302","id-1017/topology/bd9a6f5084eb"],"id-1057"],
+          "id-1057/topology/9c1ab46510ea": ["face","fillet/generated",["id-1017/topology/62947d8fdcf3"],"id-1057"],
+          "id-1057/topology/697c423411e0": ["face","fillet/generated",["id-1017/topology/b389495db302"],"id-1057"],
+          "id-1057/topology/7297f79e3d5f": ["face","fillet/generated",["id-1017/topology/649d10ab70ae"],"id-1057"],
+          "id-1057/topology/5dd472767435": ["face","fillet/generated",["id-1017/topology/bd9a6f5084eb"],"id-1057"],
+          "id-1057/topology/0b31b87ae687": ["face","fillet/generated",["id-1017/topology/3762663872f8","id-1017/topology/5d05f6e47dde","id-1017/topology/6cac7ce54755","id-1017/topology/925d7a934701"],"id-1057"],
+          "id-1057/topology/7cc46d9deb72": ["face","fillet/generated",["id-1017/topology/6cac7ce54755"],"id-1057"],
+          "id-1057/topology/f89111be2a91": ["face","fillet/generated",["id-1017/topology/3762663872f8"],"id-1057"],
+          "id-1057/topology/06550fc6270c": ["face","fillet/generated",["id-1017/topology/8ab0a20e36db","id-1017/topology/b389495db302","id-1017/topology/bd9a6f5084eb","id-1017/topology/e4555f9f606e"],"id-1057"],
+          "id-1057/topology/e5a10eb46145": ["face","fillet/generated",["id-1017/topology/e4555f9f606e"],"id-1057"],
+          "id-1057/topology/3dcd43b980e3": ["face","fillet/generated",["id-1017/topology/8ab0a20e36db"],"id-1057"],
+          "id-1057/topology/5f6b94817f50": ["edge","fillet/generated",["id-1017/topology/1f6c1ca43fb3","id-1017/topology/56faaefae921","id-1017/topology/925d7a934701"],"id-1057"],
+          "id-1057/topology/2811b9715786": ["edge","fillet/generated",["id-1017/topology/56faaefae921"],"id-1057"],
+          "id-1057/topology/d47b2d1aa916": ["edge","fillet/generated",["id-1017/topology/1f6c1ca43fb3"],"id-1057"],
+          "id-1057/topology/30808d571246": ["edge","fillet/generated",["id-1017/topology/925d7a934701"],"id-1057"],
+          "id-1057/topology/d444b34d63f8": ["edge","fillet/generated",["id-1017/topology/1f6c1ca43fb3","id-1017/topology/5d05f6e47dde","id-1017/topology/925d7a934701"],"id-1057"],
+          "id-1057/topology/ad7ebefe30b2": ["edge","fillet/generated",["id-1017/topology/5d05f6e47dde"],"id-1057"],
+          "id-1057/topology/d070d656d105": ["edge","fillet/generated",["id-1017/topology/1f6c1ca43fb3","id-1017/topology/925d7a934701"],"id-1057"],
+          "id-1057/topology/aec98f6d261c": ["edge","fillet/generated",["id-1017/topology/62947d8fdcf3","id-1017/topology/649d10ab70ae","id-1017/topology/bd9a6f5084eb"],"id-1057"],
+          "id-1057/topology/c23edceea0b6": ["edge","fillet/generated",["id-1017/topology/62947d8fdcf3"],"id-1057"],
+          "id-1057/topology/530924a8d323": ["edge","fillet/generated",["id-1017/topology/649d10ab70ae"],"id-1057"],
+          "id-1057/topology/450b1c9af791": ["edge","fillet/generated",["id-1017/topology/bd9a6f5084eb"],"id-1057"],
+          "id-1057/topology/5bc717f584a8": ["edge","fillet/generated",["id-1017/topology/649d10ab70ae","id-1017/topology/b389495db302","id-1017/topology/bd9a6f5084eb"],"id-1057"],
+          "id-1057/topology/6d3f003a9ccb": ["edge","fillet/generated",["id-1017/topology/b389495db302"],"id-1057"],
+          "id-1057/topology/a17841e7c73f": ["edge","fillet/generated",["id-1017/topology/3762663872f8","id-1017/topology/5d05f6e47dde","id-1017/topology/925d7a934701"],"id-1057"],
+          "id-1057/topology/ee5e1a544011": ["edge","fillet/generated",["id-1017/topology/3762663872f8"],"id-1057"],
+          "id-1057/topology/820331667458": ["edge","fillet/generated",["id-1017/topology/3762663872f8","id-1017/topology/6cac7ce54755","id-1017/topology/925d7a934701"],"id-1057"],
+          "id-1057/topology/df3a37655229": ["edge","fillet/generated",["id-1017/topology/6cac7ce54755"],"id-1057"],
+          "id-1057/topology/efd51db39cff": ["edge","fillet/generated",["id-1017/topology/3762663872f8","id-1017/topology/925d7a934701"],"id-1057"],
+          "id-1057/topology/64daec7a6866": ["edge","fillet/generated",["id-1017/topology/8ab0a20e36db","id-1017/topology/b389495db302","id-1017/topology/bd9a6f5084eb"],"id-1057"],
+          "id-1057/topology/7f08f3b5bb60": ["edge","fillet/generated",["id-1017/topology/8ab0a20e36db"],"id-1057"],
+          "id-1057/topology/be7663485759": ["edge","fillet/generated",["id-1017/topology/8ab0a20e36db","id-1017/topology/bd9a6f5084eb","id-1017/topology/e4555f9f606e"],"id-1057"],
+          "id-1057/topology/66129995c425": ["edge","fillet/generated",["id-1017/topology/e4555f9f606e"],"id-1057"]
+        }
+      },
+      {
+        "$class": "PlaneFeature",
+        "id": "id-1092",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "mode": "offset",
+          "axis": null,
+          "path": null,
+          "base": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XZ"
+            }
+          },
+          "base2": null,
+          "point": null,
+          "point2": null,
+          "point3": null,
+          "angle": 0,
+          "position": 0,
+          "offset": 0.53,
+          "rotationX": -37.1,
+          "rotationY": 13.7,
+          "rotationTransform": {
+            "$class": "Matrix4",
+            "elements": [0.9715491199976461,-0.14286266150956511,-0.18889829903469946,0,0,0.7975839288252285,-0.6032079877452825,0,0.23683814606561865,0.5860461896694802,0.7748919641744161,0,0,0,0,1]
+          },
+          "rotationAppliedX": -37.1,
+          "rotationAppliedY": 13.7
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "planeId": "id-1093"
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-1098",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-1093"
+            }
+          }
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-1099",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-1094",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [-7.63,-3.5300000000000002,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [4.37,-3.5300000000000002,0]
+                }
+              ]
+            },
+            {
+              "$class": "Arc",
+              "id": "id-1095",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [4.37,0.47,0]
+              },
+              "radius": 4,
+              "start": -1.5707963267948966,
+              "sweep": 3.141592653589793
+            },
+            {
+              "$class": "Line",
+              "id": "id-1096",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [4.37,4.47,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [-7.63,4.47,0]
+                }
+              ]
+            },
+            {
+              "$class": "Arc",
+              "id": "id-1097",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [-7.63,0.47,0]
+              },
+              "radius": 4,
+              "start": 1.5707963267948966,
+              "sweep": 3.1415926535897927
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "ExtrudeFeature",
+        "id": "id-1109",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "distance",
+          "side": "forward",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-1108",
+              "sketchId": "id-1099",
+              "rings": [
+                ["id-1097","id-1094","id-1095","id-1096"]
+              ]
+            }
+          ],
+          "axis": null,
+          "distance": 8,
+          "limitFace": null,
+          "offset": 0,
+          "endOffset": 0,
+          "operation": "create",
+          "sideChangedByUser": false
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2,
+          "selections": [
+            {
+              "identity": "id-1109/topology/6c46e6e6456b",
+              "recipe": {
+                "version": 1,
+                "kind": "body",
+                "identity": "id-1109/topology/fa49d6114b5c",
+                "anchors": ["id-1109/topology/068a20f18f06","id-1109/topology/2fc1147eb351","id-1109/topology/4bc92bc817a7","id-1109/topology/a47ba1757988"],
+                "policy": "single",
+                "context": [
+                  ["id-1109/topology/276f4425c908","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/276f4425c908","id-1109/topology/22b36ca82c09"],
+                  ["id-1109/topology/276f4425c908","id-1109/topology/3ce0810b6572"],
+                  ["id-1109/topology/276f4425c908","id-1109/topology/553bb9e963d6"],
+                  ["id-1109/topology/276f4425c908","id-1109/topology/62415efcfec1"],
+                  ["id-1109/topology/276f4425c908","id-1109/topology/73d2c829225b"],
+                  ["id-1109/topology/276f4425c908","id-1109/topology/9bc95fc32b0b"],
+                  ["id-1109/topology/276f4425c908","id-1109/topology/9d02c0efa3bd"],
+                  ["id-1109/topology/276f4425c908","id-1109/topology/a709a96d4237"],
+                  ["id-1109/topology/276f4425c908","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/276f4425c908","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/276f4425c908"],
+                  ["id-1109/topology/2cf6f7e435d2","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/2cf6f7e435d2","id-1109/topology/3ce0810b6572"],
+                  ["id-1109/topology/2cf6f7e435d2","id-1109/topology/553bb9e963d6"],
+                  ["id-1109/topology/2cf6f7e435d2","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/2cf6f7e435d2","id-1109/topology/73d2c829225b"],
+                  ["id-1109/topology/2cf6f7e435d2","id-1109/topology/9bc95fc32b0b"],
+                  ["id-1109/topology/2cf6f7e435d2","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/2cf6f7e435d2","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/2cf6f7e435d2"],
+                  ["id-1109/topology/2e73aee02fc5","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/2e73aee02fc5","id-1109/topology/22b36ca82c09"],
+                  ["id-1109/topology/2e73aee02fc5","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/2e73aee02fc5","id-1109/topology/62415efcfec1"],
+                  ["id-1109/topology/2e73aee02fc5","id-1109/topology/9d02c0efa3bd"],
+                  ["id-1109/topology/2e73aee02fc5","id-1109/topology/a709a96d4237"],
+                  ["id-1109/topology/2e73aee02fc5","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/2e73aee02fc5","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/2e73aee02fc5"],
+                  ["id-1109/topology/3b1e1a8761b9","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/3b1e1a8761b9","id-1109/topology/3ce0810b6572"],
+                  ["id-1109/topology/3b1e1a8761b9","id-1109/topology/553bb9e963d6"],
+                  ["id-1109/topology/3b1e1a8761b9","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/3b1e1a8761b9","id-1109/topology/73d2c829225b"],
+                  ["id-1109/topology/3b1e1a8761b9","id-1109/topology/9bc95fc32b0b"],
+                  ["id-1109/topology/3b1e1a8761b9","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/3b1e1a8761b9","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/3b1e1a8761b9"],
+                  ["id-1109/topology/5364a03edb22","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/5364a03edb22","id-1109/topology/3ce0810b6572"],
+                  ["id-1109/topology/5364a03edb22","id-1109/topology/553bb9e963d6"],
+                  ["id-1109/topology/5364a03edb22","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/5364a03edb22","id-1109/topology/73d2c829225b"],
+                  ["id-1109/topology/5364a03edb22","id-1109/topology/9bc95fc32b0b"],
+                  ["id-1109/topology/5364a03edb22","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/5364a03edb22","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/5364a03edb22"],
+                  ["id-1109/topology/90faacf1cebf","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/90faacf1cebf","id-1109/topology/3ce0810b6572"],
+                  ["id-1109/topology/90faacf1cebf","id-1109/topology/553bb9e963d6"],
+                  ["id-1109/topology/90faacf1cebf","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/90faacf1cebf","id-1109/topology/73d2c829225b"],
+                  ["id-1109/topology/90faacf1cebf","id-1109/topology/9bc95fc32b0b"],
+                  ["id-1109/topology/90faacf1cebf","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/90faacf1cebf","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/90faacf1cebf"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/22b36ca82c09"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/3ce0810b6572"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/553bb9e963d6"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/62415efcfec1"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/73d2c829225b"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/9bc95fc32b0b"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/9d02c0efa3bd"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/a709a96d4237"],
+                  ["id-1109/topology/b87061282e12","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/b87061282e12"],
+                  ["id-1109/topology/ba1685645bff","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/ba1685645bff","id-1109/topology/22b36ca82c09"],
+                  ["id-1109/topology/ba1685645bff","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/ba1685645bff","id-1109/topology/62415efcfec1"],
+                  ["id-1109/topology/ba1685645bff","id-1109/topology/9d02c0efa3bd"],
+                  ["id-1109/topology/ba1685645bff","id-1109/topology/a709a96d4237"],
+                  ["id-1109/topology/ba1685645bff","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/ba1685645bff","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/ba1685645bff"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/22b36ca82c09"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/3ce0810b6572"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/553bb9e963d6"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/62415efcfec1"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/73d2c829225b"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/9bc95fc32b0b"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/9d02c0efa3bd"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/a709a96d4237"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/cd451dd9f8a5","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/cd451dd9f8a5"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/22b36ca82c09"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/3ce0810b6572"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/553bb9e963d6"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/62415efcfec1"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/73d2c829225b"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/9bc95fc32b0b"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/9d02c0efa3bd"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/a709a96d4237"],
+                  ["id-1109/topology/d8387d7b5baf","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/d8387d7b5baf"],
+                  ["id-1109/topology/dd16f8eb60d6","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/dd16f8eb60d6","id-1109/topology/22b36ca82c09"],
+                  ["id-1109/topology/dd16f8eb60d6","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/dd16f8eb60d6","id-1109/topology/62415efcfec1"],
+                  ["id-1109/topology/dd16f8eb60d6","id-1109/topology/9d02c0efa3bd"],
+                  ["id-1109/topology/dd16f8eb60d6","id-1109/topology/a709a96d4237"],
+                  ["id-1109/topology/dd16f8eb60d6","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/dd16f8eb60d6","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/dd16f8eb60d6"],
+                  ["id-1109/topology/dfb10a903d10","id-1109/topology/16cb765580ed"],
+                  ["id-1109/topology/dfb10a903d10","id-1109/topology/22b36ca82c09"],
+                  ["id-1109/topology/dfb10a903d10","id-1109/topology/5c25668a1144"],
+                  ["id-1109/topology/dfb10a903d10","id-1109/topology/62415efcfec1"],
+                  ["id-1109/topology/dfb10a903d10","id-1109/topology/9d02c0efa3bd"],
+                  ["id-1109/topology/dfb10a903d10","id-1109/topology/a709a96d4237"],
+                  ["id-1109/topology/dfb10a903d10","id-1109/topology/c063a02a54ff"],
+                  ["id-1109/topology/dfb10a903d10","id-1109/topology/eeb8e2fd4010"],
+                  ["id-1109/topology/dfb10a903d10"]
+                ],
+                "branch": []
+              }
+            }
+          ]
+        },
+        "topologyDescriptions": {
+          "id-1109/topology/5277f6c4bf6d": ["face","profile-end",["id-1094","id-1095","id-1096","id-1097"],"id-1109"],
+          "id-1109/topology/5364a03edb22": ["face","profile-end",["id-1097"],"id-1109"],
+          "id-1109/topology/90faacf1cebf": ["face","profile-end",["id-1094"],"id-1109"],
+          "id-1109/topology/2cf6f7e435d2": ["face","profile-end",["id-1095"],"id-1109"],
+          "id-1109/topology/3b1e1a8761b9": ["face","profile-end",["id-1096"],"id-1109"],
+          "id-1109/topology/a4f102a8f6fc": ["face","profile-start",["id-1094","id-1095","id-1096","id-1097"],"id-1109"],
+          "id-1109/topology/2e73aee02fc5": ["face","profile-start",["id-1097"],"id-1109"],
+          "id-1109/topology/ba1685645bff": ["face","profile-start",["id-1094"],"id-1109"],
+          "id-1109/topology/dd16f8eb60d6": ["face","profile-start",["id-1095"],"id-1109"],
+          "id-1109/topology/dfb10a903d10": ["face","profile-start",["id-1096"],"id-1109"],
+          "id-1109/topology/276f4425c908": ["face","profile-side",["id-1097"],"id-1109"],
+          "id-1109/topology/d8387d7b5baf": ["face","profile-side",["id-1094"],"id-1109"],
+          "id-1109/topology/b87061282e12": ["face","profile-side",["id-1095"],"id-1109"],
+          "id-1109/topology/cd451dd9f8a5": ["face","profile-side",["id-1096"],"id-1109"],
+          "id-1109/topology/80ce0fae53da": ["edge","profile/boundary",["id-1109/topology/276f4425c908","id-1109/topology/2e73aee02fc5","id-1109/topology/ba1685645bff","id-1109/topology/dd16f8eb60d6","id-1109/topology/dfb10a903d10"],"id-1109"],
+          "id-1109/topology/62415efcfec1": ["edge","profile/boundary",["id-1109/topology/2e73aee02fc5"],"id-1109"],
+          "id-1109/topology/a709a96d4237": ["edge","profile/boundary",["id-1109/topology/ba1685645bff"],"id-1109"],
+          "id-1109/topology/22b36ca82c09": ["edge","profile/boundary",["id-1109/topology/dd16f8eb60d6"],"id-1109"],
+          "id-1109/topology/9d02c0efa3bd": ["edge","profile/boundary",["id-1109/topology/dfb10a903d10"],"id-1109"],
+          "id-1109/topology/c063a02a54ff": ["edge","profile/boundary",["id-1109/topology/276f4425c908"],"id-1109"],
+          "id-1109/topology/c4a19403c1c6": ["edge","profile/boundary",["id-1109/topology/2e73aee02fc5","id-1109/topology/ba1685645bff","id-1109/topology/d8387d7b5baf","id-1109/topology/dd16f8eb60d6","id-1109/topology/dfb10a903d10"],"id-1109"],
+          "id-1109/topology/16cb765580ed": ["edge","profile/boundary",["id-1109/topology/d8387d7b5baf"],"id-1109"],
+          "id-1109/topology/09f1a731d9aa": ["edge","profile/boundary",["id-1109/topology/2e73aee02fc5","id-1109/topology/b87061282e12","id-1109/topology/ba1685645bff","id-1109/topology/dd16f8eb60d6","id-1109/topology/dfb10a903d10"],"id-1109"],
+          "id-1109/topology/5c25668a1144": ["edge","profile/boundary",["id-1109/topology/b87061282e12"],"id-1109"],
+          "id-1109/topology/34ddf776ddbd": ["edge","profile/boundary",["id-1109/topology/2e73aee02fc5","id-1109/topology/ba1685645bff","id-1109/topology/cd451dd9f8a5","id-1109/topology/dd16f8eb60d6","id-1109/topology/dfb10a903d10"],"id-1109"],
+          "id-1109/topology/eeb8e2fd4010": ["edge","profile/boundary",["id-1109/topology/cd451dd9f8a5"],"id-1109"],
+          "id-1109/topology/eaea7f7c5b10": ["edge","profile/boundary",["id-1109/topology/276f4425c908","id-1109/topology/cd451dd9f8a5"],"id-1109"],
+          "id-1109/topology/ae55b08ec214": ["edge","profile/boundary",["id-1109/topology/276f4425c908","id-1109/topology/d8387d7b5baf"],"id-1109"],
+          "id-1109/topology/1671d8dae865": ["edge","profile/boundary",["id-1109/topology/b87061282e12","id-1109/topology/d8387d7b5baf"],"id-1109"],
+          "id-1109/topology/53249ab32fcd": ["edge","profile/boundary",["id-1109/topology/b87061282e12","id-1109/topology/cd451dd9f8a5"],"id-1109"],
+          "id-1109/topology/8db8e7abc1fd": ["edge","profile/boundary",["id-1109/topology/276f4425c908","id-1109/topology/2cf6f7e435d2","id-1109/topology/3b1e1a8761b9","id-1109/topology/5364a03edb22","id-1109/topology/90faacf1cebf"],"id-1109"],
+          "id-1109/topology/73d2c829225b": ["edge","profile/boundary",["id-1109/topology/2cf6f7e435d2"],"id-1109"],
+          "id-1109/topology/9bc95fc32b0b": ["edge","profile/boundary",["id-1109/topology/3b1e1a8761b9"],"id-1109"],
+          "id-1109/topology/3ce0810b6572": ["edge","profile/boundary",["id-1109/topology/5364a03edb22"],"id-1109"],
+          "id-1109/topology/553bb9e963d6": ["edge","profile/boundary",["id-1109/topology/90faacf1cebf"],"id-1109"],
+          "id-1109/topology/740682ac7945": ["edge","profile/boundary",["id-1109/topology/2cf6f7e435d2","id-1109/topology/3b1e1a8761b9","id-1109/topology/5364a03edb22","id-1109/topology/90faacf1cebf","id-1109/topology/d8387d7b5baf"],"id-1109"],
+          "id-1109/topology/8977f3bf3524": ["edge","profile/boundary",["id-1109/topology/2cf6f7e435d2","id-1109/topology/3b1e1a8761b9","id-1109/topology/5364a03edb22","id-1109/topology/90faacf1cebf","id-1109/topology/b87061282e12"],"id-1109"],
+          "id-1109/topology/55f94f94f14a": ["edge","profile/boundary",["id-1109/topology/2cf6f7e435d2","id-1109/topology/3b1e1a8761b9","id-1109/topology/5364a03edb22","id-1109/topology/90faacf1cebf","id-1109/topology/cd451dd9f8a5"],"id-1109"],
+          "id-1109/topology/105818cb6299": ["vertex","profile/boundary",["id-1109/topology/22b36ca82c09","id-1109/topology/62415efcfec1","id-1109/topology/9d02c0efa3bd","id-1109/topology/a709a96d4237","id-1109/topology/c063a02a54ff","id-1109/topology/eeb8e2fd4010"],"id-1109"],
+          "id-1109/topology/5a4dfd6cba0a": ["vertex","profile/boundary",["id-1109/topology/22b36ca82c09"],"id-1109"],
+          "id-1109/topology/343d55e0969f": ["vertex","profile/boundary",["id-1109/topology/62415efcfec1"],"id-1109"],
+          "id-1109/topology/cf71c704ab79": ["vertex","profile/boundary",["id-1109/topology/9d02c0efa3bd"],"id-1109"],
+          "id-1109/topology/24661fb27494": ["vertex","profile/boundary",["id-1109/topology/a709a96d4237"],"id-1109"],
+          "id-1109/topology/609a188616ee": ["vertex","profile/boundary",["id-1109/topology/c063a02a54ff"],"id-1109"],
+          "id-1109/topology/56e2399108c5": ["vertex","profile/boundary",["id-1109/topology/eeb8e2fd4010"],"id-1109"],
+          "id-1109/topology/dcb9c99d5129": ["vertex","profile/boundary",["id-1109/topology/16cb765580ed","id-1109/topology/22b36ca82c09","id-1109/topology/62415efcfec1","id-1109/topology/9d02c0efa3bd","id-1109/topology/a709a96d4237","id-1109/topology/c063a02a54ff"],"id-1109"],
+          "id-1109/topology/6e6215dfb2ff": ["vertex","profile/boundary",["id-1109/topology/16cb765580ed"],"id-1109"],
+          "id-1109/topology/45efb1424b38": ["vertex","profile/boundary",["id-1109/topology/16cb765580ed","id-1109/topology/22b36ca82c09","id-1109/topology/5c25668a1144","id-1109/topology/62415efcfec1","id-1109/topology/9d02c0efa3bd","id-1109/topology/a709a96d4237"],"id-1109"],
+          "id-1109/topology/b8e18cb97e3d": ["vertex","profile/boundary",["id-1109/topology/5c25668a1144"],"id-1109"],
+          "id-1109/topology/a43230ff8bd8": ["vertex","profile/boundary",["id-1109/topology/22b36ca82c09","id-1109/topology/5c25668a1144","id-1109/topology/62415efcfec1","id-1109/topology/9d02c0efa3bd","id-1109/topology/a709a96d4237","id-1109/topology/eeb8e2fd4010"],"id-1109"],
+          "id-1109/topology/3691a2c4f956": ["vertex","profile/boundary",["id-1109/topology/3ce0810b6572","id-1109/topology/553bb9e963d6","id-1109/topology/73d2c829225b","id-1109/topology/9bc95fc32b0b","id-1109/topology/c063a02a54ff","id-1109/topology/eeb8e2fd4010"],"id-1109"],
+          "id-1109/topology/0d764a21510c": ["vertex","profile/boundary",["id-1109/topology/3ce0810b6572"],"id-1109"],
+          "id-1109/topology/a9ba757bad5e": ["vertex","profile/boundary",["id-1109/topology/553bb9e963d6"],"id-1109"],
+          "id-1109/topology/d101599fe911": ["vertex","profile/boundary",["id-1109/topology/73d2c829225b"],"id-1109"],
+          "id-1109/topology/f2ae97e33bd1": ["vertex","profile/boundary",["id-1109/topology/9bc95fc32b0b"],"id-1109"],
+          "id-1109/topology/a9378b0a08e8": ["vertex","profile/boundary",["id-1109/topology/16cb765580ed","id-1109/topology/3ce0810b6572","id-1109/topology/553bb9e963d6","id-1109/topology/73d2c829225b","id-1109/topology/9bc95fc32b0b","id-1109/topology/c063a02a54ff"],"id-1109"],
+          "id-1109/topology/466c81dfbc55": ["vertex","profile/boundary",["id-1109/topology/16cb765580ed","id-1109/topology/3ce0810b6572","id-1109/topology/553bb9e963d6","id-1109/topology/5c25668a1144","id-1109/topology/73d2c829225b","id-1109/topology/9bc95fc32b0b"],"id-1109"],
+          "id-1109/topology/a03f68276a55": ["vertex","profile/boundary",["id-1109/topology/3ce0810b6572","id-1109/topology/553bb9e963d6","id-1109/topology/5c25668a1144","id-1109/topology/73d2c829225b","id-1109/topology/9bc95fc32b0b","id-1109/topology/eeb8e2fd4010"],"id-1109"],
+          "id-1109/topology/fa49d6114b5c": ["body","profile/body",["id-1094","id-1095","id-1096","id-1097"],"id-1109"],
+          "id-1109/topology/068a20f18f06": ["body","profile/body",["id-1097"],"id-1109"],
+          "id-1109/topology/4bc92bc817a7": ["body","profile/body",["id-1094"],"id-1109"],
+          "id-1109/topology/2fc1147eb351": ["body","profile/body",["id-1095"],"id-1109"],
+          "id-1109/topology/a47ba1757988": ["body","profile/body",["id-1096"],"id-1109"],
+          "id-1109/topology/6c46e6e6456b": ["body","selection",["e7147af48a13"],"id-1109"]
+        }
+      },
+      {
+        "$class": "BooleanFeature",
+        "id": "id-1213",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "tools": [
+            {
+              "$class": "SolidReference",
+              "componentId": "id-0",
+              "selection": {
+                "version": 1,
+                "kind": "body",
+                "identity": "id-1109/topology/6c46e6e6456b",
+                "policy": "single"
+              }
+            }
+          ],
+          "keepTools": false,
+          "operation": "cut"
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        }
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "Main Assembly",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-1007": true,
+        "id-1099": true
+      },
+      "itemNames": {},
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [50,50,40]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [0,0,5]
+      }
+    }
+  ]
+}

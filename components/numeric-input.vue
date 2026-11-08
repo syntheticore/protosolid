@@ -38,10 +38,10 @@
 
     .spinner
 
-      button.button(type="button" tabindex="-1" @mousedown.prevent @click="$emit('increase', stepFactor($event))")
+      button.button(type="button" tabindex="-1" @mousedown.left.prevent="startRepeat('increase', $event)")
         Icon(icon="caret-up")
 
-      button.button(type="button" tabindex="-1" @mousedown.prevent @click="$emit('decrease', stepFactor($event))")
+      button.button(type="button" tabindex="-1" @mousedown.left.prevent="startRepeat('decrease', $event)")
         Icon(icon="caret-down")
 
 </template>
@@ -228,7 +228,29 @@
       }
     },
 
+    beforeUnmount() {
+      this.stopRepeat()
+    },
+
     methods: {
+      // Holding a spinner button keeps stepping after a short delay. Only
+      // mouseup ends it, as regeneration makes the UI inert, which fires
+      // mouseleave on the button.
+      startRepeat(direction, e) {
+        const factor = this.stepFactor(e)
+        this.$emit(direction, factor)
+        this.repeatTimeout = setTimeout(() => {
+          this.repeatInterval = setInterval(() => this.$emit(direction, factor), 60)
+        }, 400)
+        window.addEventListener('mouseup', this.stopRepeat)
+      },
+
+      stopRepeat() {
+        clearTimeout(this.repeatTimeout)
+        clearInterval(this.repeatInterval)
+        window.removeEventListener('mouseup', this.stopRepeat)
+      },
+
       commit(noFocus) {
         this.$emit('commit', this.text(), noFocus)
       },

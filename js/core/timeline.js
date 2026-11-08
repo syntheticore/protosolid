@@ -68,7 +68,9 @@ export class Timeline {
     //   &mut feature.borrow().feature_type.as_feature().modified_components()
     // );
     let index = this.features.indexOf(feature)
-    this.features = this.features.filter(f => f != feature )
+    // Rebuilding the array through a reactive timeline would compare and
+    // store proxies. Splicing keeps the raw features that lookups expect.
+    this.features.splice(index, 1)
     if(this.marker > index) {
       this.marker -= 1
       this.last_eval_index -= 1
@@ -82,7 +84,7 @@ export class Timeline {
   // Replace all features from index on. Like edits, their outdated results
   // stay visible until evaluation replaces them.
   replaceFeatures(index, features) {
-    this.features = [...this.features.slice(0, index), ...features]
+    this.features.splice(index, Infinity, ...features)
     this.last_change_index = Math.min(this.last_change_index, index)
     this.last_eval_index = Math.min(this.last_eval_index, index)
     this.change_version++
@@ -168,7 +170,7 @@ export class Timeline {
 
   reorder(feature, other, after) {
     const sourceIndex = this.features.indexOf(feature)
-    this.features = this.features.filter(f => f != feature )
+    this.features.splice(sourceIndex, 1)
     const otherIndex = this.features.indexOf(other)
     const targetIndex = otherIndex + (after ? 1 : 0)
     this.features.splice(targetIndex, 0, feature)

@@ -7,10 +7,10 @@ import { SketchElement, SketchPoint, Line, Circle, Arc, Spline, SketchText } fro
 import { SketchOrigin, ProjectedPoint, HorVertConstraint, Dimension } from '../core/sketch.js'
 import { ConstructionHelper } from '../core/helpers.js'
 import { Feature } from '../core/features.js'
-import { PlanarReference, AxialReference, PointReference, ProfileReference } from '../core/references.js'
+import { PlanarReference, AxialReference, PointReference, ProfileReference, PatternInputReference } from '../core/references.js'
 import { measureOptions, measureValue } from '../core/measures.js'
 import { worldTransform } from '../core/assembly.js'
-import { featureName } from './catalog.js'
+import { featureName, settingNotes } from './catalog.js'
 
 // Agents address geometry with item ids like `face:<component id>:<face id>`,
 // valid for the document state they were read from. Coordinates are in the
@@ -114,6 +114,10 @@ function referenceItems(reference) {
   if(reference instanceof PlanarReference || reference instanceof AxialReference || reference instanceof PointReference) {
     return referenceItems(reference.item)
   }
+  // Feature inputs of patterns and mirrors only locate their result through a body
+  if(reference instanceof PatternInputReference && reference.featureId) {
+    return reference.document.timeline.features.filter(feature => feature.id == reference.featureId)
+  }
   return reference.getItems()
 }
 
@@ -197,12 +201,13 @@ export function describeTopology(component, solid) {
   }
 }
 
-function describeHelper(helper) {
+function describeHelper(component, helper) {
   const transform = helper.transform
   return {
     id: itemId(helper),
     type: helper.typename().toLowerCase(),
     name: helper.isStandard() ? helper.id.split('/').pop() : undefined,
+    ...(component.isItemHidden(helper.id) && { hidden: true }),
     origin: vector(new THREE.Vector3().setFromMatrixPosition(transform)),
     ...(helper.typename() != 'Point' && {
       [helper.typename() == 'Plane' ? 'normal' : 'direction']: vector(new THREE.Vector3().setFromMatrixColumn(transform, 2)),
@@ -233,7 +238,7 @@ export function describeComponent(doc, component, { recursive = true, details = 
         hidden: component.isItemHidden(sketch.id),
         elements: sketch.elements.length,
       })),
-      constructionGeometry: component.helpers.map(describeHelper),
+      constructionGeometry: component.helpers.map(helper => describeHelper(component, helper)),
       parameters: component.creator.parameters.map(({ name, value }) => ({ name, value })),
       ...(component.creator.material && { material: component.creator.material.name || component.creator.material.title }),
     }),
@@ -263,11 +268,13 @@ export function describeTimeline(doc) {
 
 // Settings of a feature, as a schema for agents
 export function describeSettings(feature) {
+  const notes = settingNotes[featureName(feature)] || {}
   return Object.entries(feature.settings).map(([key, setting]) => {
     const options = feature.settingOptions?.(key) || setting.options
     return {
       key,
       title: setting.title,
+      ...(notes[key] && { description: notes[key] }),
       type: setting.type,
       ...(setting.multi && { multiple: true }),
       ...(setting.optional && { optional: true }),
@@ -420,6 +427,8 @@ export function describeSketch(doc, sketch, tree = doc.top()) {
 export function describeDocument(doc) {
   return {
     name: doc.filePath?.split(/[\\/]/).pop() || 'Untitled Document',
+    file: doc.filePath || null,
+    unsavedChanges: doc.hasUnsavedChanges,
     units: { length: 'mm', angle: 'deg' },
     marker: doc.timeline.marker,
     activeComponent: itemId(doc.activeComponent),

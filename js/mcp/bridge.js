@@ -1,6 +1,16 @@
 import preferences, { emitter as prefEmitter } from '../preferences.js'
-import { tools } from './tools.js'
-import { ToolError } from './describe.js'
+import { tools as initialTools } from './tools.js'
+import { ToolError as InitialToolError } from './describe.js'
+
+// Tool modules are swapped on hot reload, so agents test changes without restarting the app
+let tools = initialTools
+let ToolError = InitialToolError
+if(import.meta.hot) {
+  import.meta.hot.accept(['./tools.js', './describe.js'], ([toolsModule, describeModule]) => {
+    if(toolsModule) tools = toolsModule.tools
+    if(describeModule) ToolError = describeModule.ToolError
+  })
+}
 
 // Answers MCP messages the Electron main process receives over HTTP. Tool
 // calls run one after another on the active document.
@@ -15,6 +25,8 @@ To model, add a sketch on an origin plane or planar face with create_feature (ty
 then create solid features such as extrude or revolve from its profiles. Refine with fillet, chamfer, shell and others. \
 Change existing work with edit_feature and edit_sketch, which regenerate everything after it.
 Lengths are in mm and angles in degrees. Settings and dimensions also accept expressions with units and parameters, like "40mm" or "width / 2". \
+Y points up, so the ground plane is XZ. The standard views look from +Y (top), +Z (front) and +X (side), home looks from (1, 1, 1). \
+New components become active. Use activate_component on the top component to work in and see the whole model again. \
 Prefer parameters and dimensions over hard coded geometry, so the user can adapt the design.
 Item ids are only valid for the model state they were read from, query again after changes.
 Use capture_view to check the result visually.`
@@ -38,8 +50,11 @@ async function callTool({ name, arguments: args }, app) {
     if(result?.image) return { content: [{ type: 'image', data: result.image, mimeType: result.mimeType }] }
     return textResult(result)
   } catch(error) {
-    if(!(error instanceof ToolError)) console.error(error)
-    return { ...textResult(error.message), isError: true }
+    if(error instanceof ToolError) return { ...textResult(error.message), isError: true }
+    console.error(error)
+    const message = tool.readOnly ? `Internal error: ${error.message}` :
+      `Internal error: ${error.message}. The document may have been changed partly, use get_document to check its state before retrying.`
+    return { ...textResult(message), isError: true }
   }
 }
 

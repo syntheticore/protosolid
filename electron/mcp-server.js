@@ -153,7 +153,8 @@ function createMcpServer({ getWebContents, onStatus }) {
   }
 
   function configure({ enabled, port }) {
-    if(enabled == config.enabled && port == config.port) return
+    // A server that failed to start, like on a busy port, retries on reconfiguration
+    if(enabled == config.enabled && port == config.port && (server || !enabled)) return
     config = { enabled, port }
     stop()
     if(enabled) start(port)

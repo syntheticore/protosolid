@@ -1,6 +1,7 @@
 import { nextTick, toRaw } from 'vue'
 
 import Expression from '../core/expression.js'
+import { ConstructionHelper } from '../core/helpers.js'
 import { lastId, setLastId } from '../core/id.js'
 import { inputReference } from '../core/references.js'
 import { featureTypes, featureName } from './catalog.js'
@@ -217,16 +218,33 @@ const failingFeatures = (doc, except) => describeTimeline(doc).filter(feature =>
 
 function featureResult(doc, feature, warning) {
   const tree = doc.top()
+  // Bodies are named after the feature that created them
+  const created = solid => solid.id.includes(`${feature.id}/topology/`)
   return {
     feature: describeFeature(doc, feature, { schema: false }),
     ...(warning && { warning }),
+    ...(feature.planeId && { plane: `helper:${feature.componentId}:${feature.planeId}` }),
     marker: doc.timeline.marker,
     modifiedComponents: feature.modifiedComponents().map(id => tree.findChild(id)).filter(Boolean).map(component => ({
       id: itemId(component),
       name: component.creator.title,
-      bodies: component.compound.solids().map(solid => describeBody(component, solid)),
+      bodies: component.compound.solids().map(solid => ({ ...describeBody(component, solid), ...(created(solid) && { created: true }) })),
     })),
     failingFeatures: failingFeatures(doc, itemId(feature)),
+  }
+}
+
+// The change is done at this point, so a failing description must not report it as failed
+function appliedResult(doc, feature, warning) {
+  try {
+    return featureResult(doc, feature, warning)
+  } catch(error) {
+    console.error(error)
+    return {
+      feature: itemId(feature),
+      warning: `The change was applied, but its result could not be described: ${error.message}. Use get_document to inspect it.`,
+      marker: doc.timeline.marker,
+    }
   }
 }
 
@@ -436,19 +454,26 @@ export const tools = [
       const Type = featureTypes[type]
       if(!Type) throw new ToolError(`Unknown feature type '${type}'`)
       await closeEditing(doc)
+      // Features belong to the active component. Naming another one only
+      // targets it, the user's active component stays.
+      const previous = doc.activeComponent
       activateComponent(doc, component)
-      const feature = new Type(doc)
-      applySettings(doc, feature, settings, doc.top())
-      const warning = await addFeature(doc, feature)
-      if(feature.sketch) {
-        if(operations?.length) return updateSketch(doc, feature.sketch, operations)
-        return { feature: itemId(feature), sketch: describeSketch(doc, feature.sketch) }
+      try {
+        const feature = new Type(doc)
+        applySettings(doc, feature, settings, doc.top())
+        const warning = await addFeature(doc, feature)
+        if(feature.sketch) {
+          if(operations?.length) return await updateSketch(doc, feature.sketch, operations)
+          return { feature: itemId(feature), sketch: describeSketch(doc, feature.sketch) }
+        }
+        // Hides consumed sketches, as confirming a feature does
+        feature.confirm()
+        feature.commit?.()
+        doc.markChanged()
+        return appliedResult(doc, feature, warning)
+      } finally {
+        if(component) doc.reactivateActiveComponent(previous)
       }
-      // Hides consumed sketches, as confirming a feature does
-      feature.confirm()
-      feature.commit?.()
-      doc.markChanged()
-      return featureResult(doc, feature, warning)
     },
   },
   {
@@ -472,7 +497,7 @@ export const tools = [
       beforeMarker(doc, feature)
       const tree = doc.top(doc.timeline.features.indexOf(toRaw(feature)))
       const warning = await updateFeature(doc, feature, () => applySettings(doc, feature, settings, tree))
-      return featureResult(doc, feature, warning)
+      return appliedResult(doc, feature, warning)
     },
   },
   {
@@ -563,7 +588,7 @@ export const tools = [
     name: 'create_component',
     title: 'Create component',
     description: 'Adds an empty component as a child of the given or the active component. ' +
-      'The new component becomes active, so following features go into it.',
+      'The new component becomes active, so following features go into it. Use activate_component to switch back.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -583,14 +608,31 @@ export const tools = [
     },
   },
   {
+    name: 'activate_component',
+    title: 'Activate component',
+    description: 'Makes a component active, like the user does in the tree. New features go into the active component ' +
+      'unless they name one, and the viewport fades the other components. Activate the top component to see the whole model.',
+    inputSchema: {
+      type: 'object',
+      properties: { component: { type: 'string', description: 'Component id, like component:id-0' } },
+      required: ['component'],
+    },
+    run: async ({ component }, { doc }) => {
+      editable(doc)
+      await closeEditing(doc)
+      activateComponent(doc, component)
+      return describeComponent(doc, doc.activeComponent, { recursive: false })
+    },
+  },
+  {
     name: 'set_visibility',
     title: 'Set visibility',
-    description: 'Shows or hides a component, body or sketch, like the eye icons in the tree. ' +
+    description: 'Shows or hides a component, body, sketch or construction plane, axis or point, like the eye icons in the tree. ' +
       'New solid features only affect bodies visible when they are created.',
     inputSchema: {
       type: 'object',
       properties: {
-        item: { type: 'string', description: 'component:…, body:… or sketch:… id' },
+        item: { type: 'string', description: 'component:…, body:…, sketch:… or helper:… id' },
         hidden: { type: 'boolean' },
       },
       required: ['item', 'hidden'],
@@ -613,10 +655,29 @@ export const tools = [
         const component = tree.findChild(item.compound.componentId)
         component.creator.itemsHidden[component.sourceItemId(item.id)] = hidden
         await doc.updateFeatureVisibility(component, item.id)
+      } else if(item instanceof ConstructionHelper) {
+        const component = tree.findChild(item.componentId)
+        component.creator.itemsHidden[component.sourceItemId(item.id)] = hidden
+        doc.markChanged()
       } else {
         throw new ToolError(`The visibility of ${id} cannot be changed`)
       }
       return { item: id, hidden }
+    },
+  },
+  {
+    name: 'save_document',
+    title: 'Save document',
+    description: 'Saves the active document to its file, like Ctrl+S. Documents that were never saved, or with as_new_file, ' +
+      'ask the user for a location, and versioned documents ask for a version message. The call waits for the user.',
+    inputSchema: {
+      type: 'object',
+      properties: { as_new_file: { type: 'boolean', description: 'Save under a new name, like Save As' } },
+    },
+    run: async ({ as_new_file = false }, { doc }) => {
+      editable(doc)
+      await doc.save(as_new_file)
+      return { saved: !doc.hasUnsavedChanges, file: doc.filePath || null }
     },
   },
   {

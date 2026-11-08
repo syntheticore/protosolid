@@ -79,6 +79,9 @@
       color: var(--fg) !important
       filter: drop-shadow(0 0 3px rgba($highlight, 0.9)) drop-shadow(0 0 7px rgba($highlight, 0.65))
 
+      :where([data-theme="light"]) &
+        filter: none
+
     &:hover.selected
       padding-top: 0
       padding-bottom: 26px

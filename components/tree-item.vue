@@ -311,13 +311,23 @@
       &.selected
         background: $highlight * 0.7 !important
         border-color: $highlight * 1.1
+        color: white
 
-        h2
         header svg
+        header svg.eye
+        header .controls svg
           color: white
 
         .controls
           border-color: $highlight * 1.1
+
+        // Light theme fills brighter than the border
+        :where([data-theme="light"]) &
+          background: $highlight !important
+          border-color: $highlight * 0.8
+
+          .controls
+            border-color: $highlight * 0.8
 
       > header
         display: flex

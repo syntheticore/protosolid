@@ -8,8 +8,8 @@ const themeColors = {
     constrained: '#d7e4ed',
     vertex: 'white',
     ui: 'darkgray',
-    ghostWire: 'rgb(45, 49, 53)',
     ghost: 'white',
+    fluid: 'white',
     plane: 'white',
   },
   light: {
@@ -17,8 +17,8 @@ const themeColors = {
     constrained: '#27313b',
     vertex: '#27313b',
     ui: '#7f858c',
-    ghostWire: 'rgb(192, 198, 205)',
     ghost: '#1c2127',
+    fluid: '#8e9093',
     plane: '#1c2127',
   },
 }
@@ -106,6 +106,8 @@ class Materials {
 
     this.ghostWire = this.wire.clone()
     this.ghostWire.linewidth = 1.5
+    this.ghostWire.opacity = 0.15
+    this.ghostWire.depthWrite = false
 
     this.hiddenLine = this.wire.clone()
     this.hiddenLine.linewidth = 1.5
@@ -380,8 +382,8 @@ class Materials {
     this.vertexPoint.color.set(colors.vertex)
     this.ui.color.set(colors.ui)
     this.uiPoint.color.set(colors.ui)
-    this.ghostWire.color.set(colors.ghostWire)
     this.ghostSurface.color.set(colors.ghost)
+    this.fluidSurface.color.set(colors.fluid)
     this.plane.color.set(colors.plane)
     this.planeOutline.color.set(colors.plane)
   }

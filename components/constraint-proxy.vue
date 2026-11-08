@@ -19,7 +19,7 @@
     v-else-if="dimension"
     :class="{ selected, preview: preview || drawingToolActive }"
     :style="{ top: projectedProxies[0].coords.y + 'px', left: projectedProxies[0].coords.x + 'px' }"
-    @click.stop="select"
+    @click.stop
     @dblclick="constraint.active = true"
     @keydown.enter.stop.prevent
   )
@@ -315,7 +315,6 @@
   function select() {
     props.document.selection.handle(props.constraint, bus.isCtrlPressed)
   }
-
   function clearHighlight() {
     if(highlight.value == props.constraint) highlight.value = null
   }

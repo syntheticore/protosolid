@@ -641,6 +641,8 @@ export class ManipulationTool extends HighlightTool {
       this.selectionClickPending = true
       return
     }
+    const dimension = this.viewport.activeDimension
+    if(dimension) return this.viewport.document.selection.handle(dimension, this.viewport.bus.isCtrlPressed)
     return this.selectAt(coords, this.viewport.bus.isCtrlPressed)
   }
 

@@ -1,0 +1,677 @@
+{
+  "lastId": "0n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 6,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-546",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-547",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-548",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [404,270,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [843.2,698.8,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-549",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [843.2,698.8,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [829.9269,712.395,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-550",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [829.9269,712.395,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [390.7269,283.595,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-551",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [390.7269,283.595,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [404,270,0]
+                }
+              ]
+            }
+          ],
+          "constraints": [
+            {
+              "$class": "CoincidentConstraint",
+              "id": "id-552",
+              "items": [
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-547",
+                    "isProjection": false,
+                    "itemId": "id-548",
+                    "outputIndex": 0
+                  },
+                  "index": 1
+                },
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-547",
+                    "isProjection": false,
+                    "itemId": "id-549",
+                    "outputIndex": 0
+                  },
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "$class": "CoincidentConstraint",
+              "id": "id-553",
+              "items": [
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-547",
+                    "isProjection": false,
+                    "itemId": "id-549",
+                    "outputIndex": 0
+                  },
+                  "index": 1
+                },
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-547",
+                    "isProjection": false,
+                    "itemId": "id-550",
+                    "outputIndex": 0
+                  },
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "$class": "CoincidentConstraint",
+              "id": "id-554",
+              "items": [
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-547",
+                    "isProjection": false,
+                    "itemId": "id-550",
+                    "outputIndex": 0
+                  },
+                  "index": 1
+                },
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-547",
+                    "isProjection": false,
+                    "itemId": "id-551",
+                    "outputIndex": 0
+                  },
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "$class": "CoincidentConstraint",
+              "id": "id-555",
+              "items": [
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-547",
+                    "isProjection": false,
+                    "itemId": "id-551",
+                    "outputIndex": 0
+                  },
+                  "index": 1
+                },
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-547",
+                    "isProjection": false,
+                    "itemId": "id-548",
+                    "outputIndex": 0
+                  },
+                  "index": 0
+                }
+              ]
+            }
+          ],
+          "projections": []
+        }
+      },
+      {
+        "$class": "RevolveFeature",
+        "id": "id-565",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "angle",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-574",
+              "sketchId": "id-547",
+              "rings": [
+                ["id-551","id-548","id-549","id-550"]
+              ]
+            }
+          ],
+          "axis": {
+            "$class": "AxialReference",
+            "item": {
+              "$class": "CurveReference",
+              "componentId": "id-0",
+              "sketchId": "id-547",
+              "isProjection": false,
+              "itemId": "id-548",
+              "outputIndex": 0
+            }
+          },
+          "angle": 360,
+          "offset": 0,
+          "fromFace": null,
+          "limitFace": null,
+          "side": true,
+          "operation": "create"
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "topologyDescriptions": {
+          "id-565/topology/3e60d3c23b7c": ["face","profile-side/turn-start",["id-550"],"id-565"],
+          "id-565/topology/cf90f237be2d": ["face","profile-side/turn-end",["id-550"],"id-565"],
+          "id-565/topology/5b280a58afe5": ["face","profile-side",["id-550"],"id-565"],
+          "id-565/topology/bc43b73d5352": ["face","profile-side/turn-start",["id-549"],"id-565"],
+          "id-565/topology/f2befe37befa": ["face","profile-side/turn-end",["id-549"],"id-565"],
+          "id-565/topology/8bf5f3b3ca1d": ["face","profile-side",["id-549"],"id-565"],
+          "id-565/topology/51e5056848da": ["face","profile-side/turn-start",["id-551"],"id-565"],
+          "id-565/topology/011166aa84ce": ["face","profile-side/turn-end",["id-551"],"id-565"],
+          "id-565/topology/ed34cf860e61": ["face","profile-side",["id-551"],"id-565"],
+          "id-565/topology/038b34561939": ["edge","profile/boundary",["id-565/topology/5b280a58afe5"],"id-565"],
+          "id-565/topology/771cccde79f9": ["edge","profile/boundary",["id-565/topology/5b280a58afe5","id-565/topology/ed34cf860e61"],"id-565"],
+          "id-565/topology/1abd18cb12aa": ["edge","profile/boundary",["id-565/topology/ed34cf860e61"],"id-565"],
+          "id-565/topology/39983be3fae1": ["edge","profile/boundary",["id-565/topology/3e60d3c23b7c","id-565/topology/51e5056848da"],"id-565"],
+          "id-565/topology/2e9bea7250c4": ["edge","profile/boundary",["id-565/topology/3e60d3c23b7c"],"id-565"],
+          "id-565/topology/4665a3d2084f": ["edge","profile/boundary",["id-565/topology/51e5056848da"],"id-565"],
+          "id-565/topology/24f518d7fbec": ["edge","profile/boundary",["id-565/topology/011166aa84ce","id-565/topology/cf90f237be2d"],"id-565"],
+          "id-565/topology/1aae5983a980": ["edge","profile/boundary",["id-565/topology/cf90f237be2d"],"id-565"],
+          "id-565/topology/ff89920133cb": ["edge","profile/boundary",["id-565/topology/011166aa84ce"],"id-565"],
+          "id-565/topology/768ef1d2bf3a": ["edge","profile/boundary",["id-565/topology/5b280a58afe5","id-565/topology/8bf5f3b3ca1d"],"id-565"],
+          "id-565/topology/7796cbdf1e3f": ["edge","profile/boundary",["id-565/topology/8bf5f3b3ca1d"],"id-565"],
+          "id-565/topology/a6f11c6a3f49": ["edge","profile/boundary",["id-565/topology/3e60d3c23b7c","id-565/topology/bc43b73d5352"],"id-565"],
+          "id-565/topology/5c4822a77d79": ["edge","profile/boundary",["id-565/topology/bc43b73d5352"],"id-565"],
+          "id-565/topology/e665abc2f536": ["edge","profile/boundary",["id-565/topology/cf90f237be2d","id-565/topology/f2befe37befa"],"id-565"],
+          "id-565/topology/d1a4323a50b7": ["edge","profile/boundary",["id-565/topology/f2befe37befa"],"id-565"],
+          "id-565/topology/6a08e15e841a": ["vertex","profile/boundary",["id-565/topology/038b34561939","id-565/topology/7796cbdf1e3f"],"id-565"],
+          "id-565/topology/1dc28f54c05b": ["vertex","profile/boundary",["id-565/topology/038b34561939"],"id-565"],
+          "id-565/topology/e8251c101049": ["vertex","profile/boundary",["id-565/topology/7796cbdf1e3f"],"id-565"],
+          "id-565/topology/c5c88175411b": ["vertex","profile/boundary",["id-565/topology/038b34561939","id-565/topology/1abd18cb12aa"],"id-565"],
+          "id-565/topology/e0b28fcb158d": ["vertex","profile/boundary",["id-565/topology/1abd18cb12aa"],"id-565"],
+          "id-565/topology/cbc20b1c8667": ["body","profile/body",["id-548","id-549","id-550","id-551"],"id-565"],
+          "id-565/topology/25d336921492": ["body","profile/body",["id-551"],"id-565"],
+          "id-565/topology/5b48b1c9b82d": ["body","profile/body",["id-548"],"id-565"],
+          "id-565/topology/6e77efaea51f": ["body","profile/body",["id-549"],"id-565"],
+          "id-565/topology/8cb95cede6d9": ["body","profile/body",["id-550"],"id-565"]
+        }
+      },
+      {
+        "$class": "PlaneFeature",
+        "id": "id-604",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "mode": "offset",
+          "axis": null,
+          "path": null,
+          "base": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          },
+          "base2": null,
+          "point": null,
+          "point2": null,
+          "point3": null,
+          "angle": 0,
+          "position": 0,
+          "offset": 58.6569,
+          "rotationX": 1.0688,
+          "rotationY": 6.1065,
+          "rotationTransform": {
+            "$class": "Matrix4",
+            "elements": [0.994325882458134,0.00198424754685163,-0.10635836702171517,0,0,0.9998260177126923,0.01865299720632032,0,0.1063768747136945,-0.01854715790766356,0.9941528873667748,0,0,0,0,1]
+          },
+          "rotationAppliedX": 1.0688,
+          "rotationAppliedY": 6.1065
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "planeId": "id-605"
+      },
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-606",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-605"
+            }
+          }
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-607",
+          "elements": [
+            {
+              "$class": "Line",
+              "id": "id-608",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [0.0051,340.0506,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [392.2213,271.2601,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-609",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [392.2213,271.2601,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [393.4306,278.1549,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-610",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [393.4306,278.1549,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [1.5599,348.9153,0]
+                }
+              ]
+            },
+            {
+              "$class": "Line",
+              "id": "id-611",
+              "points": [
+                {
+                  "$class": "Vector3",
+                  "elements": [1.5599,348.9153,0]
+                },
+                {
+                  "$class": "Vector3",
+                  "elements": [0.0051,340.0506,0]
+                }
+              ]
+            }
+          ],
+          "constraints": [
+            {
+              "$class": "CoincidentConstraint",
+              "id": "id-612",
+              "items": [
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-607",
+                    "isProjection": false,
+                    "itemId": "id-608",
+                    "outputIndex": 0
+                  },
+                  "index": 1
+                },
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-607",
+                    "isProjection": false,
+                    "itemId": "id-609",
+                    "outputIndex": 0
+                  },
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "$class": "CoincidentConstraint",
+              "id": "id-613",
+              "items": [
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-607",
+                    "isProjection": false,
+                    "itemId": "id-609",
+                    "outputIndex": 0
+                  },
+                  "index": 1
+                },
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-607",
+                    "isProjection": false,
+                    "itemId": "id-610",
+                    "outputIndex": 0
+                  },
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "$class": "CoincidentConstraint",
+              "id": "id-614",
+              "items": [
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-607",
+                    "isProjection": false,
+                    "itemId": "id-610",
+                    "outputIndex": 0
+                  },
+                  "index": 1
+                },
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-607",
+                    "isProjection": false,
+                    "itemId": "id-611",
+                    "outputIndex": 0
+                  },
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "$class": "CoincidentConstraint",
+              "id": "id-615",
+              "items": [
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-607",
+                    "isProjection": false,
+                    "itemId": "id-611",
+                    "outputIndex": 0
+                  },
+                  "index": 1
+                },
+                {
+                  "$class": "ElemRef",
+                  "curveRef": {
+                    "$class": "CurveReference",
+                    "componentId": "id-0",
+                    "sketchId": "id-607",
+                    "isProjection": false,
+                    "itemId": "id-608",
+                    "outputIndex": 0
+                  },
+                  "index": 0
+                }
+              ]
+            }
+          ],
+          "projections": []
+        }
+      },
+      {
+        "$class": "RevolveFeature",
+        "id": "id-625",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "angle",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-634",
+              "sketchId": "id-607",
+              "rings": [
+                ["id-611","id-608","id-609","id-610"]
+              ]
+            }
+          ],
+          "axis": {
+            "$class": "AxialReference",
+            "item": {
+              "$class": "CurveReference",
+              "componentId": "id-0",
+              "sketchId": "id-607",
+              "isProjection": false,
+              "itemId": "id-608",
+              "outputIndex": 0
+            }
+          },
+          "angle": 360,
+          "offset": 0,
+          "fromFace": null,
+          "limitFace": null,
+          "side": true,
+          "operation": "join"
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "topologyDescriptions": {
+          "id-625/topology/c9bd0b88b505": ["face","profile-side/turn-start",["id-610"],"id-625"],
+          "id-625/topology/5970ab29d39a": ["face","profile-side/turn-end",["id-610"],"id-625"],
+          "id-625/topology/ecce4d55d2f4": ["face","profile-side",["id-610"],"id-625"],
+          "id-625/topology/5382e40a1d7b": ["face","profile-side/turn-start",["id-609"],"id-625"],
+          "id-625/topology/2a9212d82b0d": ["face","profile-side/turn-end",["id-609"],"id-625"],
+          "id-625/topology/dc70c473bbfe": ["face","profile-side",["id-609"],"id-625"],
+          "id-625/topology/1382fe0615b6": ["face","profile-side/turn-start",["id-611"],"id-625"],
+          "id-625/topology/9923ddedc8c9": ["face","profile-side/turn-end",["id-611"],"id-625"],
+          "id-625/topology/99e4bad69173": ["face","profile-side",["id-611"],"id-625"],
+          "id-625/topology/9048b9abee1d": ["edge","profile/boundary",["id-625/topology/ecce4d55d2f4"],"id-625"],
+          "id-625/topology/bb960e52b4b0": ["edge","profile/boundary",["id-625/topology/99e4bad69173","id-625/topology/ecce4d55d2f4"],"id-625"],
+          "id-625/topology/9a6e02821617": ["edge","profile/boundary",["id-625/topology/99e4bad69173"],"id-625"],
+          "id-625/topology/6c49548606ec": ["edge","profile/boundary",["id-625/topology/1382fe0615b6","id-625/topology/c9bd0b88b505"],"id-625"],
+          "id-625/topology/c3614e3de6ea": ["edge","profile/boundary",["id-625/topology/c9bd0b88b505"],"id-625"],
+          "id-625/topology/2b73efdba54b": ["edge","profile/boundary",["id-625/topology/1382fe0615b6"],"id-625"],
+          "id-625/topology/b91ad7412d71": ["edge","profile/boundary",["id-625/topology/5970ab29d39a","id-625/topology/9923ddedc8c9"],"id-625"],
+          "id-625/topology/136b703db4c0": ["edge","profile/boundary",["id-625/topology/5970ab29d39a"],"id-625"],
+          "id-625/topology/270eac4c6b20": ["edge","profile/boundary",["id-625/topology/9923ddedc8c9"],"id-625"],
+          "id-625/topology/5eac16d57e20": ["edge","profile/boundary",["id-625/topology/dc70c473bbfe","id-625/topology/ecce4d55d2f4"],"id-625"],
+          "id-625/topology/0764b0afda56": ["edge","profile/boundary",["id-625/topology/dc70c473bbfe"],"id-625"],
+          "id-625/topology/379e68b5f944": ["edge","profile/boundary",["id-625/topology/5382e40a1d7b","id-625/topology/c9bd0b88b505"],"id-625"],
+          "id-625/topology/8748d8281e36": ["edge","profile/boundary",["id-625/topology/5382e40a1d7b"],"id-625"],
+          "id-625/topology/4dd245af12e4": ["edge","profile/boundary",["id-625/topology/2a9212d82b0d","id-625/topology/5970ab29d39a"],"id-625"],
+          "id-625/topology/7293ce02f6ac": ["edge","profile/boundary",["id-625/topology/2a9212d82b0d"],"id-625"],
+          "id-625/topology/c444a260bc0b": ["vertex","profile/boundary",["id-625/topology/0764b0afda56","id-625/topology/9048b9abee1d"],"id-625"],
+          "id-625/topology/c2c1a773a504": ["vertex","profile/boundary",["id-625/topology/9048b9abee1d"],"id-625"],
+          "id-625/topology/6d030e21e450": ["vertex","profile/boundary",["id-625/topology/0764b0afda56"],"id-625"],
+          "id-625/topology/8c98cc5d189f": ["vertex","profile/boundary",["id-625/topology/9048b9abee1d","id-625/topology/9a6e02821617"],"id-625"],
+          "id-625/topology/2e2059787ede": ["vertex","profile/boundary",["id-625/topology/9a6e02821617"],"id-625"],
+          "id-625/topology/f0675308aa66": ["body","profile/body",["id-608","id-609","id-610","id-611"],"id-625"],
+          "id-625/topology/5084802d8aa0": ["body","profile/body",["id-611"],"id-625"],
+          "id-625/topology/d95a703f35f9": ["body","profile/body",["id-608"],"id-625"],
+          "id-625/topology/2087a5bed1a9": ["body","profile/body",["id-609"],"id-625"],
+          "id-625/topology/3fe9fbaf9a0e": ["body","profile/body",["id-610"],"id-625"]
+        }
+      },
+      {
+        "$class": "MirrorFeature",
+        "id": "id-688",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "inputs": [
+            {
+              "$class": "PatternInputReference",
+              "featureId": "id-625"
+            }
+          ],
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          },
+          "operation": "create"
+        },
+        "expressions": {},
+        "measures": {},
+        "topologyNames": {
+          "version": 2
+        }
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "joined chainstay revolve feature mirror",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "flatPatterns": [],
+      "simulations": [],
+      "camSetups": [],
+      "drawings": [],
+      "canvases": [],
+      "itemsHidden": {},
+      "itemNames": {},
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [900,900,900]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [420,520,0]
+      }
+    }
+  ]
+}

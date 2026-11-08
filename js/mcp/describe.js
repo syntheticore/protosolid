@@ -215,6 +215,69 @@ function describeHelper(component, helper) {
   }
 }
 
+export function describeMaterial(material) {
+  const { title, ...properties } = material.dump()
+  return { title, ...Object.fromEntries(Object.entries(properties).map(([key, value]) => [key, typeof value == 'number' ? round(value) : value])) }
+}
+
+export function describeVariant(component) {
+  const variant = component.creator.variant
+  return variant && {
+    activeOption: variant.options[variant.activeOption]?.title,
+    options: variant.options.map(option => ({
+      title: option.title,
+      values: Object.fromEntries(component.creator.parameters
+        .filter(parameter => option.values[parameter.id] !== undefined)
+        .map(parameter => [parameter.name, option.values[parameter.id]])),
+    })),
+  }
+}
+
+// Simulations, drawings, CAM setups, sections and canvases of a component
+export function describeStored(kind, item) {
+  const id = `${kind}:${item.id}`
+  switch(kind) {
+    case 'simulation': return { id, title: item.title, type: item.mode }
+    case 'drawing': return { id, title: item.title, sheet: item.sheet, scale: item.scale }
+    case 'cam': return { id, title: item.title, operations: item.operations.map(operation => operation.type) }
+    case 'section': {
+      const transform = item.getTransform()
+      return {
+        id,
+        point: vector(new THREE.Vector3().setFromMatrixPosition(transform)),
+        normal: vector(new THREE.Vector3().setFromMatrixColumn(transform, 2)),
+        flipped: item.side,
+        ...(item.hidden && { hidden: true }),
+      }
+    }
+    case 'canvas': return {
+      id,
+      file: item.src,
+      ...(item.width && { pixels: [item.width, item.height] }),
+      plane: item.plane,
+      scale: item.scale,
+      x: item.x,
+      y: item.y,
+      transparency: item.transparency,
+      ...(item.hidden && { hidden: true }),
+    }
+  }
+}
+
+function describeStoredItems(component) {
+  const creator = component.creator
+  const lists = {
+    simulations: ['simulation', creator.simulations],
+    drawings: ['drawing', creator.drawings],
+    camSetups: ['cam', creator.camSetups],
+    sections: ['section', creator.sectionViews],
+    canvases: ['canvas', creator.canvases],
+  }
+  return Object.fromEntries(Object.entries(lists)
+    .filter(([, [, items]]) => items?.length)
+    .map(([key, [kind, items]]) => [key, items.map(item => describeStored(kind, item))]))
+}
+
 function sketchTitle(component, sketch) {
   return component.itemTitle(sketch.id, sketch.creator?.title || 'Sketch')
 }
@@ -240,7 +303,10 @@ export function describeComponent(doc, component, { recursive = true, details = 
       })),
       constructionGeometry: component.helpers.map(helper => describeHelper(component, helper)),
       parameters: component.creator.parameters.map(({ name, value }) => ({ name, value })),
-      ...(component.creator.material && { material: component.creator.material.name || component.creator.material.title }),
+      ...(component.creator.variant && { variant: describeVariant(component) }),
+      ...(component.creator.material && { material: component.creator.material.title }),
+      color: '#' + new THREE.Color(component.creator.color).getHexString(),
+      ...describeStoredItems(component),
     }),
     ...(recursive && {
       children: component.children.map(child => describeComponent(doc, child, { recursive, details })),
@@ -432,6 +498,9 @@ export function describeDocument(doc) {
     units: { length: 'mm', angle: 'deg' },
     marker: doc.timeline.marker,
     activeComponent: itemId(doc.activeComponent),
+    ...(doc.repository && { versioned: true }),
+    materials: doc.materials.map(material => material.title),
+    savedViews: doc.views.map(view => view.title),
     components: describeComponent(doc, doc.top()),
     timeline: describeTimeline(doc),
   }

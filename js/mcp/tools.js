@@ -4,8 +4,15 @@ import Expression from '../core/expression.js'
 import { ConstructionHelper } from '../core/helpers.js'
 import { lastId, setLastId } from '../core/id.js'
 import { inputReference } from '../core/references.js'
+import { decodeFile } from '../core/document-format.js'
+import { loadFile } from '../utils.js'
 import { featureTypes, featureName } from './catalog.js'
-import { editSketch, operationTypes, constraintTypeNames } from './sketch-ops.js'
+import { editSketch, prepareSketchOperations, operationTypes, constraintTypeNames } from './sketch-ops.js'
+import { settle, editable, closeEditing, activateComponent, beforeMarker, failingFeatures } from './common.js'
+import { propertyTools } from './properties.js'
+import { analysisTools } from './analysis.js'
+import { outputTools } from './output.js'
+import { historyTools } from './history.js'
 import {
   ToolError,
   itemId,
@@ -41,34 +48,6 @@ const pickerTypes = {
   componentRef: 'component (component:…)',
   patternInput: 'feature, body or component',
   joint: 'joint (joint:…)',
-}
-
-function settle(doc) {
-  return nextTick().then(() => doc.regenerationQueue.catch(() => {}))
-}
-
-function editable(doc) {
-  if(doc.activeMerge) throw new ToolError('The document is showing a merge preview, which cannot be edited. Ask the user to finish the merge.')
-}
-
-// Closes feature boxes and sketches the user has open, keeping sketch edits
-async function closeEditing(doc) {
-  await doc.cancelFeature()
-  await settle(doc)
-}
-
-function activateComponent(doc, id) {
-  if(!id) return
-  const component = findComponent(doc, id)
-  if(component.readOnly) throw new ToolError(`Component ${id} is read-only`)
-  doc.activateComponent(doc.getComponent(component.sourceId()) || component)
-}
-
-// Features after the marker are not evaluated, so changes could not be checked
-function beforeMarker(doc, feature) {
-  if(doc.timeline.features.indexOf(toRaw(feature)) >= doc.timeline.marker) {
-    throw new ToolError(`${itemId(feature)} is after the timeline marker. Use move_marker to move the marker behind it first.`)
-  }
 }
 
 function setValue(feature, key, value, component) {
@@ -214,8 +193,6 @@ async function updateFeature(doc, feature, change) {
   return warning
 }
 
-const failingFeatures = (doc, except) => describeTimeline(doc).filter(feature => feature.error && feature.id != except)
-
 function featureResult(doc, feature, warning) {
   const tree = doc.top()
   // Bodies are named after the feature that created them
@@ -251,7 +228,7 @@ function appliedResult(doc, feature, warning) {
 // Sketch edits regenerate the sketch feature and everything after it
 async function updateSketch(doc, sketch, operations) {
   beforeMarker(doc, sketch.creator)
-  const result = editSketch(doc, sketch, operations)
+  const result = editSketch(doc, sketch, await prepareSketchOperations(operations))
   doc.timeline.invalidateFeature(toRaw(sketch.creator))
   doc.markChanged()
   await doc.regenerate()
@@ -291,6 +268,11 @@ const sketchOperations = {
     'and "construction": true for construction geometry. Ops: ' +
     'point {at}; line {from, to}; polyline {points, closed}; rectangle {from, to} or {center, width, height}; circle {center, radius}; ' +
     'arc {center, radius, startAngle, endAngle} counterclockwise in degrees, or {start, through, end}; spline {points}; ' +
+    'text {at, content, size?, fontFamily?, fontStyle?, explode?} with the baseline starting at "at", size in mm, a system font, ' +
+    'and explode to turn it into editable curves; ' +
+    'fillet {items, radius} rounding the corner of two curves, or of one corner point {element, point}, with a dimensioned tangent arc; ' +
+    'offset {items, through, distance?} offsetting one curve with the chain it connects to, or a profile, towards the point "through", ' +
+    'optionally at an exact distance, kept parallel by an offset constraint; ' +
     `constraint {type, items} with type ${constraintTypeNames.join(', ')}; ` +
     'dimension {items, value, orientation?, position?} with a value in mm/degrees or an expression, orientation horizontal or vertical for point distances; ' +
     'delete {items} for elements and constraints; construction {items, construction}; ' +
@@ -323,6 +305,12 @@ const sketchOperations = {
       value: { type: ['number', 'string'] },
       orientation: { type: 'string', enum: ['horizontal', 'vertical'] },
       intersect: { type: 'boolean' },
+      content: { type: 'string' },
+      size: { type: 'number' },
+      fontFamily: { type: 'string' },
+      fontStyle: { type: 'string' },
+      explode: { type: 'boolean' },
+      distance: { type: 'number' },
     },
     required: ['op'],
   },
@@ -403,20 +391,22 @@ export const tools = [
     name: 'capture_view',
     title: 'Capture view',
     readOnly: true,
-    description: 'Screenshot of the 3D viewport as the user sees it, optionally from a standard view fitted to the model.',
+    description: 'Screenshot of the 3D viewport as the user sees it, optionally from a standard view fitted to the model, or from a saved view.',
     inputSchema: {
       type: 'object',
       properties: {
-        view: { type: 'string', enum: ['current', 'home', 'top', 'front', 'side'], description: 'Camera direction, defaults to current' },
+        view: { type: 'string', description: 'current (the default), home, top, front, side, or the title of a saved view' },
         width: { type: 'integer', description: 'Maximum image width in pixels, defaults to 1024' },
       },
     },
     run: async ({ view = 'current', width = 1024 }, { app, doc }) => {
       const renderer = window.alcRenderer
       if(view != 'current') {
-        await doc.activateView(doc.views.find(saved => saved.system && saved.title.toLowerCase() == view))
+        const saved = doc.views.find(saved => saved.title.toLowerCase() == view.toLowerCase())
+        if(!saved) throw new ToolError(`No view '${view}'. Views are current, ${doc.views.map(saved => saved.title).join(', ')}.`)
+        await doc.activateView(saved)
         await nextTick()
-        app.bus.emit('zoom-all')
+        if(saved.system || saved.zoomToFit) app.bus.emit('zoom-all')
         while(renderer.isAnimating || renderer.cameraTarget || renderer.viewControlsTarget) {
           await new Promise(resolve => setTimeout(resolve, 20))
         }
@@ -587,24 +577,65 @@ export const tools = [
   {
     name: 'create_component',
     title: 'Create component',
-    description: 'Adds an empty component as a child of the given or the active component. ' +
-      'The new component becomes active, so following features go into it. Use activate_component to switch back.',
+    description: 'Adds a component as a child of the given or the active component. Without further options it is empty ' +
+      'and becomes active, so following features go into it. Use activate_component to switch back. ' +
+      'With instanceOf it adds another instance of a component next to it, which shares its definition and geometry. ' +
+      'With fromBody it turns a body into a child component of the body\'s component. ' +
+      'With file it places a .cad or STEP file as a linked component into the parent. Move components into place with pose_component.',
     inputSchema: {
       type: 'object',
       properties: {
         parent: { type: 'string' },
         name: { type: 'string' },
+        instanceOf: { type: 'string', description: 'Component to instantiate' },
+        fromBody: { type: 'string', description: 'Body to convert, like body:id-0:12' },
+        file: { type: 'string', description: 'Absolute path of a .cad, .step or .stp file to place. Placed files are read only and keep their own names.' },
       },
     },
-    run: async ({ parent, name }, { doc }) => {
+    run: async ({ parent, name, instanceOf, fromBody, file }, { doc }) => {
       editable(doc)
       const parentComponent = findComponent(doc, parent)
       if(parentComponent.readOnly) throw new ToolError('The parent component is read-only')
       await closeEditing(doc)
-      await doc.createComponent(parentComponent)
-      await settle(doc)
-      if(name) doc.renameComponent(doc.activeComponent, name)
-      return describeComponent(doc, doc.activeComponent, { recursive: false })
+      let component
+      if(file && name) throw new ToolError('Placed files are read only and keep their own names')
+      if(instanceOf || fromBody || file) {
+        const previous = doc.activeComponent
+        if(instanceOf) {
+          const source = findComponent(doc, instanceOf)
+          if(!source.parent || source.readOnly) throw new ToolError('Only editable child components can be instantiated')
+          await doc.createComponentInstance(source)
+        } else if(fromBody) {
+          const body = resolveItem(doc, fromBody)
+          if(body.typename() != 'Solid') throw new ToolError(`${fromBody} is no body`)
+          await doc.convertBodyToComponent(doc.top().findChild(body.compound.componentId), body)
+        } else {
+          doc.activateComponent(parentComponent)
+          const loaded = await loadFile('', 'binary', file)
+          loaded.data = await decodeFile(loaded.data)
+          try {
+            await doc.placeFile(loaded)
+          } finally {
+            doc.reactivateActiveComponent(previous)
+          }
+        }
+        await settle(doc)
+        const feature = doc.timeline.features[doc.timeline.marker - 1]
+        const failure = feature.error?.type == 'error' && feature.error.msg
+        if(failure) {
+          await doc.removeFeature(feature)
+          await settle(doc)
+          throw new ToolError(`The component could not be created: ${failure}`)
+        }
+        // Placed files nest their components under the feature id
+        component = doc.top().getChildren().find(child => child.id == feature.id || child.id.startsWith(`${feature.id}/`))
+      } else {
+        await doc.createComponent(parentComponent)
+        await settle(doc)
+        component = doc.activeComponent
+      }
+      if(name) doc.renameComponent(component, name)
+      return describeComponent(doc, component, { recursive: false })
     },
   },
   {
@@ -735,4 +766,8 @@ export const tools = [
       }
     },
   },
+  ...propertyTools,
+  ...analysisTools,
+  ...outputTools,
+  ...historyTools,
 ]

@@ -12,7 +12,7 @@ const ARROW = 3
 const GAP = 1
 const OVERSHOOT = 2
 
-const gdtCharacteristics = [
+export const gdtCharacteristics = [
   { value: 'straightness', label: 'Straightness' },
   { value: 'flatness', label: 'Flatness' },
   { value: 'circularity', label: 'Circularity' },
@@ -29,7 +29,7 @@ const gdtCharacteristics = [
   { value: 'totalRunout', label: 'Total Runout' },
 ]
 
-const weldTypes = [
+export const weldTypes = [
   { value: 'fillet', label: 'Fillet' },
   { value: 'square', label: 'Square Butt' },
   { value: 'v', label: 'V Butt' },

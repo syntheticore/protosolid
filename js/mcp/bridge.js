@@ -51,6 +51,8 @@ async function callTool({ name, arguments: args }, app) {
     return textResult(result)
   } catch(error) {
     if(error instanceof ToolError) return { ...textResult(error.message), isError: true }
+    // File dialogs reject with this string when the user closes them
+    if(error == 'canceled') return { ...textResult('The user canceled the file dialog, nothing was written or loaded'), isError: true }
     console.error(error)
     const message = tool.readOnly ? `Internal error: ${error.message}` :
       `Internal error: ${error.message}. The document may have been changed partly, use get_document to check its state before retrying.`

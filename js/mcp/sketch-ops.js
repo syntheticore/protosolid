@@ -20,8 +20,14 @@ import {
   MidpointConstraint,
   TouchConstraint,
   IntersectionConstraint,
+  OffsetConstraint,
+  ProfileOffsetConstraint,
   Dimension,
 } from '../core/sketch.js'
+import { Profile } from '../core/geom3d.js'
+import { supportsFillet, curveFillet, trimToPoint } from '../core/sketch-fillet.js'
+import { supportsOffset, connectedOffsetChain, profileOffsetGroups, nearestOffsetFrame, buildOffsetCurves } from '../core/sketch-offset.js'
+import { listSystemFonts, findFont, preferredFont, loadSystemFont, textPieces } from '../core/sketch-text.js'
 import Expression from '../core/expression.js'
 import { ToolError, resolveItem } from './describe.js'
 
@@ -280,6 +286,93 @@ class SketchEdit {
     })
   }
 
+  // Rounds the corner between two curves, given as both curves or as their shared end point
+  fillet({ items, radius, name }) {
+    radius = positive(radius, 'radius')
+    if(!Array.isArray(items) || !items.length || items.length > 2) throw new ToolError('A fillet takes two curves or one corner point')
+    let curves = items.map(item => this.item(item))
+    if(curves.length == 1) {
+      const ref = curves[0]
+      if(!(ref instanceof ElemRef) || ref.index === undefined) throw new ToolError('A single fillet item must be a corner point like { element, point: "end" }')
+      const curve = ref.curve()
+      const corner = curve.handles()[ref.index]
+      if(!curve.endpoints().some(end => end.almost(corner))) throw new ToolError('The fillet point must be the end of a curve')
+      const neighbors = this.sketch.elements.filter(other => supportsFillet(other) && other != curve && !other.projection &&
+        other.isReference == curve.isReference && other.endpoints().some(end => end.almost(corner)))
+      if(neighbors.length != 1) throw new ToolError('The corner must join exactly two curves')
+      curves = [curve, neighbors[0]]
+    }
+    if(curves.some(curve => curve instanceof ElemRef || !supportsFillet(curve) || curve.projection)) {
+      throw new ToolError('Fillets round lines, arcs and splines of the sketch')
+    }
+    if(curves[0] == curves[1]) throw new ToolError('Select a different curve for the fillet')
+    if(curves[0].isReference != curves[1].isReference) throw new ToolError('Both curves must have the same construction status')
+    const fillet = curveFillet(...curves, radius)
+    const arc = this.add(new Arc(fillet.center, radius, fillet.start, fillet.sweep), name, curves[0].isReference)
+    // As the fillet tool trims the curves to the arc
+    curves.forEach((curve, i) => {
+      const { curve: replacement, index } = trimToPoint(curve, fillet.ends[i], fillet.parameters[i], fillet.points[i])
+      replacement.isReference = curve.isReference
+      this.sketch.replaceElement(curve, [replacement])
+      this.sketch.addConstraint(new CoincidentConstraint(new ElemRef(replacement, index), new ElemRef(arc, i + 1)))
+      this.sketch.addConstraint(new TangentConstraint(replacement instanceof Spline ? new ElemRef(replacement, index) : replacement, arc))
+    })
+    const direction = fillet.middle.clone().sub(fillet.center).normalize()
+    this.sketch.addConstraint(new Dimension([arc], fillet.middle.clone().addScaledVector(direction, 10), radius))
+  }
+
+  // Offsets a curve, the chain it connects to, or a profile towards a point, like the offset tool
+  offset({ items, through, distance, name }) {
+    if(!Array.isArray(items) || items.length != 1) throw new ToolError('An offset takes one curve or profile')
+    const position = point(through, 'through')
+    const source = String(items[0]).startsWith('profile:') ? resolveItem(this.doc, items[0], this.tree) : this.element(items[0])
+    if(!(source instanceof Profile) && !supportsOffset(source)) throw new ToolError('Offsets take lines, circles, arcs, splines and profiles')
+    const elements = [...this.sketch.elements, ...this.sketch.projectedElements()]
+    const groups = source instanceof Profile ? profileOffsetGroups(source, elements) : [connectedOffsetChain(source, elements)]
+    // The point picks the side, an explicit distance replaces its distance
+    const side = value => distance === undefined ? value : (Math.sign(value) || 1) * positive(distance, 'distance')
+    let constraint, curves
+    if(source instanceof Profile || source instanceof Spline || groups.flat().length > 1) {
+      const frame = nearestOffsetFrame(groups, position)
+      const offset = side(position.clone().sub(frame.point).dot(frame.normal))
+      curves = buildOffsetCurves(groups, offset)
+      curves.forEach(curve => this.add(curve, null, groups[0][0].curve.isReference))
+      constraint = new ProfileOffsetConstraint(groups, curves, position.clone(), offset)
+    } else {
+      let curve
+      if(source instanceof Line) {
+        const direction = source.direction().normalize()
+        const normal = new THREE.Vector3(-direction.y, direction.x, 0)
+        const offset = side(position.clone().sub(source.points[0]).dot(normal))
+        if(Math.abs(offset) < 1e-9) throw new ToolError('The offset must not be zero')
+        curve = new Line(...source.points.map(point => point.clone().addScaledVector(normal, offset)))
+      } else {
+        const radius = source.radius + side(position.distanceTo(source.center()) - source.radius)
+        if(!(radius > 1e-9) || Math.abs(radius - source.radius) < 1e-9) throw new ToolError('The offset must not be zero or collapse the curve')
+        curve = source instanceof Circle ? new Circle(source.center(), radius) :
+          Arc.fromPoints([0, 0.5, 1].map(u => source.sample(u).sub(source.center()).multiplyScalar(radius / source.radius).add(source.center())))
+      }
+      this.add(curve, null, source.isReference)
+      curves = [curve]
+      constraint = new OffsetConstraint([source, curve], position.clone())
+    }
+    this.sketch.addConstraint(constraint)
+    constraint.active = true
+    this.name(name, curves)
+  }
+
+  // Outlined text, its font loaded by prepareSketchOperations
+  text({ at, content, size = 10, explode, name, construction, font }) {
+    if(typeof content != 'string' || !content.trim()) throw new ToolError('Text needs content')
+    const elem = this.add(new SketchText(point(at, 'at'), content, positive(size, 'size'), font.pieces, font.family, font.style), name, construction)
+    this.snap(elem, [0])
+    if(explode) {
+      const curves = this.sketch.materializeText(elem)
+      this.created.splice(this.created.indexOf(elem), 1, ...curves)
+      this.name(name, curves)
+    }
+  }
+
   project({ items, intersect }) {
     items.forEach(id => {
       const projection = intersect ? new Intersection(resolveItem(this.doc, id, this.tree)) : new Projection(resolveItem(this.doc, id, this.tree))
@@ -309,7 +402,29 @@ function defaultDimensionPosition(items) {
   return center.add(new THREE.Vector3(0, 3, 0))
 }
 
-export const operationTypes = ['point', 'line', 'polyline', 'rectangle', 'circle', 'arc', 'spline', 'constraint', 'dimension', 'delete', 'construction', 'project']
+export const operationTypes = [
+  'point', 'line', 'polyline', 'rectangle', 'circle', 'arc', 'spline', 'text', 'fillet', 'offset',
+  'constraint', 'dimension', 'delete', 'construction', 'project',
+]
+
+// Text outlines come from system fonts, which load asynchronously
+export async function prepareSketchOperations(operations) {
+  if(!operations.some(operation => operation?.op == 'text')) return operations
+  const fonts = await listSystemFonts()
+  if(!fonts.length) throw new ToolError('No system fonts are available for text')
+  return Promise.all(operations.map(async operation => {
+    if(operation?.op != 'text') return operation
+    const data = operation.fontFamily ?
+      findFont(fonts, operation.fontFamily, operation.fontStyle || 'Regular') :
+      preferredFont(fonts)
+    if(!data) {
+      const families = [...new Set(fonts.map(font => font.family))]
+      throw new ToolError(`No font ${operation.fontFamily} ${operation.fontStyle || 'Regular'}. Families include ${families.slice(0, 40).join(', ')}.`)
+    }
+    const font = await loadSystemFont(data)
+    return { ...operation, font: { family: data.family, style: data.style, pieces: textPieces(font, String(operation.content ?? '')) } }
+  }))
+}
 
 // Applies all operations and solves the sketch. A failing operation or an
 // unsolvable result restores the sketch as it was, using a history of its own.

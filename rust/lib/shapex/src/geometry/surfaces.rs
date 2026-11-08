@@ -469,10 +469,13 @@ impl Cone3 {
         let delta = point - self.apex;
         let x = delta.dot(self.x_radius) / self.x_radius.magnitude2();
         let y = delta.dot(self.y_radius) / self.y_radius.magnitude2();
+        // The signed height covers both sheets. Choose the generator whose
+        // radial and axial components both point toward the query.
+        let sign = if delta.dot(self.axis) < 0.0 { -1.0 } else { 1.0 };
         let u = if x == 0.0 && y == 0.0 {
             0.0
         } else {
-            y.atan2(x).rem_euclid(std::f64::consts::TAU)
+            (sign * y).atan2(sign * x).rem_euclid(std::f64::consts::TAU)
         };
         let (sin, cos) = u.sin_cos();
         let generator = self.axis + self.x_radius * cos + self.y_radius * sin;

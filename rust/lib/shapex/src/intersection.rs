@@ -635,14 +635,29 @@ fn line_cone(
     let axial_direction = line.direction().dot(axis_unit);
     let radial_origin = delta - axis_unit * axial_origin;
     let radial_direction = line.direction() - axis_unit * axial_direction;
-    let slope_squared = slope * slope;
-    let roots = solve_quadratic(
-        radial_direction.magnitude2() - slope_squared * axial_direction * axial_direction,
-        2.0 * (radial_origin.dot(radial_direction)
-            - slope_squared * axial_origin * axial_direction),
-        radial_origin.magnitude2() - slope_squared * axial_origin * axial_origin,
+    let axial_direction = slope * axial_direction;
+    let a = radial_direction.magnitude2() - axial_direction.powi(2);
+    // With a flat cone the two sheets are close together. Center the
+    // quadratic at the line's crossing of the apex plane when the axial
+    // term dominates, so the discriminant resolves both roots.
+    let (radial_origin, axial_origin, offset) =
+        if a < 0.0 {
+            let offset = -(slope * axial_origin) / axial_direction;
+            (radial_origin + radial_direction * offset, 0.0, offset)
+        } else {
+            (radial_origin, slope * axial_origin, 0.0)
+        };
+    let mut roots = solve_quadratic(
+        a,
+        2.0 * (radial_origin.dot(radial_direction) - axial_origin * axial_direction),
+        radial_origin.magnitude2() - axial_origin.powi(2),
         tolerance.linear_at_scale(cone.reference_radius()),
     )?;
+    if let IntersectionSet::Isolated(roots) = &mut roots {
+        for (parameter, _) in roots {
+            *parameter += offset;
+        }
+    }
     curve_surface_roots(line, Surface3::Cone(cone), roots, tolerance)
 }
 
@@ -3278,10 +3293,15 @@ fn trace_surface_intersection_direction(
             tangent = tangent.map(|value| value * direction);
             initial_tangent = tangent;
         }
-        // Near a turn, the tangent plane can meet the intersection far beyond
-        // the predictor. Keep corrections local so the guide does not skip
-        // that turn and acquire a nearly singular parameterization.
+        // A long axial range must not set the step in an angular chart.
+        // Otherwise a predictor can skip across the turn of a branch.
         let mut local_step = step;
+        for (component, domain) in tangent.into_iter().zip(&domains) {
+            if let Some(period) = domain.period {
+                local_step = local_step.min(period / (48.0 * component.abs()));
+            }
+        }
+        // Adaptive guides also need local steps in their nonperiodic charts.
         if adaptive || matches!((first, second), (Surface3::Plane(_), Surface3::Torus(_)) | (Surface3::Torus(_), Surface3::Plane(_))) {
             for (index, range) in first_domains.iter().chain(&second_domains).enumerate() {
                 if tangent[index].abs() > tolerance.parameter {

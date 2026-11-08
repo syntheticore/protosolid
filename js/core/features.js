@@ -476,7 +476,16 @@ class RepeatingFeature extends SolidFeature {
     if(!kind) return true
     const current = this.inputs?.()[0]
     if(current && inputReferenceKind(current) != kind) return false
+    if(kind == 'Component') return this.isDescendantComponent(item)
     return kind != 'feature' || this.canReplay(item)
+  }
+
+  // Repeating the own component or one of its ancestors would contain itself.
+  isDescendantComponent(component) {
+    for(let parent = component.parent; parent; parent = parent.parent) {
+      if(parent.id == this.componentId) return true
+    }
+    return false
   }
 
   // Replaying a feature needs a solid modeling feature of the same component.

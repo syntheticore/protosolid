@@ -9,6 +9,7 @@ const {
   nativeTheme,
   dialog,
 } = require('electron')
+const { createMcpServer } = require('./mcp-server.js')
 
 const isMac = process.platform === 'darwin'
 
@@ -382,6 +383,12 @@ function createWindow() {
   mainWindow.on('closed', function() {
     // Dereference the window object
     mainWindow = null
+    mcpServer.rejectPending('The document window was closed')
+  })
+
+  // Requests in flight are never answered by a reloaded page
+  mainWindow.webContents.on('did-start-loading', () => {
+    mcpServer.rejectPending('The document window was reloaded')
   })
 
   mainWindow.on('enter-full-screen', function() {
@@ -510,6 +517,26 @@ ipcMain.on('preferences-updated', function(event, preferences) {
     }
   })
 })
+
+const mcpServer = createMcpServer({
+  getWebContents: () => mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null,
+  onStatus: status => BrowserWindow.getAllWindows().forEach(window => {
+    if(!window.isDestroyed()) window.webContents.send('mcp-status', status)
+  }),
+})
+
+// Sent by the document window on startup and whenever preferences change
+ipcMain.on('mcp-configure', function(event, config) {
+  mcpServer.configure(config)
+  // Agents drive the document while the window is in the background
+  event.sender.setBackgroundThrottling(!config.enabled)
+})
+
+ipcMain.on('mcp-response', function(event, id, response) {
+  mcpServer.receive(id, response)
+})
+
+ipcMain.handle('mcp-status', () => mcpServer.status())
 
 ipcMain.on('set-theme', function(event, theme) {
   if(['system', 'light', 'dark'].includes(theme)) {

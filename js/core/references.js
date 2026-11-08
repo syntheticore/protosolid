@@ -1,6 +1,21 @@
 import Serialize from './serialize.js'
 import { Wire, Profile } from './geom3d.js'
 
+// Reference of the kind a feature setting of the given type expects to a picked item
+export function inputReference(type, item) {
+  if(type == 'profile' || type == 'solid') return item.reference()
+  if(type == 'patternInput') return PatternInputReference.fromItem(item)
+  if(type == 'point') return item.pointReference()
+  if(type == 'componentRef') return item.componentReference()
+  if(type == 'face') return item.faceReference()
+  if(type == 'edge') return item.edgeReference()
+  if(type == 'plane') return item.planarReference()
+  if(type == 'axis') return item.axialReference()
+  if(type == 'path') return item.pathReference()
+  if(type == 'curve') return new CurveReference(item)
+  if(type == 'joint') return new JointReference(item)
+}
+
 export class Reference {
   constructor(item) {
     this.item = item

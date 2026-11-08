@@ -24,6 +24,8 @@ const preferences = {
   tessellationTolerance: '0.1mm',
   tessellationAngularTolerance: '0.1rad',
   sketchTessellationTolerance: '0.01mm',
+  mcpEnabled: false,
+  mcpPort: 3923,
 }
 
 export const defaultPreferences = Object.freeze({ ...preferences })

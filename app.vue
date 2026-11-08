@@ -88,6 +88,7 @@
   import { loadFile, loadFiles } from './js/utils.js'
   import Emitter from './js/emitter.js'
   import { ManipulationTool } from './js/tools.js'
+  import { startMcpBridge } from './js/mcp/bridge.js'
 
   loadPreferences()
   const isPreferencesWindow = new URLSearchParams(window.location.search).get('window') === 'preferences'
@@ -168,6 +169,8 @@
       window.ipc.on('importFile', importFile)
       window.ipc.on('exportFile', exportFile)
       window.ipc.on('closeFile', () => closeDocument(activeDocument.value) )
+
+      startMcpBridge({ bus, activeDocument: () => activeDocument.value })
 
       watch(() => activeDocument.value?.canSave ?? false, canSave => {
         window.ipc.send('set-save-enabled', canSave)

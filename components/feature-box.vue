@@ -323,7 +323,7 @@
   import { DummyTool, ManipulationTool } from './../js/tools.js'
   import { shallowEqual } from './../js/utils.js'
   import { CreateSketchFeature } from './../js/core/features.js'
-  import { CurveReference, JointReference, PatternInputReference, AxialReference } from './../js/core/references.js'
+  import { AxialReference, inputReference } from './../js/core/references.js'
   import { SketchElement } from './../js/core/geom2d.js'
   import { ProjectedPoint } from './../js/core/sketch.js'
   import { selectionType } from './../js/core/geom3d.js'
@@ -586,34 +586,7 @@
           this.updatePaths()
           return
         }
-        const setting = this.activeFeature.settings[key]
-        const type = setting.type
-        // Build reference of requested type from item
-        let itemRef
-        if(type == 'profile' || type == 'solid') {
-          itemRef = item.reference()
-        } else if(type == 'patternInput') {
-          itemRef = PatternInputReference.fromItem(item)
-        } else if(type == 'point') {
-          itemRef = item.pointReference()
-        } else if(type == 'componentRef') {
-          itemRef = item.componentReference()
-        } else if(type == 'face') {
-          itemRef = item.faceReference()
-        } else if(type == 'edge') {
-          itemRef = item.edgeReference()
-        } else if(type == 'plane') {
-          itemRef = item.planarReference()
-        } else if(type == 'axis') {
-          itemRef = item.axialReference()
-        } else if(type == 'path') {
-          itemRef = item.pathReference()
-        } else if(type == 'curve') {
-          itemRef = new CurveReference(item)
-        } else if(type == 'joint') {
-          itemRef = new JointReference(item)
-        }
-
+        const itemRef = inputReference(this.activeFeature.settings[key].type, item)
         this.activeFeature.selectInput(key, itemRef, item)
         this.updatePaths()
       },

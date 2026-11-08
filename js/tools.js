@@ -717,7 +717,7 @@ export class ManipulationTool extends HighlightTool {
       !this.viewport.activeDimension &&
       !this.viewport.hoveredHandle &&
       !this.viewport.hoveredDimension &&
-      (object instanceof Line || object instanceof Circle || object instanceof Arc || object instanceof SketchText) &&
+      (object instanceof Line || object instanceof Spline || object instanceof Circle || object instanceof Arc || object instanceof SketchText) &&
       this.viewport.document.activeSketch?.elements.includes(object) &&
       !object.projection
     ) {
@@ -822,7 +822,7 @@ export class ManipulationTool extends HighlightTool {
     const handle = this.viewport.activeHandle
     const dimension = this.viewport.activeDimension
 
-    // Drag a line by its body, or change a circle/arc radius from the curve.
+    // Drag a line or spline by its body, or change a circle/arc radius from the curve.
     // Updates are absolute from mouse-down, so solver adjustments between
     // pointer events cannot build up into drift.
     if(handle?.curveDrag && this.curveDrag) {
@@ -833,7 +833,7 @@ export class ManipulationTool extends HighlightTool {
         handle.targets = this.curveDrag.group.flatMap(item => item.handles.map((point, index) => ({
           elem: item.elem, index, point: point.clone().add(delta),
         })))
-      } else if(handle.elem instanceof Line || handle.elem instanceof SketchText) {
+      } else if(handle.elem instanceof Line || handle.elem instanceof Spline || handle.elem instanceof SketchText) {
         const delta = vec.clone().sub(this.curveDrag.pointer)
         handle.targets = originalHandles.map((point, index) => ({
           elem: handle.elem, index, point: point.clone().add(delta),

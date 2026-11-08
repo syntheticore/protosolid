@@ -2474,7 +2474,12 @@ export class ExtrudeFeature extends SolidFeature {
           this.distance = dist
           if(this.side != 'both') {
             const direction = side ? 'forward' : 'reverse'
-            if(this.side != direction) this.sideChangedByUser = true
+            if(this.side != direction) {
+              this.sideChangedByUser = true
+              // Dragging into the body cuts, dragging back out joins again
+              const hasBody = this.document.top(this.document.timeline.features.indexOf(this)).findChild(this.componentId).compound.solids().length
+              if(hasBody && this.operation == (side ? 'cut' : 'join')) this.operation = side ? 'join' : 'cut'
+            }
             this.side = direction
           }
         },

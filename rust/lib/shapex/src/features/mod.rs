@@ -15,6 +15,7 @@ use super::{
 };
 use crate::topology_error;
 
+mod blend_offset;
 mod dissolve;
 mod draft;
 mod move_faces;

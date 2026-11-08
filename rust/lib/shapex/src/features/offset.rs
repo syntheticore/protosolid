@@ -18,6 +18,7 @@ pub(super) fn offset_body(
     let mut collapsed = BTreeMap::new();
     let mut vanished_blends = BTreeSet::new();
     let mut vanished_corners = Vec::new();
+    let mut split_blends = BTreeMap::new();
     for face_id in &source_faces {
         let face = topology.face(*face_id)?;
         let face_bounds = face_parameter_bounds(topology, *face_id, tolerance)?;
@@ -39,7 +40,25 @@ pub(super) fn offset_body(
                 collapsed.insert(*face_id, support);
                 continue;
             }
-            offset_support(&base, face_bounds, distance * orientation, tolerance)?
+            let signed_distance = distance * orientation;
+            match &base {
+                Surface3::Blend(blend) if !adjust_blends && face.loops().len() == 1 => {
+                    match super::blend_offset::CircularBlendOffset::new(
+                        topology, *face_id, openings, blend, face_bounds, signed_distance, tolerance,
+                    )? {
+                        Some(offset) if offset.is_split() => {
+                            split_blends.insert(face.name(), offset);
+                            // The circular section has identical offset contact
+                            // rails. Use it only to rebuild neighboring faces.
+                            let circular: Surface3 = blend.clone().with_curvature_continuity(false)?.into();
+                            circular.offset(signed_distance, tolerance)?
+                        }
+                        Some(offset) => offset.unsplit_surface(tolerance)?,
+                        None => offset_support(&base, face_bounds, signed_distance, tolerance)?,
+                    }
+                }
+                _ => offset_support(&base, face_bounds, signed_distance, tolerance)?,
+            }
         };
         let expanded = expanded_offset_bounds(&surface, face_bounds, distance, tolerance)?;
         supports.insert(*face_id, surface);
@@ -75,7 +94,7 @@ pub(super) fn offset_body(
             crate::DomainBounds::Bounded(range) => range,
             _ => match topology.face(face_id)?.surface() {
                 Surface3::Cylinder(_) => face_parameter_bounds(topology, face_id, tolerance)?[1],
-                Surface3::RollingBall(blend) => blend.center_range(),
+                Surface3::RollingBall(blend) | Surface3::Blend(blend) => blend.center_range(),
                 _ => return Err(not_implemented("unbounded collapsed blend guide")),
             },
         };
@@ -258,6 +277,17 @@ pub(super) fn offset_body(
     };
     let mut patches = patches;
     for shell in patches.values_mut() {
+        if !split_blends.is_empty() {
+            let mut trimmed = Vec::new();
+            for patch in std::mem::take(shell) {
+                if let Some(offset) = split_blends.get(&patch.sources[0]) {
+                    trimmed.extend(offset.patches(&patch, tolerance)?);
+                } else {
+                    trimmed.push(patch);
+                }
+            }
+            *shell = trimmed;
+        }
         regularize_coincident_offset_faces(shell, distance, tolerance)?;
     }
     let offset = commit_support_patches(source, patches, changed_supports, role)?;
@@ -503,13 +533,17 @@ pub(super) fn collapsed_support(
             }
             None
         }
-        Surface3::RollingBall(blend) => {
-            let range = blend.center_range();
-            let parameter = (range.start + range.end) * 0.5;
+        Surface3::RollingBall(blend) | Surface3::Blend(blend)
+            if matches!(surface, Surface3::RollingBall(_)) || (distance.abs() >= blend.radius() - tolerance.linear
+                && blend.rotating_quintic(blend.center_range().middle())?.is_some()) =>
+        {
+            let parameter = blend.center_range().middle();
+            // The right-angle quintic lies outside its generating circle in
+            // the meridian. Once that circle collapses, the offset plane and
+            // cylinder meet directly and hide the entire blend.
             let value = surface.evaluate(parameter, 0.5)?;
-            let radial = value.point - blend.center_curve().evaluate(parameter)?.point;
-            let sign = value.normal()?.dot(radial).signum();
-            let radius = blend.radius() + distance * sign;
+            let radial = value.point - blend.center_curve().first_order(parameter)?.0;
+            let radius = blend.radius() + distance * value.normal()?.dot(radial).signum();
             (radius <= tolerance.linear)
                 .then(|| (CollapsedSupport::Curve(blend.center_curve().clone()), radius < -tolerance.linear))
         }

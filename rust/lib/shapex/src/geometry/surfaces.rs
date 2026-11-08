@@ -976,7 +976,7 @@ impl OffsetSurface3 {
             let mixed = (value.du.dot(offset_dv) + value.dv.dot(offset_du)) * 0.5;
             let second = value.dv.dot(offset_dv);
             if first <= 0.0 || first * second - mixed * mixed <= 0.0 {
-                return Err(crate::unsupported("Fillet offset crosses its curvature limit; collapsed blend removal is not supported"));
+                return Err(crate::unsupported("Fillet offset crosses its curvature limit"));
             }
         }
         Ok((

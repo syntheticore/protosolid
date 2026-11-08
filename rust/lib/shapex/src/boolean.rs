@@ -6,7 +6,7 @@ use cgmath::prelude::*;
 use crate::{Point2, Point3, Vec2};
 
 use super::brep_classification::{BrepClassifier, PointClassification};
-use super::bounds::Bounds;
+use super::bounds::{bounds_separated, Bounds};
 use super::trim::{align_pcurve_to_face_chart, coincident_supports,
     face_boundary_curves, face_parameter_bounds, intersection_chart_copies,
     point_in_sampled_trim, point_in_sampled_periodic_trim, sample_pcurve,
@@ -760,21 +760,6 @@ pub(super) fn patch_complexity_key(patch: &BrepPatch) -> (u8, u8) {
     (boundary_complexity, surface_complexity)
 }
 
-fn bounds_separated(
-    first: Option<Bounds>,
-    second: Option<Bounds>,
-    tolerance: ModelTolerance,
-) -> bool {
-    let (Some(first), Some(second)) = (first, second) else {
-        return false;
-    };
-    let scale = [first.0, first.1, second.0, second.1]
-        .into_iter()
-        .map(|point| point.to_vec().magnitude())
-        .fold(1.0_f64, f64::max);
-    first.separated(second, tolerance.linear_at_scale(scale) * 16.0)
-}
-
 fn boundary_curves(compound: &Compound, face: super::FaceId) -> KernelResult<Vec<FaceCurve>> {
     let topology = compound.topology();
     face_boundary_curves(topology, face, compound.tolerance())?.into_iter()
@@ -981,7 +966,7 @@ fn arrange_face(
             // closed support into a singular one-face boundary. The other
             // operand contributes only regions outside the owner's trims.
             if !point_in_sampled_trim(uv, original_boundary, &original_samples)?
-                || (operand != owner && classifiers[owner].covers_on_support(surface, value.point)?)
+                || (operand != owner && classifiers[owner].covers_on_support(surface, uv, value.point)?)
             {
                 return Ok(None);
             }
@@ -991,8 +976,8 @@ fn arrange_face(
             // On a shared support, exact oriented trims determine the local
             // material sides. A fixed normal probe can cross a nearby blend
             // or thin wall and invent an interface between tangent cutters.
-            let first = classifiers[0].sides_on_support(surface, value.point, parameter_normal)?;
-            let second = classifiers[1].sides_on_support(surface, value.point, parameter_normal)?;
+            let first = classifiers[0].sides_on_support(surface, uv, value.point, parameter_normal)?;
+            let second = classifiers[1].sides_on_support(surface, uv, value.point, parameter_normal)?;
             let below_occupied = occupied(kind, first.0, second.0);
             let above_occupied = occupied(kind, first.1, second.1);
             let coincident_orientation = match (below_occupied, above_occupied) {
@@ -1355,7 +1340,7 @@ fn arrange_regions(
                 continue;
             }
             for (first_parameter, second_parameter) in curve_intersections_sampled(
-                &curves[first], &curves[second], Some([&samples[first], &samples[second]]), tolerance,
+                &curves[first], &curves[second], Some([&samples[first], &samples[second]]), false, tolerance,
             )? {
                 split_parameters[first].push(first_parameter);
                 split_parameters[second].push(second_parameter);
@@ -2294,7 +2279,7 @@ fn patch_uses_face(
             let mut parameters = vec![curve.range.start, curve.range.end];
             for (other, other_samples) in b.iter().zip(b_samples.iter()) {
                 parameters.extend(
-                    curve_intersections_sampled(curve, other, Some([curve_samples, other_samples]), tolerance)?
+                    curve_intersections_sampled(curve, other, Some([curve_samples, other_samples]), false, tolerance)?
                         .into_iter()
                         .map(|(parameter, _)| parameter),
                 );

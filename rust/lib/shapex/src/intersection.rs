@@ -1033,9 +1033,56 @@ fn plane_cone(
         return Ok(IntersectionSet::Isolated(curves));
     }
     if plane.normal().cross(cone.axis().normalize()).magnitude() > tolerance.angular {
-        return Err(unsupported(
-            "oblique plane/cone intersection requires bounded tracing",
-        ));
+        let axial = normal.dot(cone.axis());
+        let x = normal.dot(cone.x_radius());
+        let y = normal.dot(cone.y_radius());
+        let radial = x.hypot(y);
+        if axial.abs() - radial <= tolerance.linear_at_scale(scale) {
+            return Err(unsupported("open plane/cone intersection requires bounded tracing"));
+        }
+        let height = -apex_distance / axial;
+        if height <= tolerance.parameter {
+            return Err(unsupported("plane/cone section on the opposite sheet requires bounded tracing"));
+        }
+        // Project the rational unit circle from the cone apex onto the plane.
+        // Align its first radius with the plane normal's radial component so
+        // every control weight stays positive throughout the elliptic case.
+        let (sin, cos) = y.atan2(x).sin_cos();
+        let first = cone.x_radius() * cos + cone.y_radius() * sin;
+        let second = -cone.x_radius() * sin + cone.y_radius() * cos;
+        let mut controls = Vec::new();
+        let mut weights = Vec::new();
+        let quarter = std::f64::consts::FRAC_1_SQRT_2;
+        for (u, v, weight) in [
+            (1.0, 0.0, 1.0), (1.0, 1.0, quarter), (0.0, 1.0, 1.0),
+            (-1.0, 1.0, quarter), (-1.0, 0.0, 1.0), (-1.0, -1.0, quarter),
+            (0.0, -1.0, 1.0), (1.0, -1.0, quarter), (1.0, 0.0, 1.0),
+        ] {
+            let factor = 1.0 + radial / axial * u;
+            controls.push(cone.apex() + (cone.axis() + first * u + second * v) * (height / factor));
+            weights.push(weight * factor);
+        }
+        let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0];
+        let curve: Curve3 = super::NurbsCurve3::new(2, controls, weights, knots)?.into();
+        let range = super::ParameterRange::new(0.0, 4.0)?;
+        let surface: Surface3 = cone.into();
+        let mut points = Vec::new();
+        let mut achieved_error = 0.0_f64;
+        for index in 0..=16 {
+            let point = curve.first_order(index as f64 / 4.0)?.0;
+            let projection = surface.project(point, tolerance)?;
+            achieved_error = achieved_error.max(projection.distance);
+            points.push(Point2::new(projection.parameters.0, projection.parameters.1));
+        }
+        unwrap_periodic_points(&mut points, surface.domains());
+        let guide = smooth_nurbs_guide(&points, range)?.into();
+        let first_pcurve = plane.parameterized_curve_image(&curve, range, tolerance)?;
+        let second_pcurve = SurfaceProjectionPcurve2::new(
+            curve.clone(), surface, guide, range, tolerance,
+        )?.into();
+        return Ok(IntersectionSet::Isolated(vec![SurfaceSurfaceCurve {
+            curve, first_pcurve, second_pcurve, achieved_error,
+        }]));
     }
     let v = (plane.origin() - cone.apex()).dot(plane.normal()) / cone.axis().dot(plane.normal());
     if v <= tolerance.parameter {

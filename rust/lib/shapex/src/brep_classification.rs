@@ -87,26 +87,19 @@ impl<'a> BrepClassifier<'a> {
     /// Oriented material sides on coincident trimmed supports, as used when
     /// Boolean operations arrange shared faces without crossing a thin wall.
     pub(super) fn sides_on_support(
-        &self, support: &Surface3, point: Point3, normal: Vec3,
+        &self, support: &Surface3, uv: Point2, point: Point3, normal: Vec3,
     ) -> KernelResult<(bool, bool)> {
         let mut covered = false;
         let mut sides = (false, false);
         for face in &self.faces {
             let value = self.topology.face(face.id)?;
             let surface = value.surface();
-            if !coincident_supports(surface, support, self.tolerance)? {
-                continue;
-            }
-            let projection = surface.project(point, self.tolerance)?;
-            // Equivalent supports can have different bounded spline domains.
-            // A closest point clamped to one domain's edge does not cover a
-            // point on the other's continuation.
-            if projection.distance > self.tolerance.linear_at_scale(point.to_vec().magnitude()) {
-                continue;
-            }
-            if !self.in_trim(face, projection.parameters)? { continue; }
+            let Some(parameters) = self.coincident_parameters(surface, support, uv, point)? else { continue; };
+            if !self.in_trim(face, parameters)? { continue; }
             let sign = value.orientation().sign();
-            let forward = surface.normal(projection.parameters.0, projection.parameters.1)?.dot(normal) * sign > 0.0;
+            let forward = if surface == support { sign > 0.0 } else {
+                surface.normal(parameters.0, parameters.1)?.dot(normal) * sign > 0.0
+            };
             sides.0 |= forward;
             sides.1 |= !forward;
             covered = true;
@@ -117,18 +110,32 @@ impl<'a> BrepClassifier<'a> {
         }
     }
 
-    pub(super) fn covers_on_support(&self, support: &Surface3, point: Point3) -> KernelResult<bool> {
+    pub(super) fn covers_on_support(&self, support: &Surface3, uv: Point2, point: Point3) -> KernelResult<bool> {
         for face in &self.faces {
             let surface = self.topology.face(face.id)?.surface();
-            if coincident_supports(support, surface, self.tolerance)? {
-                let projection = surface.project(point, self.tolerance)?;
-                if projection.distance > self.tolerance.linear_at_scale(point.to_vec().magnitude()) {
-                    continue;
-                }
-                if self.in_trim(face, projection.parameters)? { return Ok(true); }
+            if let Some(parameters) = self.coincident_parameters(surface, support, uv, point)? {
+                if self.in_trim(face, parameters)? { return Ok(true); }
             }
         }
         Ok(false)
+    }
+
+    fn coincident_parameters(
+        &self, surface: &Surface3, support: &Surface3, uv: Point2, point: Point3,
+    ) -> KernelResult<Option<(f64, f64)>> {
+        // The arrangement already knows the exact chart on a shared
+        // support. A global projection can converge on another spline lobe.
+        if surface == support {
+            return Ok(Some((uv.x, uv.y)));
+        }
+        if !coincident_supports(surface, support, self.tolerance)? {
+            return Ok(None);
+        }
+        let projection = surface.project(point, self.tolerance)?;
+        // A projection clamped to a shorter equivalent support does not
+        // cover a point on the other support's continuation.
+        Ok((projection.distance <= self.tolerance.linear_at_scale(point.to_vec().magnitude()))
+            .then_some(projection.parameters))
     }
 
     fn in_trim(&self, face: &ClassificationFace, parameters: (f64, f64)) -> KernelResult<bool> {

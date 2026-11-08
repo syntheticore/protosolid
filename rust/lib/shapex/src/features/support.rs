@@ -211,7 +211,8 @@ pub(crate) fn support_patches(
                             let domains = supports[&excluded].domains();
                             // Angular supports constrain only their retained
                             // sector. Their continuation is not a global
-                            // half-space beyond that sector.
+                            // half-space beyond that sector. A ruled chamfer
+                            // keeps its material side past the contact rails.
                             if [uv.0, uv.1].into_iter().enumerate().any(|(axis, value)| {
                                 let value = if let Some(period) = domains[axis].period {
                                     value
@@ -222,7 +223,7 @@ pub(crate) fn support_patches(
                                 } else if axis == 1
                                     && matches!(
                                         supports[&excluded],
-                                        Surface3::RollingBall(_) | Surface3::Blend(_) | Surface3::Ruled(_)
+                                        Surface3::RollingBall(_) | Surface3::Blend(_)
                                     )
                                 {
                                     value

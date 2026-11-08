@@ -478,7 +478,7 @@ pub(super) fn offset_regions_with_joins(
 ) -> KernelResult<Compound> {
     use crate::trim::{FaceCurve, align_pcurve_to_face_chart, face_boundary_curves, intersection_chart_copies,
         face_parameter_bounds as trim_bounds, point_in_sampled_trim, trim_samples, trim_to_faces};
-    use crate::bounds::Bounds;
+    use crate::bounds::{bounds_separated, Bounds};
     use crate::brep_classification::{BrepClassifier, PointClassification};
     let tolerance = source.tolerance();
     let radius = offset_distance.abs();
@@ -745,17 +745,28 @@ pub(super) fn offset_regions_with_joins(
             boundaries.push(boundary);
         }
     }
+    let chart_bounds = boundaries.iter().map(|boundary| trim_bounds(boundary, tolerance))
+        .collect::<KernelResult<Vec<_>>>()?;
+    // Join imprints can extend past an offset trim. Cull only when the
+    // complete supports have disjoint enclosures.
+    let enclosures = supports.iter().map(|surface| crate::bounds::surface(surface, None).ok())
+        .collect::<Vec<_>>();
     for first in base_count..supports.len() {
         for second in 0..first {
             if parents[first - base_count].contains(&second) { continue; }
+            if bounds_separated(enclosures[first], enclosures[second], tolerance) {
+                continue;
+            }
             let shared_section = if second >= base_count && first < join_end {
                 let a = topology.edge(joins[first - base_count])?;
                 let b = topology.edge(joins[second - base_count])?;
                 a.vertices().iter().position(|vertex| b.vertices().contains(vertex))
                     .map(|end| &boundaries[first][if end == 0 { 3 } else { 1 }])
             } else { None };
-            let intersections = supports[first].intersect_surface_in_bounds(&supports[second],
-                trim_bounds(&boundaries[first], tolerance)?, trim_bounds(&boundaries[second], tolerance)?, tolerance)?;
+            let domains = [chart_bounds[first], chart_bounds[second]];
+            let intersections = supports[first].intersect_surface_in_bounds(
+                &supports[second], domains[0], domains[1], tolerance,
+            )?;
             let IntersectionSet::Isolated(intersections) = intersections else { continue; };
             for intersection in intersections {
                 // Adjacent joins already carry their common end section.
@@ -772,8 +783,7 @@ pub(super) fn offset_regions_with_joins(
                     }).collect::<KernelResult<Vec<_>>>()?.into_iter().all(|on| on);
                     if on_section { continue; }
                 }
-                let intersection = reparameterize_join_intersection(intersection,
-                    [trim_bounds(&boundaries[first], tolerance)?, trim_bounds(&boundaries[second], tolerance)?], tolerance)?;
+                let intersection = reparameterize_join_intersection(intersection, domains, tolerance)?;
                 let first_pcurve = align_pcurve_to_face_chart(&intersection.first_pcurve, None,
                     &supports[first], &boundaries[first], tolerance)?;
                 let second_pcurve = align_pcurve_to_face_chart(&intersection.second_pcurve, None,
@@ -889,12 +899,28 @@ pub(super) fn offset_regions_with_joins(
     let mut patches = Vec::new();
     for index in 0..supports.len() {
         let surface = &supports[index];
-        let bounds = trim_bounds(&boundaries[index], tolerance)?;
+        let bounds = chart_bounds[index];
         let samples = trim_samples(&boundaries[index])?;
         let uv_probe_limit = bounds[0].span().abs().min(bounds[1].span().abs()) * 0.05;
+        let intact_corner = if index >= join_end && curves[index].len() == boundaries[index].len()
+            && point_in_sampled_trim(Point2::new(0.0, 0.0), &boundaries[index], &samples)?
+        {
+            // The corner chart is centered on the fan of incident normals.
+            // With no imprints, exposure is constant over the whole patch.
+            // Probe its interior once, away from the tangent contact arcs.
+            let point = surface.first_order(0.0, 0.0)?.0;
+            let distance = distance_to_source(point)?;
+            Some(classifier.classify(point)? == PointClassification::Outside
+                && (distance - radius).abs() <= tolerance.linear_at_scale(point.to_vec().magnitude()))
+        } else {
+            None
+        };
         let mut regions = crate::boolean::arrange_surface_regions(surface, &curves[index],
             radius * 1.0e-3, uv_probe_limit, tolerance, |uv| {
                 if index >= base_count && !point_in_sampled_trim(uv, &boundaries[index], &samples)? { return Ok(None); }
+                if let Some(retained) = intact_corner {
+                    return Ok(retained.then_some(FaceOrientation::Forward));
+                }
                 if index < base_count && !sharp {
                     let (_, original, bounds, samples, _) = &original_boundaries[&ancestry[index][0]];
                     let original_uv = in_source_chart(uv, surface, *bounds);

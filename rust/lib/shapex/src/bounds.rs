@@ -3,7 +3,8 @@
 use cgmath::prelude::*;
 
 use super::{
-    Compound, Curve2, Curve3, DiagnosticKind, KernelError, KernelResult, ParameterRange, Surface3,
+    Compound, Curve2, Curve3, DiagnosticKind, KernelError, KernelResult, ModelTolerance,
+    ParameterRange, Surface3,
 };
 use crate::{Point3, Vec3};
 use crate::unsupported;
@@ -51,6 +52,21 @@ impl Bounds {
             )
         })
     }
+}
+
+pub(super) fn bounds_separated(
+    first: Option<Bounds>,
+    second: Option<Bounds>,
+    tolerance: ModelTolerance,
+) -> bool {
+    let (Some(first), Some(second)) = (first, second) else {
+        return false;
+    };
+    let scale = [first.0, first.1, second.0, second.1]
+        .into_iter()
+        .map(|point| point.to_vec().magnitude())
+        .fold(1.0_f64, f64::max);
+    first.separated(second, tolerance.linear_at_scale(scale) * 16.0)
 }
 
 fn unavailable() -> KernelError {
@@ -400,7 +416,7 @@ fn surface_patch(support: &Surface3, uv: Bounds) -> KernelResult<Bounds> {
     }
 }
 
-fn surface(s: &Surface3, boundary: Option<Bounds>) -> KernelResult<Bounds> {
+pub(super) fn surface(s: &Surface3, boundary: Option<Bounds>) -> KernelResult<Bounds> {
     Ok(match s {
         Surface3::Plane(_) => boundary.ok_or_else(unavailable)?,
         Surface3::Cylinder(c) => {

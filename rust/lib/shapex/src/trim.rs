@@ -710,16 +710,18 @@ fn partition_to_faces_sampled<P, Q>(
     let first_samples = sample_pcurve(&first_curve, 32)?;
     let second_samples = sample_pcurve(&second_curve, 32)?;
     let mut parameters = vec![domain.start, domain.end];
+    // Recover shallow crossings before testing interval interiors. The clipped
+    // endpoints then enter the arrangement as existing trim vertices.
     for (boundary, samples) in first_boundary.iter().zip(first_boundary_samples.iter()) {
         parameters.extend(
-            curve_intersections_sampled(&first_curve, boundary, Some([&first_samples, samples]), tolerance)?
+            curve_intersections_sampled(&first_curve, boundary, Some([&first_samples, samples]), true, tolerance)?
                 .into_iter()
                 .map(|hit| hit.0),
         );
     }
     for (boundary, samples) in second_boundary.iter().zip(second_boundary_samples.iter()) {
         parameters.extend(
-            curve_intersections_sampled(&second_curve, boundary, Some([&second_samples, samples]), tolerance)?
+            curve_intersections_sampled(&second_curve, boundary, Some([&second_samples, samples]), true, tolerance)?
                 .into_iter()
                 .map(|hit| hit.0),
         );
@@ -764,7 +766,7 @@ pub(super) fn curve_intersections<P, Q>(
     second: &FaceCurve<Q>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<(f64, f64)>> {
-    curve_intersections_sampled(first, second, None, tolerance)
+    curve_intersections_sampled(first, second, None, false, tolerance)
 }
 
 /// `samples` are both curves' `trim_samples`, reused when one curve meets many.
@@ -772,6 +774,7 @@ pub(super) fn curve_intersections_sampled<P, Q>(
     first: &FaceCurve<P>,
     second: &FaceCurve<Q>,
     samples: Option<[&[(f64, Point2)]; 2]>,
+    seed_near_misses: bool,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<(f64, f64)>> {
     let endpoint_hits = || -> KernelResult<Vec<(f64, f64)>> {
@@ -861,15 +864,18 @@ pub(super) fn curve_intersections_sampled<P, Q>(
         Some([first, second]) => (Cow::Borrowed(first), Cow::Borrowed(second)),
         None => (Cow::Owned(sample_pcurve(first, 32)?), Cow::Owned(sample_pcurve(second, 32)?)),
     };
+    let padding = seed_near_misses.then(|| [chord_padding(&first_samples), chord_padding(&second_samples)]);
     let mut hits = Vec::<(f64, f64)>::new();
-    for first_pair in first_samples.windows(2) {
-        for second_pair in second_samples.windows(2) {
-            let Some((first_fraction, second_fraction)) = segment_intersection_parameters(
-                first_pair[0].1,
-                first_pair[1].1,
-                second_pair[0].1,
-                second_pair[1].1,
-            ) else {
+    for (i, first_pair) in first_samples.windows(2).enumerate() {
+        for (j, second_pair) in second_samples.windows(2).enumerate() {
+            let [a, b] = [first_pair[0].1, first_pair[1].1];
+            let [c, d] = [second_pair[0].1, second_pair[1].1];
+            let crossing = segment_intersection_parameters(a, b, c, d);
+            let nearby = crossing.is_none();
+            let Some((first_fraction, second_fraction)) = crossing.or_else(|| {
+                let [first, second] = padding.as_ref()?;
+                nearby_segment_parameters(a, b, c, d, first[i] + second[j])
+            }) else {
                 continue;
             };
             let mut parameters = [
@@ -882,7 +888,12 @@ pub(super) fn curve_intersections_sampled<P, Q>(
                 let first_value = first.pcurve.first_order(parameters[0])?;
                 let second_value = second.pcurve.first_order(parameters[1])?;
                 let residual = first_value.0 - second_value.0;
-                if residual.magnitude() <= tolerance.parameter * 16.0 {
+                let accuracy = if nearby {
+                    f64::EPSILON * 16.0 * first_value.0.to_vec().magnitude().max(1.0)
+                } else {
+                    tolerance.parameter * 16.0
+                };
+                if residual.magnitude() <= accuracy {
                     break;
                 }
                 let determinant =
@@ -906,7 +917,13 @@ pub(super) fn curve_intersections_sampled<P, Q>(
             let first_point = first.pcurve.evaluate(parameters[0])?.point;
             let second_point = second.pcurve.evaluate(parameters[1])?.point;
             let uv_error = first_point.distance(second_point);
-            let within_tolerance = if uv_error <= tolerance.parameter * 64.0 { true } else {
+            let within_tolerance = if nearby {
+                uv_error <= f64::EPSILON * 32.0 * first_point.to_vec().magnitude().max(1.0)
+                    && [first_pair, second_pair].into_iter().zip(parameters).all(|(pair, parameter)| {
+                        parameter >= pair[0].0.min(pair[1].0) - tolerance.parameter
+                            && parameter <= pair[0].0.max(pair[1].0) + tolerance.parameter
+                    })
+            } else if uv_error <= tolerance.parameter * 64.0 { true } else {
                 // Implicit supports converge in model units. Their rounded
                 // inverse charts need not attain the absolute UV tolerance.
                 let (a, da) = first.curve.first_order(parameters[0])?;
@@ -928,6 +945,47 @@ pub(super) fn curve_intersections_sampled<P, Q>(
     }
     hits.extend(endpoint_hits()?);
     Ok(deduplicate(hits))
+}
+
+// Estimate the deviation of each sampling chord from the turns at its ends.
+// These margins only supply Newton seeds; exact UV coincidence decides hits.
+fn chord_padding(samples: &[(f64, Point2)]) -> Vec<f64> {
+    samples.windows(2).enumerate().map(|(index, pair)| {
+        let chord = pair[1].1 - pair[0].1;
+        let turn = |adjacent: Vec2| {
+            if adjacent.magnitude2() == 0.0 { return 0.0; }
+            (chord.x * adjacent.y - chord.y * adjacent.x).abs() / adjacent.magnitude()
+        };
+        let before = index.checked_sub(1).map_or(0.0, |i| turn(pair[0].1 - samples[i].1));
+        let after = samples.get(index + 2).map_or(0.0, |next| turn(next.1 - pair[1].1));
+        before.max(after) * 0.5
+    }).collect()
+}
+
+fn nearby_segment_parameters(
+    a: Point2, b: Point2, c: Point2, d: Point2, margin: f64,
+) -> Option<(f64, f64)> {
+    if margin == 0.0 || (0..2).any(|axis| {
+        a[axis].min(b[axis]) - margin > c[axis].max(d[axis])
+            || c[axis].min(d[axis]) - margin > a[axis].max(b[axis])
+    }) { return None; }
+    let closest = |point: Point2, start: Point2, end: Point2| {
+        let direction = end - start;
+        let fraction = if direction.magnitude2() == 0.0 { 0.0 }
+            else { ((point - start).dot(direction) / direction.magnitude2()).clamp(0.0, 1.0) };
+        (fraction, point.distance2(start + direction * fraction))
+    };
+    let (from_start, start_error) = closest(a, c, d);
+    let (from_end, end_error) = closest(b, c, d);
+    let (to_start, reverse_start_error) = closest(c, a, b);
+    let (to_end, reverse_end_error) = closest(d, a, b);
+    let (error, first, second) = [
+        (start_error, 0.0, from_start),
+        (end_error, 1.0, from_end),
+        (reverse_start_error, to_start, 0.0),
+        (reverse_end_error, to_end, 1.0),
+    ].into_iter().min_by(|a, b| a.0.total_cmp(&b.0)).unwrap();
+    (error <= margin.powi(2)).then_some((first, second))
 }
 
 pub(super) fn segment_intersection_parameters(

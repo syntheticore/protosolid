@@ -945,8 +945,9 @@ fn replace_face_contact_supports_boolean_operations() {
     let continuation = Surface3::Nurbs(spline.extended_bezier([0.5, 0.5]).unwrap());
     let outside = continuation.evaluate(1.2, 0.5).unwrap().point;
     let classifier = crate::brep_classification::BrepClassifier::for_compound(&upper).unwrap();
-    assert!(!classifier.covers_on_support(&continuation, outside).unwrap());
-    assert_eq!(classifier.sides_on_support(&continuation, outside,
+    let uv = Point2::new(1.2, 0.5);
+    assert!(!classifier.covers_on_support(&continuation, uv, outside).unwrap());
+    assert_eq!(classifier.sides_on_support(&continuation, uv, outside,
         continuation.normal(1.2, 0.5).unwrap()).unwrap(), (false, false));
     for width in [2.0, 3.0] {
         let lower = owned_cuboid(Point3::new(-width, -4.0, -1.0), Point3::new(width, 0.0, 1.0));

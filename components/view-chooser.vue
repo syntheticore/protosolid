@@ -296,6 +296,8 @@
   import { makeID } from './../js/core/id.js'
 
   const props = defineProps(['document', 'projectionMode', 'displayMode', 'colorMode'])
+  const bus = inject('bus')
+  let hovered = null
 
   const settingsOpen = ref(false)
 
@@ -375,7 +377,7 @@
   }
 
   function clickView(view, i, event) {
-    const selectedView = modifiedView(view, i, event)
+    const selectedView = modifiedView(view, i, event.ctrlKey || event.metaKey)
     if(props.document.activeView == selectedView) {
       // Views are saved with the document, so they stay unchanged while merging
       if(props.document.activeMerge) return
@@ -388,8 +390,8 @@
     }
   }
 
-  function modifiedView(view, i, event) {
-    if(!view.system || i >= 3 || (!event.ctrlKey && !event.metaKey)) return view
+  function modifiedView(view, i, opposite) {
+    if(!view.system || i >= 3 || !opposite) return view
     return {
       ...view,
       position: view.target.clone().multiplyScalar(2).sub(view.position),
@@ -397,8 +399,17 @@
   }
 
   function previewView(view, i, event) {
-    props.document.previewSavedView(modifiedView(view, i, event))
+    hovered = { view, i }
+    props.document.previewSavedView(modifiedView(view, i, event.ctrlKey || event.metaKey))
   }
+
+  // Pressing or releasing ctrl over a view switches the preview between it
+  // and its opposite without requiring the pointer to re-enter.
+  function onCtrl(pressed) {
+    if(hovered) props.document.previewSavedView(modifiedView(hovered.view, hovered.i, pressed))
+  }
+  bus.on('ctrl-pressed', onCtrl)
+  onUnmounted(() => bus.off('ctrl-pressed', onCtrl))
 
   function deleteView(index) {
     unhover()
@@ -406,6 +417,7 @@
   }
 
   function unhover() {
+    hovered = null
     props.document.clearViewPreview()
   }
 

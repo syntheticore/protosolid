@@ -6,7 +6,7 @@
     :class="{ hidden: isHidden }"
   )
 
-    .box(:class="{ highlighted: isHighlighted, selected: document.selection.has(sketch) }")
+    .box(:class="{ highlighted: isHighlighted, 'sketch-active': isActive, selected: document.selection.has(sketch) }")
 
       TreeItemHeader(
         :model-value="component.itemTitle(sketch.id, `Sketch ${index + 1}`)"
@@ -43,6 +43,9 @@
   .icon
     padding-left: 3px
 
+  .treelet-sketch .box.sketch-active
+    background: dark2(1.6, 0.8)
+
 </style>
 
 
@@ -63,6 +66,10 @@
     computed: {
       isHighlighted: function() {
         return this.highlight?.id == this.sketch.id || this.highlight?.sketch?.id == this.sketch.id
+      },
+
+      isActive: function() {
+        return this.document.activeSketch?.id == this.sketch.id
       },
 
       isHidden: function() {

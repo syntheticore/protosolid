@@ -1463,12 +1463,10 @@ fn arrange_regions(
                 || matches!(surface, Surface3::Swept(_) | Surface3::Revolved(_)))
                 && matches!(piece.pcurve, Curve2::SurfaceIntersection(_) | Curve2::SurfaceProjection(_)))
         {
-            // A tracing spline selects the intersection branch but is not the
-            // intersection itself. Center side probes on the corrected curve.
-            // Exact p-curves already select that branch. A global projection
-            // can land on a different local minimum or change the UV chart.
+            // Center side probes on the corrected intersection. Seed the
+            // projection from the tracing p-curve to stay on its local branch.
             let point = piece.curve.evaluate(parameter)?.point;
-            let projection = surface.project(point, tolerance)?;
+            let projection = surface.project_near(point, uv, tolerance)?;
             uv = nearest_uv(
                 surface.domains(),
                 Point2::new(projection.parameters.0, projection.parameters.1),

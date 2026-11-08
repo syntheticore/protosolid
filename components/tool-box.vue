@@ -346,6 +346,7 @@
   import { ThermalSimulation } from './../js/core/thermal.js'
   import { StaticSimulation } from './../js/core/static.js'
   import { FluidSimulation } from './../js/core/fluid.js'
+  import { CamSetup, addOperation, operationTypes } from './../js/core/cam.js'
 
   const layoutDuration = 200
 
@@ -360,8 +361,9 @@
     },
 
     watch: {
-      'document.activeSketch': function(sketch) {
-        if(!this.feature) this.activeTab = this.document.activeSketch ? 1 : 4
+      mode: function(mode) {
+        if(this.feature) return
+        this.activeTab = mode ? this.tabs.findIndex(tab => tab.mode == mode) : 4
       },
 
       // Tab and stacking changes may happen together when picking a tool from the stack
@@ -371,6 +373,13 @@
     },
 
     computed: {
+      // Sketch and CAM mode replace the regular tabs with their own
+      mode: function() {
+        if(this.document.activeSketch) return 'sketch'
+        if(this.document.camMode) return 'cam'
+        return null
+      },
+
       layout: function() {
         return [this.activeTab, this.stacked]
       },
@@ -424,7 +433,7 @@
           },
           {
             title: 'Sketch',
-            sketchOnly: true,
+            mode: 'sketch',
             tools: [
               { title: 'Point', tool: PointTool },
               { title: 'Line', tool: LineTool, hotKey: 'L', keyCode: 76 },
@@ -439,7 +448,7 @@
           },
           {
             title: 'Edit Sketch',
-            sketchOnly: true,
+            mode: 'sketch',
             tools: [
               { title: 'Trim', tool: TrimTool, hotKey: 'T', keyCode: 84},
               { title: 'Fillet', tool: SketchFilletTool, hotKey: 'F', keyCode: 70 },
@@ -453,7 +462,7 @@
           },
           {
             title: 'Constrain',
-            sketchOnly: true,
+            mode: 'sketch',
             tools: [
               { title: 'Dimension', tool: DimensionTool, hotKey: 'D', keyCode: 68 },
               { title: 'Touch', tool: TouchConstraintTool },
@@ -531,6 +540,16 @@
               { title: 'Render', icon: 'lightbulb' },
               { title: 'Canvas', icon: 'image', action: this.addCanvas },
               { title: 'Export', action: this.addExportConfig, icon: 'file-download' },
+              { title: 'Manufacture', action: this.addCamSetup, icon: 'industry' },
+            ],
+          },
+          {
+            title: 'Milling',
+            mode: 'cam',
+            tools: [
+              ...Object.entries(operationTypes).map(([type, { label, icon }]) =>
+                ({ title: label, icon, action: () => this.addCamOperation(type) })
+              ),
             ],
           },
         ]
@@ -559,11 +578,10 @@
           return
         }
 
-        const inSketch = !!this.document.activeSketch
         const tool = this.tabs
           .flatMap(tab => tab.tools.filter(tool =>
-            (inSketch == !!tab.sketchOnly)
-            || (inSketch && tool.feature && tool.feature !== CreateSketchFeature)
+            this.isTabAvailable(tab)
+            || (this.mode == 'sketch' && tool.feature && tool.feature !== CreateSketchFeature)
           ))
           .find(
             tool => tool.hotKey && tool.hotKey.toLowerCase() == key
@@ -572,7 +590,7 @@
       },
 
       isTabAvailable: function(tab) {
-        return !!this.document.activeSketch == !!tab.sketchOnly
+        return this.mode == (tab.mode || null)
       },
 
       // Positions of the parts taking part in a morph, relative to the box
@@ -809,6 +827,20 @@
         }
         this.document.activeComponent.creator.exportConfigs.push(config)
         this.document.activateExport(config, this.document.activeComponent)
+        this.document.markChanged()
+      },
+
+      addCamSetup: function() {
+        const setup = new CamSetup()
+        this.document.activeComponent.creator.camSetups.push(setup)
+        this.document.activateInteractivePanel(`cam:${this.document.activeComponent.id}:${setup.id}`)
+        this.document.markChanged()
+      },
+
+      addCamOperation: function(type) {
+        const [, componentId, setupId] = this.document.activeInteractivePanel.split(':')
+        const setup = this.document.getComponent(componentId).creator.camSetups.find(setup => setup.id == setupId)
+        addOperation(setup, type)
         this.document.markChanged()
       },
 

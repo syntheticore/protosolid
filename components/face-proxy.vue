@@ -214,6 +214,8 @@
     if((props.colorMode == 'thermal' || props.colorMode == 'static') && !props.document.activeSimulationPicker) {
       return props.parentActive ? getSurfaceMaterial() : materials.ghostSurface
     }
+    // The simulated stock takes the place of the part
+    if(props.colorMode == 'cam') return materials.ghostSurface
     if(props.colorMode == 'interference') {
       return props.parentActive ? materials.interferenceSurface : materials.ghostSurface
     }

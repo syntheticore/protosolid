@@ -52,7 +52,7 @@
   template(v-for="helper in component.helpers")
 
     HelperProxy(
-      v-if="!((document.activeMerge || document.activeSimulation) && helper.isStandard()) &&(isHelperHighlighted(helper) || !component.isItemHidden(helper.id) && (component.id === document.activeComponent?.id || referencedItemIds.has(helper.id) || document.activeFeature instanceof JointFeature || (projectingPoints && helper instanceof PointHelper)))"
+      v-if="!((document.activeMerge || document.activeSimulation || document.camMode) && helper.isStandard()) &&(isHelperHighlighted(helper) || !component.isItemHidden(helper.id) && (component.id === document.activeComponent?.id || referencedItemIds.has(helper.id) || document.activeFeature instanceof JointFeature || (projectingPoints && helper instanceof PointHelper)))"
       :key="helper.id"
       :document="document"
       :component="component"

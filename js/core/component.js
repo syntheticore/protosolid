@@ -22,6 +22,7 @@ export class ComponentDefinition {
     this.variant = null
     this.exportConfigs = []
     this.simulations = []
+    this.camSetups = []
     this.canvases = []
     this.itemsHidden = {}
     this.itemNames = {}
@@ -89,6 +90,7 @@ export class ComponentDefinition {
     const def = Object.assign(new ComponentDefinition(), dump)
     def.parameters ||= []
     def.simulations ||= []
+    def.camSetups ||= []
     def.updateMaterials()
     return def
   }

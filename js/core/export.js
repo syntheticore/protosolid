@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { saveFile } from '../utils.js'
 import { relativeComponentTransform } from './assembly.js'
 import { shapex, tessellateMesh, transformFromMatrix } from './shapex.js'
+import { exportGcode } from './cam.js'
 
 
 // STEP
@@ -209,6 +210,14 @@ export async function autoExportComponents(root) {
         throw new Error(`Auto-export "${config.title}" has no destination path`)
       }
       await exportConfigured(component, config)
+    }
+    for(const setup of component.creator.camSetups) {
+      if(!setup.autoSave || exportedConfigs.has(setup)) continue
+      exportedConfigs.add(setup)
+      if(!setup.path) {
+        throw new Error(`Auto-export "${setup.title}" has no destination path`)
+      }
+      await exportGcode(setup, component)
     }
   }
 }

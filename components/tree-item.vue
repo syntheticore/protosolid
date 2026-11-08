@@ -110,6 +110,15 @@
         :simulation="simulation"
       )
 
+      //- CAM Setups
+      TreeletCam(
+        v-for="setup in component.creator.camSetups"
+        :key="setup.id"
+        :document="document"
+        :component="component"
+        :setup="setup"
+      )
+
       //- Center of Mass
       li(v-if="component.cog")
         .box
@@ -432,6 +441,7 @@
           this.component.creator.cog ||
           this.component.creator.material ||
           this.component.creator.simulations.length ||
+          this.component.creator.camSetups.length ||
           this.component.creator.parameters.length ||
           this.component.creator.variant ||
           this.component.creator.sectionViews.length ||

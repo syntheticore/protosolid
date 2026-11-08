@@ -308,6 +308,7 @@
   import { setWorldTransform, solveAssembly, worldTransform } from './../js/core/assembly.js'
   import { TransformGizmo } from './../js/three/gizmos.js'
   import SimulationFlow from '../js/three/simulation-flow.js'
+  import CamView from '../js/three/cam-view.js'
   import { componentTriangles } from './../js/core/export.js'
   import { listSystemFonts, preferredFont } from './../js/core/sketch-text.js'
   import {
@@ -611,6 +612,8 @@
       this.bus.on('unpreview-feature', this.unpreviewFeature)
       this.bus.on('thermal-result', this.updateSimulationFlow)
       this.bus.on('fluid-result', this.updateSimulationFlow)
+      this.bus.on('cam-result', this.updateCamView)
+      this.bus.on('cam-frame', this.updateCamFrame)
       this.bus.on('resize', this.onWindowResize)
       this.bus.on('keydown', this.keyDown)
       this.bus.on('sketch-history', this.changeSketchHistory)
@@ -638,9 +641,12 @@
       this.bus.off('resize', this.onWindowResize)
       this.bus.off('thermal-result', this.updateSimulationFlow)
       this.bus.off('fluid-result', this.updateSimulationFlow)
+      this.bus.off('cam-result', this.updateCamView)
+      this.bus.off('cam-frame', this.updateCamFrame)
       this.bus.off('joint-picked', this.jointPicked)
       this.bus.off('alt-pressed', this.setOrbiting)
       this.clearSimulationFlow()
+      this.camView?.dispose()
       this.clearExportPreview()
       this.clearSelectionTransformGizmo()
       this.renderer.dispose()
@@ -1213,6 +1219,30 @@
         group.applyMatrix4(worldTransform(component))
         this.simulationFlow = group
         this.renderer.scene.add(group)
+        this.renderer.render()
+      },
+
+      // Toolpaths and stock of the open CAM setup. Setups closing after
+      // another one opened leave the other's view alone.
+      updateCamView: function(cam) {
+        if(cam && !cam.setup.result && cam.setup !== this.camSetup) return
+        this.camSetup = cam?.setup
+        if(this.camView) {
+          this.renderer.scene.remove(this.camView)
+          this.camView.dispose()
+          this.camView = null
+        }
+        if(cam?.setup.result) {
+          this.camView = markRaw(new CamView(cam.setup.result))
+          this.camView.applyMatrix4(worldTransform(cam.component).multiply(cam.setup.result.machineToLocal))
+          this.camView.update(null)
+          this.renderer.scene.add(this.camView)
+        }
+        this.renderer.render()
+      },
+
+      updateCamFrame: function(simulation) {
+        this.camView?.update(simulation)
         this.renderer.render()
       },
 

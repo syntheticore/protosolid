@@ -54,6 +54,7 @@ export default class Document extends Emitter {
     this.activeSimulationPicker = false
     this.activeExportConfig = null
     this.activeExportComponentId = null
+    this.camPlayer = null
     this.selection = new Selection()
 
     this.hasChanges = false
@@ -413,6 +414,15 @@ export default class Document extends Emitter {
     this.activeExportComponentId = null
     if(key) this.selection.clear()
     this.activeInteractivePanel = key
+  }
+
+  get camMode() {
+    return !!this.activeInteractivePanel?.startsWith('cam:')
+  }
+
+  // The stock replaces the part while machining is simulated
+  get camSimulating() {
+    return !!this.camPlayer?.simulation
   }
 
   activateSimulation(simulation) {

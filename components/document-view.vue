@@ -149,7 +149,10 @@
       :class="{ top: !!document.activeFeature }"
     )
 
+    CamBar(v-if="document.camMode && document.camPlayer" :player="document.camPlayer")
+
     FeatureBar(
+      v-else
       :document="document"
       :active-tool="activeTool"
     )
@@ -306,6 +309,7 @@
       top: 132px
 
   .feature-bar
+  .cam-bar
     position: absolute
     bottom: 12px
     max-width: calc(100% - 24px)
@@ -445,6 +449,7 @@
 
       effectiveColorMode: function() {
         if(this.document.activeSimulation?.result && !this.document.activeSimulationPicker) return this.document.activeSimulation.mode
+        if(this.document.camSimulating) return 'cam'
         if(this.activeTool?.interferenceMode) return 'interference'
         const savedMode = this.document.previewView?.displaySettings?.colorMode
         return this.activeTool?.diagnosticMode

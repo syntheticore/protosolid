@@ -6,6 +6,7 @@ import { relativeComponentTransform } from './assembly.js'
 import { exportDrawing } from './drawing.js'
 import { shapex, tessellateMesh, transformFromMatrix } from './shapex.js'
 import { exportGcode } from './cam.js'
+import { exportFlatPattern } from './flat-pattern.js'
 
 
 // STEP
@@ -227,6 +228,14 @@ export async function autoExportComponents(root) {
         throw new Error(`Auto-export "${drawing.title}" has no destination path`)
       }
       await exportDrawing(component, drawing, root)
+    }
+    for(const config of component.creator.flatPatterns) {
+      if(!config.autoSave || exportedConfigs.has(config)) continue
+      exportedConfigs.add(config)
+      if(!config.path) {
+        throw new Error(`Auto-export "${config.title}" has no destination path`)
+      }
+      await exportFlatPattern(component, config)
     }
   }
 }

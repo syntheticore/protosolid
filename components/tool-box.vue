@@ -217,6 +217,11 @@
       &:disabled
         filter: brightness(50%)
 
+        // Darkening would make light theme tools stand out, so they fade instead
+        :where([data-theme="light"]) &
+          filter: none
+          opacity: 0.4
+
       &.active
 
         svg
@@ -306,6 +311,19 @@
     MotionLinkFeature,
     GroupFeature,
   } from './../js/core/features.js'
+
+  import {
+    SheetFaceFeature,
+    ContourFlangeFeature,
+    FlangeFeature,
+    HemFeature,
+    BendFeature,
+    UnfoldFeature,
+    RefoldFeature,
+    sheetMetalRules,
+    addSheetMetalRules,
+  } from './../js/core/sheet-metal.js'
+  import { flatPatternDefaults } from './../js/core/flat-pattern.js'
 
   import { hasSystemFonts } from './../js/core/sketch-text.js'
 
@@ -506,6 +524,29 @@
               { title: 'Draft', feature: DraftFeature },
               { title: 'Split', feature: SplitFeature },
               { title: 'Align', icon: 'align' },
+            ],
+          },
+          {
+            title: 'Sheet Metal',
+            tools: [
+              {
+                title: 'Rules',
+                action: this.addSheetMetalRules,
+                icon: 'ruler-combined',
+                isDisabled: () => {
+                  const names = this.document.activeComponent.getParameters().map(parameter => parameter.name)
+                  return sheetMetalRules.every(rule => names.includes(rule.name))
+                },
+              },
+              { title: 'Face', feature: SheetFaceFeature },
+              { title: 'Contour', feature: ContourFlangeFeature },
+              { title: 'Flange', feature: FlangeFeature },
+              { title: 'Hem', feature: HemFeature },
+              { title: 'Bend', feature: BendFeature },
+              { title: 'Corner', icon: 'border-style' },
+              { title: 'Unfold', feature: UnfoldFeature },
+              { title: 'Refold', feature: RefoldFeature },
+              { title: 'Flatten', action: this.addFlatPattern, icon: 'flat-pattern' },
             ],
           },
           {
@@ -844,6 +885,18 @@
           }],
         }
         this.document.regenerateParameters()
+      },
+
+      addSheetMetalRules: function() {
+        addSheetMetalRules(this.document.activeComponent)
+        this.document.regenerateParameters()
+      },
+
+      addFlatPattern: function() {
+        const config = { ...flatPatternDefaults }
+        this.document.activeComponent.creator.flatPatterns.push(config)
+        this.document.activateExport(config, this.document.activeComponent)
+        this.document.markChanged()
       },
 
       addSectionView: function() {

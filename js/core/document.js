@@ -4,6 +4,7 @@ import { nextTick, markRaw } from 'vue'
 import { Timeline } from './timeline.js'
 import { saveFile, loadFile, chooseSavePath } from '../utils.js'
 import { Feature, SolidFeature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PlaneFeature, PoseFeature, PlaceFeature } from './features.js'
+import './sheet-metal.js'
 import { Selection } from '../selection.js'
 import { SectionView } from './component.js'
 import Emitter from '../emitter.js'
@@ -58,6 +59,8 @@ export default class Document extends Emitter {
     this.activeDrawing = null
     this.activeDrawingComponentId = null
     this.activeDrawingTool = null
+    // Replaces a component's body in the viewport, as { componentId, compound }
+    this.displayCompound = null
     this.selection = new Selection()
 
     this.hasChanges = false

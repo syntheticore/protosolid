@@ -344,6 +344,17 @@ function coil() {
   ).join('')
 }
 
+// Sheet ending in an upright flange at x, next to the dashed original edge
+const flangeSection = x => lines([[36, 440], [x, 440], [x, 48]], 80) + dashed(256, 0, 256, 512, 4, THIN)
+
+// Sheet folding back over itself, its bend starting at x
+const hemSection = x => seg(36, 416, x, 416, 64) + arc(x, 352, 64, 90, -90, 64) + seg(x, 288, x - 160, 288, 64) +
+  dashed(256, 0, 256, 512, 4, THIN)
+
+// Sheet bending upwards, its bend starting at x, next to the dashed bend line
+const bendSection = x => seg(36, 440, x, 440, 64) + arc(x, 312, 128, 90, 0, 64) + seg(x + 128, 312, x + 128, 48, 64) +
+  dashed(256, 0, 256, 512, 4, THIN)
+
 const definitions = {
   // Solid features
   'extrude': [
@@ -413,6 +424,66 @@ const definitions = {
     rect(0, 0, 128, 512),
     rect(0, 384, 512, 128),
     shape([160, 96], [160, 352], [416, 352]),
+  ],
+  // Sheet metal features
+  'sheet-face': [
+    shape([144, 88], [512, 88], [368, 320], [0, 320]),
+    rect(0, 352, 368, 72, 16),
+  ],
+  'sheet-contour': [lines([[36, 144], [208, 144], [304, 368], [476, 368]], 64)],
+  'sheet-flange': [
+    rect(0, 408, 256, 80, 16),
+    arc(320, 320, 128, 90, 0, 64),
+    seg(448, 320, 448, 40, 64),
+  ],
+  'sheet-hem': [
+    seg(32, 176, 352, 176, 64),
+    arc(352, 272, 96, -90, 90, 64),
+    seg(352, 368, 160, 368, 64),
+  ],
+  'sheet-bend': [
+    rect(0, 96, 208, 320),
+    rect(304, 96, 208, 320),
+    dashed(256, 48, 256, 464, 4),
+  ],
+  'sheet-unfold': [
+    rect(0, 408, 512, 80, 16),
+    dashed(152, 24, 152, 344, 3, THIN),
+    bezier([216, 48], [376, 64], [464, 160], [464, 256], THIN),
+    arrow(464, 352, 90, 112, 160),
+  ],
+  // Flange positions, as cross sections with the original sheet edge dashed
+  'flange-material-inside': [flangeSection(216)],
+  'flange-material-outside': [flangeSection(296)],
+  'flange-bend-outside': [flangeSection(400)],
+  // Corners of two flanges, seen from above
+  'corner-open': [
+    rect(0, 28, 380, 84),
+    rect(428, 160, 84, 352),
+  ],
+  'hem-material-inside': [hemSection(160)],
+  'hem-bend-outside': [hemSection(288)],
+  // Bend positions relative to the sketched line
+  'bend-centerline': [bendSection(192)],
+  'bend-start': [bendSection(256)],
+  'bend-end': [bendSection(128)],
+  'sheet-refold': [
+    rect(0, 408, 304, 80, 16),
+    dashed(360, 448, 512, 448, 3, THIN),
+    bezier([464, 352], [464, 240], [400, 152], [280, 144], THIN),
+    arrow(168, 144, 180, 112, 160),
+  ],
+  // Unfolded box with dashed bend lines
+  'flat-pattern': [
+    closed([[176, 24], [336, 24], [336, 176], [488, 176], [488, 336], [336, 336], [336, 488], [176, 488], [176, 336], [24, 336], [24, 176], [176, 176]], 48),
+    dashed(208, 176, 304, 176, 2, THIN),
+    dashed(208, 336, 304, 336, 2, THIN),
+    dashed(176, 208, 176, 304, 2, THIN),
+    dashed(336, 208, 336, 304, 2, THIN),
+  ],
+  'corner-miter': [
+    shape([0, 28], [484, 28], [400, 112], [0, 112]),
+    shape([507, 51], [507, 512], [423, 512], [423, 135]),
   ],
   'mirror': [
     shape([204, 0], [204, 512], [0, 512]),

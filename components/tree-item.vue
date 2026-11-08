@@ -97,6 +97,10 @@
       li(v-for="drawing in component.creator.drawings" :key="drawing.id")
         TreeletDrawing(:drawing="drawing" :component="component" :document="document")
 
+      //- Flat Patterns
+      li(v-for="config in component.creator.flatPatterns")
+        TreeletFlatPattern(:config="config", :component="component", :document="document")
+
       //- Material
       TreeletMaterial(
         v-if="component.creator.material && !component.readOnly"
@@ -450,7 +454,8 @@
           this.component.creator.variant ||
           this.component.creator.sectionViews.length ||
           this.component.creator.exportConfigs.length ||
-          this.component.creator.drawings.length
+          this.component.creator.drawings.length ||
+          this.component.creator.flatPatterns.length
       },
 
       planes: function() {

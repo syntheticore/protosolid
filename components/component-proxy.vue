@@ -151,13 +151,17 @@
       .multiply(props.component.localTransform())
   })
 
-  const bounds = computed(() => sectionBounds(props.component.compound))
+  // Another body may temporarily take the place of the component's own
+  const model = computed(() => props.document.displayCompound?.componentId == props.component.id ?
+    props.document.displayCompound.compound : props.component.compound)
+
+  const bounds = computed(() => sectionBounds(model.value))
 
   const compound = computed(() => {
     // Slice model using all visible saved sections and, while sketching,
     // the active sketch plane expressed in this component's local space.
     // Tools picking model topology reference the real model, so they see it unsectioned.
-    if(props.activeTool?.showsUnsectioned) return props.component.compound
+    if(props.activeTool?.showsUnsectioned) return model.value
     const sections = getSections(props.component).filter(sec => !sec.hidden )
     if(props.sectionPlane) {
       sections.push({
@@ -165,9 +169,9 @@
         side: props.sectionSide,
       })
     }
-    if(!sections.length) return props.component.compound
+    if(!sections.length) return model.value
     try {
-      const originalFaces = props.component.compound.solids().flatMap(solid => solid.faces())
+      const originalFaces = model.value.solids().flatMap(solid => solid.faces())
       const planes = sections.map(section => section.getTransform())
       const cut = sections.reduce((shape, section, index) => {
         if(!shape) return null
@@ -179,13 +183,13 @@
           return keepsShape ? shape : null
         }
         return shape.halfCut(planes[index], section.side)
-      }, props.component.compound)
+      }, model.value)
       if(!cut) return null
-      if(cut !== props.component.compound) markSectionFaces(cut, planes, originalFaces)
+      if(cut !== model.value) markSectionFaces(cut, planes, originalFaces)
       return cut
     } catch(error) {
       console.error(`Section view failed for component ${props.component.id}:`, error)
-      return props.component.compound
+      return model.value
     }
   })
 

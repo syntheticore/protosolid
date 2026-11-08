@@ -3768,13 +3768,16 @@ fn line_circle(
     let closest = line.evaluate(closest_parameter)?.point;
     // The expanded quadratic loses precision when the line's origin is far
     // from a tangency. Measure the radial gap at the closest point instead.
-    let radial_gap = circle.radius().powi(2) - (closest - circle.center()).magnitude2();
-    let gap_tolerance = linear * linear * 0.25;
-    if radial_gap < -gap_tolerance {
+    // Tangency is decided on the linear distance between line and circle, as
+    // the squared gap r² - d² shrinks with 2r·(r - d). A squared tolerance
+    // splits solved tangencies into two hits a square root apart.
+    let closest_distance = (closest - circle.center()).magnitude();
+    let radial_gap = circle.radius() - closest_distance;
+    if radial_gap < -linear {
         return Ok(IntersectionSet::Empty);
     }
-    let tangent = radial_gap.abs() <= gap_tolerance;
-    let step = (radial_gap.max(0.0) / a).sqrt();
+    let tangent = radial_gap <= linear;
+    let step = ((circle.radius() + closest_distance) * radial_gap.max(0.0) / a).sqrt();
     let parameters = if tangent {
         vec![closest_parameter]
     } else {

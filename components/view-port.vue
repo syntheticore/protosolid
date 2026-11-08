@@ -475,7 +475,8 @@
       exportPreview: function() {
         const config = this.document.activeExportConfig
         // STEP keeps the exact BREP; only mesh formats preview a tessellation.
-        if(!config || config.format == 'STEP') return null
+        // Flat patterns show through the component itself.
+        if(!config || config.format == 'STEP' || config.kind == 'flat-pattern') return null
         return {
           config,
           componentId: this.document.activeExportComponentId,

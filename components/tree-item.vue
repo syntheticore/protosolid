@@ -3,7 +3,7 @@
   li.tree-item(:class="{ hidden: !isVisible }")
 
     header(
-      @mouseenter="$emit('update:highlight', component)"
+      @mouseenter="hover"
       @mouseleave="$emit('update:highlight', null)"
     )
 
@@ -15,7 +15,7 @@
         fixed-width
       )
 
-      .box(:class="{ active: component.id === document.activeComponent?.id, selected: document.selection.has(component), 'descendant-highlighted': isDescendantHighlighted }")
+      .box(:data-picker-component="component.id" :class="{ active: component.id === document.activeComponent?.id, selected: document.selection.has(component), 'descendant-highlighted': isDescendantHighlighted }")
 
         TreeItemHeader(
           :model-value="component.creator.title"
@@ -490,11 +490,18 @@
         this.document.activateComponent(source || this.component)
       },
 
+      acceptsPick: function() {
+        return !this.document.activeFeature?.acceptsInput || this.document.activeFeature.acceptsInput(this.component)
+      },
+
+      hover: function() {
+        this.$emit('update:highlight', this.component)
+        if(this.bus.componentPickerActive && this.acceptsPick()) this.bus.emit('hover-picker-component', this.component)
+      },
+
       selectComponent: function() {
         if(this.bus.componentPickerActive) {
-          if(!this.document.activeFeature?.acceptsInput || this.document.activeFeature.acceptsInput(this.component)) {
-            this.bus.emit('picked', this.component)
-          }
+          if(this.acceptsPick()) this.bus.emit('picked', this.component)
           return
         }
         this.document.selection.handle(this.component, this.bus.isCtrlPressed)

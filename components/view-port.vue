@@ -579,6 +579,13 @@
 
       this.bus.on('joint-picked', this.jointPicked)
 
+      this.bus.on('hover-picker-component', component => {
+        if(!this.pickingPath) return
+        this.pickingPath.target = { componentId: component.id }
+        this.updatePath(this.pickingPath)
+        this.trackTreePaths()
+      })
+
       this.bus.on('show-picker', this.addPath)
       this.bus.on('clear-pickers', this.clearPaths)
       this.bus.on('activate-tool', this.activateTool)
@@ -634,6 +641,7 @@
     },
 
     beforeUnmount: function() {
+      cancelAnimationFrame(this.treePathFrame)
       this.bus.off('sketch-history', this.changeSketchHistory)
       this.bus.off('sketch-clipboard', this.sketchClipboard)
       clearTimeout(this.zoomEndTimer)
@@ -1198,6 +1206,29 @@
         }
         this.updatePath(path)
         this.paths.push(path)
+        if(center.componentId) this.trackTreePaths()
+      },
+
+      // The tree scrolls and expands without rendering the viewport,
+      // so lines ending at tree items follow it on their own.
+      trackTreePaths: function() {
+        if(this.treePathFrame) return
+        const track = () => {
+          const treePaths = [...this.paths, this.pickingPath].filter(path => path?.target?.componentId)
+          if(!treePaths.length) return this.treePathFrame = null
+          treePaths.forEach(path => this.updatePath(path))
+          this.treePathFrame = requestAnimationFrame(track)
+        }
+        this.treePathFrame = requestAnimationFrame(track)
+      },
+
+      // Collapsed components show their line at the closest visible ancestor
+      treeAnchor: function(componentId, rect) {
+        let component = this.document.top().findChild(componentId)
+        let box
+        while(!(box = window.document.querySelector(`[data-picker-component="${component.id}"]`))) component = component.parent
+        const boxRect = box.getBoundingClientRect()
+        return { x: boxRect.right + 6 - rect.left, y: boxRect.top + boxRect.height / 2 - rect.top }
       },
 
       clearPaths: function() {
@@ -1264,14 +1295,20 @@
         // Picker centers are window coordinates; the drawpad uses viewport coordinates.
         const rect = this.$refs.drawpad.getBoundingClientRect()
         const origin = { x: path.origin.x - rect.left, y: path.origin.y - rect.top }
-        path.targetPos = path.target.isVector2 ? path.target : this.renderer.toScreen(path.target)
-        path.data = this.buildPath(origin, path.targetPos)
+        const inTree = !!path.target.componentId
+        path.targetPos = inTree ? this.treeAnchor(path.target.componentId, rect) :
+          path.target.isVector2 ? path.target : this.renderer.toScreen(path.target)
+        path.data = this.buildPath(origin, path.targetPos, inTree)
       },
 
-      buildPath: function(origin, pos) {
+      // Lines into the tree arrive sideways, past the items below their target
+      buildPath: function(origin, pos, sideways) {
         const sign = this.document.activeFeature ? -1 : 1
         const dx = Math.min(25 + Math.abs(origin.x - pos.x) / 2.0, 200) * sign
         const dy = Math.abs(origin.y - pos.y) / 2.0 * sign
+        if(sideways) {
+          return `M ${origin.x} ${origin.y} C ${origin.x} ${origin.y + dx} ${pos.x + Math.abs(dx)} ${pos.y} ${pos.x} ${pos.y}`
+        }
         if(this.document.activeSimulation) {
           return `M ${origin.x} ${origin.y} C ${origin.x + dx} ${origin.y} ${pos.x - dx} ${pos.y} ${pos.x} ${pos.y}`
         }

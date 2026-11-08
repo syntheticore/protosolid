@@ -704,6 +704,8 @@
       },
 
       getCenter(item, reference) {
+        // Components are picked in the tree, so their lines end there
+        if(item.typename?.() == 'Component') return { componentId: item.id }
         // Axis frames sit at one end of the axis; aim at the picked item instead
         if(reference instanceof AxialReference) item = reference.item.getItem()
         let center

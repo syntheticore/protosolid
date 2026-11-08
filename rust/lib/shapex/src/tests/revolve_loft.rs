@@ -535,6 +535,25 @@ fn feature_conical_revolution() {
 }
 
 #[test]
+fn revolution_with_nearly_radial_end() {
+    // Rounded sketch coordinates tilt the narrow end by about 1e-5 mm,
+    // which makes it an almost flat cone rather than a disk.
+    let t = ModelTolerance::default();
+    let a = Point2::new(404.0, 270.0);
+    let b = Point2::new(843.2337, 698.8458);
+    let p = Profile::new(
+        Wire2::polygon([a, b, Point2::new(831.3576, 711.0096), Point2::new(390.7267, 283.5948)], t).unwrap(),
+        [],
+        t,
+    )
+    .unwrap();
+    let axis = Axis3::new(Point3::new(a.x, a.y, 0.0), Vec3::new(b.x - a.x, b.y - a.y, 0.0)).unwrap();
+    let body = p.revolve(Plane3::xy(), axis, std::f64::consts::TAU).unwrap();
+    assert_eq!(body.faces().count(), 3);
+    mesh(&body);
+}
+
+#[test]
 fn full_revolution_with_one_pole() {
     let tolerance = ModelTolerance::default();
     let bottom = Point2::origin();

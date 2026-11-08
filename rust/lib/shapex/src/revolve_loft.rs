@@ -332,6 +332,9 @@ fn promote_revolution(
                     .evaluate((segment.range().start + segment.range().end) * 0.5)?
                     .point;
                 let height = reference.y - apex_z;
+                // The cone's radius grows linearly from its apex on the axis.
+                // Mapping by radius stays exact for almost flat cones, whose
+                // tiny height would amplify rounding in an axial mapping.
                 (
                     Cone3::new(
                         frame.origin() + frame.z() * apex_z,
@@ -341,7 +344,7 @@ fn promote_revolution(
                         tolerance,
                     )?
                     .into(),
-                    Some(((origin.y - apex_z) / height, direction.y / height)),
+                    Some((origin.x / reference.x, direction.x / reference.x)),
                 )
             }
         }

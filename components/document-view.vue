@@ -14,6 +14,11 @@
       v-model:highlight="highlight"
     )
 
+    DrawingView(
+      v-if="document.activeDrawing"
+      :document="document"
+    )
+
     transition(name="pop")
       MergePanel(
         v-if="document.activeMerge"
@@ -34,7 +39,7 @@
         v-model:highlight="highlight"
       )
 
-    .side-bar.right(:class="{ 'always-labels': alwaysShowSideLabels }")
+    .side-bar.right(v-if="!document.activeDrawing" :class="{ 'always-labels': alwaysShowSideLabels }")
 
       section.side-section
 

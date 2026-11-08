@@ -55,6 +55,9 @@ export default class Document extends Emitter {
     this.activeExportConfig = null
     this.activeExportComponentId = null
     this.camPlayer = null
+    this.activeDrawing = null
+    this.activeDrawingComponentId = null
+    this.activeDrawingTool = null
     this.selection = new Selection()
 
     this.hasChanges = false
@@ -412,6 +415,9 @@ export default class Document extends Emitter {
     this.activeSimulationPicker = false
     this.activeExportConfig = null
     this.activeExportComponentId = null
+    this.activeDrawing = null
+    this.activeDrawingComponentId = null
+    this.activeDrawingTool = null
     if(key) this.selection.clear()
     this.activeInteractivePanel = key
   }
@@ -436,6 +442,14 @@ export default class Document extends Emitter {
     }
     this.activeExportConfig = config
     this.activeExportComponentId = config && component ? component.id : null
+  }
+
+  activateDrawing(drawing, component) {
+    if(drawing || this.activeDrawing) {
+      this.activateInteractivePanel(drawing ? 'drawing' : null)
+    }
+    this.activeDrawing = drawing
+    this.activeDrawingComponentId = drawing && component ? component.id : null
   }
 
   // Parameter values live on component definitions, which are shared by the

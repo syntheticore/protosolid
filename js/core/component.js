@@ -23,6 +23,7 @@ export class ComponentDefinition {
     this.exportConfigs = []
     this.simulations = []
     this.camSetups = []
+    this.drawings = []
     this.canvases = []
     this.itemsHidden = {}
     this.itemNames = {}
@@ -91,6 +92,7 @@ export class ComponentDefinition {
     def.parameters ||= []
     def.simulations ||= []
     def.camSetups ||= []
+    def.drawings ||= []
     def.updateMaterials()
     return def
   }

@@ -50,7 +50,7 @@
             button.button(
               :class="{active: isActive(tool)}"
               :title="tool.title"
-              :disabled="tool.disabled || tool.isDisabled?.() || (!tool.tool && !tool.feature && !tool.action)"
+              :disabled="tool.disabled || tool.isDisabled?.() || (!tool.tool && !tool.feature && !tool.action && !tool.drawingTool)"
               @click="clickTool(tool)"
             )
               Icon(:icon="toolIcon(tool)" fixed-width)
@@ -347,6 +347,7 @@
   import { StaticSimulation } from './../js/core/static.js'
   import { FluidSimulation } from './../js/core/fluid.js'
   import { CamSetup, addOperation, operationTypes } from './../js/core/cam.js'
+  import { createDrawing } from './../js/core/drawing.js'
 
   const layoutDuration = 200
 
@@ -373,10 +374,11 @@
     },
 
     computed: {
-      // Sketch and CAM mode replace the regular tabs with their own
+      // Sketch, CAM and drawing mode replace the regular tabs with their own
       mode: function() {
         if(this.document.activeSketch) return 'sketch'
         if(this.document.camMode) return 'cam'
+        if(this.document.activeDrawing) return 'drawing'
         return null
       },
 
@@ -541,6 +543,7 @@
               { title: 'Canvas', icon: 'image', action: this.addCanvas },
               { title: 'Export', action: this.addExportConfig, icon: 'file-download' },
               { title: 'Manufacture', action: this.addCamSetup, icon: 'industry' },
+              { title: 'Drawing', action: this.addDrawing, icon: 'drafting-compass' },
             ],
           },
           {
@@ -550,6 +553,45 @@
               ...Object.entries(operationTypes).map(([type, { label, icon }]) =>
                 ({ title: label, icon, action: () => this.addCamOperation(type) })
               ),
+            ],
+          },
+          {
+            title: 'Views',
+            mode: 'drawing',
+            tools: [
+              { title: 'Move', drawingTool: 'select', icon: 'arrows-alt' },
+              { title: 'Base View', drawingTool: 'base', icon: 'image' },
+              { title: 'Projected View', drawingTool: 'projected', icon: 'clone' },
+              { title: 'Section View', drawingTool: 'section', icon: 'cut' },
+              { title: 'Detail View', drawingTool: 'detail', icon: 'search-plus' },
+              { title: 'Broken View', drawingTool: 'break', icon: 'compress-alt' },
+              { title: 'Auxiliary View', drawingTool: 'auxiliary', icon: 'external-link-alt' },
+            ],
+          },
+          {
+            title: 'Annotate',
+            mode: 'drawing',
+            tools: [
+              { title: 'Dimension', drawingTool: 'dimension', icon: 'ruler-horizontal', hotKey: 'D', keyCode: 68 },
+              { title: 'Angle', drawingTool: 'angle', icon: 'ruler-combined' },
+              { title: 'Baseline', drawingTool: 'baseline', icon: 'align-left' },
+              { title: 'Ordinate', drawingTool: 'ordinate', icon: 'list-ol' },
+              { title: 'Centerline', drawingTool: 'centerline', icon: 'grip-lines-vertical' },
+              { title: 'Center Mark', drawingTool: 'centermark', icon: 'crosshairs' },
+              { title: 'Note', drawingTool: 'note', icon: 'sticky-note' },
+              { title: 'Hole Callout', drawingTool: 'hole', icon: 'bullseye' },
+              { title: 'Balloon', drawingTool: 'balloon', icon: 'comment' },
+            ],
+          },
+          {
+            title: 'Symbols',
+            mode: 'drawing',
+            tools: [
+              { title: 'Surface Finish', drawingTool: 'finish', icon: 'check' },
+              { title: 'Geometric Tolerance', drawingTool: 'gdt', icon: 'border-all' },
+              { title: 'Datum', drawingTool: 'datum', icon: 'flag' },
+              { title: 'Weld', drawingTool: 'weld', icon: 'fire' },
+              { title: 'Tolerance', drawingTool: 'tolerance', icon: 'sliders-h' },
             ],
           },
         ]
@@ -730,6 +772,9 @@
           } else if(tool.action) {
             tool.action()
 
+          } else if(tool.drawingTool) {
+            this.document.activeDrawingTool = tool.drawingTool
+
           } else if(tool.tool) {
             this.bus.emit('activate-tool', tool.tool)
           }
@@ -739,7 +784,9 @@
       // Clicking the active feature or tool again exits it,
       // while its hot key keeps restarting it
       clickTool: function(tool) {
-        if(this.feature && this.feature.constructor === tool.feature) {
+        if(tool.drawingTool && this.isActive(tool)) {
+          this.document.activeDrawingTool = null
+        } else if(this.feature && this.feature.constructor === tool.feature) {
           this.$refs.featureBox[0].close()
         } else if(this.activeTool && this.activeTool.constructor === tool.tool) {
           this.closeActiveTool()
@@ -749,6 +796,7 @@
       },
 
       isActive: function(tool) {
+        if(tool.drawingTool) return (this.document.activeDrawingTool || 'select') == tool.drawingTool
         return (this.feature && this.feature.constructor === tool.feature)
         || (this.activeTool && this.activeTool.constructor === tool.tool)
       },
@@ -841,6 +889,13 @@
         const [, componentId, setupId] = this.document.activeInteractivePanel.split(':')
         const setup = this.document.getComponent(componentId).creator.camSetups.find(setup => setup.id == setupId)
         addOperation(setup, type)
+        this.document.markChanged()
+      },
+
+      addDrawing: function() {
+        const drawing = createDrawing()
+        this.document.activeComponent.creator.drawings.push(drawing)
+        this.document.activateDrawing(drawing, this.document.activeComponent)
         this.document.markChanged()
       },
 

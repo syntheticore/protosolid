@@ -498,7 +498,7 @@
       },
 
       selectionWidgetItem: function() {
-        if(this.widgets.length || !(this.activeTool instanceof ManipulationTool) || this.document.activeSketch || this.document.activeMerge) return null
+        if(this.widgets.length || !(this.activeTool instanceof ManipulationTool) || this.document.activeSketch || this.document.activeMerge || this.document.activeDrawing) return null
         const item = this.document.selection.items.at(-1)
         return item instanceof Face || item instanceof Edge ? item : null
       },
@@ -1142,7 +1142,8 @@
       },
 
       keyDown: function(key) {
-        if(key == 'Delete' || key == 'Backspace') {
+        // Drawings delete their own selection
+        if((key == 'Delete' || key == 'Backspace') && !this.document.activeDrawing) {
           // Delete Selection
           if(this.document.selection.items.length) {
             [...this.document.selection.items].forEach(item => {

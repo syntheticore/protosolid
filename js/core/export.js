@@ -3,6 +3,7 @@ import * as THREE from 'three'
 
 import { saveFile } from '../utils.js'
 import { relativeComponentTransform } from './assembly.js'
+import { exportDrawing } from './drawing.js'
 import { shapex, tessellateMesh, transformFromMatrix } from './shapex.js'
 import { exportGcode } from './cam.js'
 
@@ -218,6 +219,14 @@ export async function autoExportComponents(root) {
         throw new Error(`Auto-export "${setup.title}" has no destination path`)
       }
       await exportGcode(setup, component)
+    }
+    for(const drawing of component.creator.drawings) {
+      if(!drawing.autoSave || exportedConfigs.has(drawing)) continue
+      exportedConfigs.add(drawing)
+      if(!drawing.path) {
+        throw new Error(`Auto-export "${drawing.title}" has no destination path`)
+      }
+      await exportDrawing(component, drawing, root)
     }
   }
 }

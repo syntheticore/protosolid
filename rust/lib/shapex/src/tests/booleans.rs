@@ -710,17 +710,17 @@ fn section_of_chamfered_and_filleted_slot_frame() {
         })
         .unwrap();
     let retained = with_boss.split(section, SplitKeep::Left).unwrap();
-    assert!(matches!(retained.resolve(top), Resolution::Preserved(_)));
-    let section_faces = retained
+    let mut section_faces = retained
         .faces()
         .filter(|face| {
             matches!(face.surface(), Surface3::Plane(p)
         if p.normal().y.abs() > 0.99 && (p.origin().y - 14.0).abs() < 1e-7)
-        })
-        .count();
-    assert_eq!(
-        section_faces, 2,
-        "the existing top and the new boss cap must remain separate"
+        });
+    let cap = section_faces.next().unwrap();
+    assert!(section_faces.next().is_none(), "the boss cap joins the existing top");
+    assert!(
+        matches!(retained.resolve(top), Resolution::Modified(face) if face == *cap),
+        "the old top resolves to the unified cap"
     );
 }
 

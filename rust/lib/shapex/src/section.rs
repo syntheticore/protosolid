@@ -4,15 +4,18 @@ use cgmath::prelude::*;
 
 use crate::{Point2, Point3, Vec2};
 use super::boolean::{arrange_section_regions,
-    patch_complexity_key, patch_components, same_unoriented_edge, unchanged_face_patch};
+    patch_complexity_key, patch_components, patch_components_with_edge_distance,
+    same_patch_edge, unchanged_face_patch};
 use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
 use super::trim::{align_pcurve_to_face_chart, face_boundary_curves, face_parameter_bounds,
     intersection_chart_copies, partition_to_face, point_in_sampled_trim, trim_samples};
 use super::{BooleanKind, Compound, FaceOrientation, IntersectionSet, Kernel, KernelResult,
     Curve2, Curve3, LoopKind, ModelTolerance, ParameterRange, Plane3,
-    PlaneCurveProjection, SplitKeep, Surface3};
+    PersistentId, PlaneCurveProjection, SplitKeep, Surface3};
 
 type FaceCurve = super::trim::FaceCurve<SegmentProvenance>;
+
+const CAP_EDGE_MATCH_FACTOR: f64 = 4.0;
 
 pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> KernelResult<Compound> {
     if source.solids().len() == 0 { return source.unchanged(); }
@@ -35,7 +38,7 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
         let high = bounds.corners().map(signed).fold(f64::NEG_INFINITY, f64::max);
         if high < -tolerance.linear || low > tolerance.linear {
             let retain = keep == SplitKeep::Both || (high < 0.0) == (keep == SplitKeep::Left);
-            return if retain { source.unchanged() } else { publish(source, Vec::new(), keep, tolerance) };
+            return if retain { source.unchanged() } else { publish(source, Vec::new(), keep, tolerance, plane, &[]) };
         }
         Some(plane_window(plane, bounds.corners().map(Ok), 0.01, tolerance)?)
     } else {
@@ -136,6 +139,7 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
     let mut results = Vec::new();
     for side in sides {
         let mut patches = Vec::new();
+        let mut coplanar = Vec::new();
         for (face, boundary, parameters, curves, coincident, samples) in &prepared {
             let orientation = source.topology().face(face.topology_id())?.orientation();
             let surface = face.surface();
@@ -175,6 +179,9 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
                     patch.preserved.push(face.persistent_id());
                 }
             }
+            if *coincident && !clipped.is_empty() {
+                coplanar.push(face.persistent_id());
+            }
             patches.extend(clipped);
         }
         if patches.len() == prepared.len() && patches.iter().all(|patch| !patch.preserved.is_empty()) {
@@ -182,14 +189,14 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
             continue;
         }
         super::sew::conform_brep_boundaries(&mut patches, tolerance)?;
-        let caps = cap_boundaries(&patches, plane, tolerance).map_err(|error|
+        let caps = cap_boundaries(&patches, plane, tolerance, true).map_err(|error|
             super::KernelError::from_diagnostics(error.diagnostics().iter().cloned()
                 .map(|diagnostic| diagnostic.with_operation("section cap boundaries")).collect()))?;
         if !caps.is_empty() {
             let orientation = if *side == SplitKeep::Left { FaceOrientation::Forward } else { FaceOrientation::Reversed };
             patches.extend(cap_patches(caps, plane, orientation, tolerance)?);
         }
-        results.push(publish(source, patches, *side, tolerance).map_err(|error|
+        results.push(publish(source, patches, *side, tolerance, plane, &coplanar).map_err(|error|
             super::KernelError::from_diagnostics(error.diagnostics().iter().cloned()
                 .map(|diagnostic| diagnostic.with_operation("section sewing")).collect()))?);
     }
@@ -250,19 +257,16 @@ fn plane_window(plane: Plane3, points: impl Iterator<Item = KernelResult<Point3>
         ParameterRange::new(minimum.y - margin, maximum.y + margin)?])
 }
 
-fn cap_boundaries(patches: &[BrepPatch], plane: Plane3, tolerance: ModelTolerance) -> KernelResult<Vec<FaceCurve>> {
+fn cap_boundaries(patches: &[BrepPatch], plane: Plane3, tolerance: ModelTolerance,
+    reverse_uses: bool) -> KernelResult<Vec<FaceCurve>> {
     let mut groups = Vec::<([Point3; 3], BrepPatchSegment, usize)>::new();
-    let linear = tolerance.linear * 4.0;
+    let linear = tolerance.linear * CAP_EDGE_MATCH_FACTOR;
     for segment in patches.iter().flat_map(|patch| &patch.loops).flat_map(|loop_| &loop_.segments) {
-        let sample = [segment.range.start, segment.range.middle(), segment.range.end]
+        let [start, middle, end] = [segment.range.start, segment.range.middle(), segment.range.end]
             .map(|t| segment.curve.evaluate(t).map(|value| value.point));
-        let sample = [sample[0].clone()?, sample[1].clone()?, sample[2].clone()?];
+        let sample = [start?, middle?, end?];
         let matching = groups.iter().position(|(other, candidate, _)| {
-            same_unoriented_edge(sample, *other, linear)
-                || (((sample[0].distance(other[0]) <= linear && sample[2].distance(other[2]) <= linear)
-                    || (sample[0].distance(other[2]) <= linear && sample[2].distance(other[0]) <= linear))
-                    && segment.curve.project_on_trim(other[1], segment.range, tolerance).is_ok_and(|p| p.distance <= linear)
-                    && candidate.curve.project_on_trim(sample[1], candidate.range, tolerance).is_ok_and(|p| p.distance <= linear))
+            same_patch_edge((segment, sample), (candidate, *other), linear, tolerance)
         });
         if let Some(index) = matching { groups[index].2 += 1; }
         else { groups.push((sample, segment.clone(), 1)); }
@@ -282,8 +286,12 @@ fn cap_boundaries(patches: &[BrepPatch], plane: Plane3, tolerance: ModelToleranc
             let pcurve = plane.parameterized_curve_image(&segment.curve, segment.range, tolerance)?;
             (segment.curve, pcurve, segment.range)
         };
-        boundary.push(FaceCurve { curve, pcurve, range: range.reversed(),
-            provenance: segment.provenance.reversed(), loop_end: false,
+        let (range, provenance) = if reverse_uses {
+            (range.reversed(), segment.provenance.reversed())
+        } else {
+            (range, segment.provenance)
+        };
+        boundary.push(FaceCurve { curve, pcurve, range, provenance, loop_end: false,
             loop_kind: LoopKind::Outer, parameter_seam: false });
     }
     // Give the classifier closed contours, including the tiny UV bridges
@@ -359,8 +367,31 @@ fn cap_patches(boundary: Vec<FaceCurve>, plane: Plane3, orientation: FaceOrienta
     Ok(patches)
 }
 
+/// A cut through an existing face can extend that face with new cap regions.
+/// Rebuild each connected region from its exposed edges in one planar chart.
+fn merge_section_faces(patches: Vec<BrepPatch>, plane: Plane3, orientation: FaceOrientation,
+    tolerance: ModelTolerance) -> KernelResult<Vec<BrepPatch>> {
+    let mut faces = Vec::new();
+    let distance = tolerance.linear * CAP_EDGE_MATCH_FACTOR;
+    for component in patch_components_with_edge_distance(patches, tolerance, distance)? {
+        let has_original = component.iter().any(|patch| !patch.sources.is_empty());
+        let has_new_cap = component.iter().any(|patch| patch.sources.is_empty());
+        if !has_original || !has_new_cap {
+            faces.extend(component);
+            continue;
+        }
+        let boundary = cap_boundaries(&component, plane, tolerance, false)?;
+        let sources = component.iter().flat_map(|patch| patch.sources.iter().copied()).collect::<Vec<_>>();
+        for mut patch in cap_patches(boundary, plane, orientation, tolerance)? {
+            patch.sources.clone_from(&sources);
+            faces.push(patch);
+        }
+    }
+    Ok(faces)
+}
+
 fn publish(source: &Compound, mut patches: Vec<BrepPatch>, side: SplitKeep,
-    precision: ModelTolerance) -> KernelResult<Compound> {
+    precision: ModelTolerance, plane: Plane3, coplanar: &[PersistentId]) -> KernelResult<Compound> {
     // Keep sewing's eightfold vertex weld inside the model tolerance and
     // below the resolved clearance used to construct the cut.
     let tolerance = ModelTolerance {
@@ -372,7 +403,19 @@ fn publish(source: &Compound, mut patches: Vec<BrepPatch>, side: SplitKeep,
     let mut kernel = Kernel::new(tolerance)?;
     let mut transaction = kernel.begin_operation();
     let mut bodies = Vec::new();
+    let on_original_plane = |patch: &BrepPatch| patch.sources.iter().any(|name| coplanar.contains(name));
     for component in &mut components {
+        // Determine shell adjacency before joining coplanar regions. Two
+        // distinct shells can touch along an edge in the cut plane.
+        if !coplanar.is_empty() && component.iter().any(on_original_plane)
+            && component.iter().any(|patch| patch.sources.is_empty())
+        {
+            let (section_faces, other): (Vec<_>, Vec<_>) = std::mem::take(component)
+                .into_iter().partition(|patch| patch.sources.is_empty() || on_original_plane(patch));
+            let orientation = if side == SplitKeep::Left { FaceOrientation::Forward } else { FaceOrientation::Reversed };
+            *component = other;
+            component.extend(merge_section_faces(section_faces, plane, orientation, precision)?);
+        }
         component.sort_by_key(patch_complexity_key);
         bodies.push(transaction.brep_shell(component)?);
     }

@@ -2229,6 +2229,23 @@ pub(crate) fn same_unoriented_edge(first: [Point3; 3], second: [Point3; 3], line
             || (first[0].distance(second[2]) <= linear && first[2].distance(second[0]) <= linear))
 }
 
+/// Equivalent trim curves can have different parameterizations. Once the
+/// endpoints agree, project both midpoints before rejecting an edge match.
+pub(super) fn same_patch_edge(
+    (first, a): (&BrepPatchSegment, [Point3; 3]),
+    (second, b): (&BrepPatchSegment, [Point3; 3]),
+    linear: f64,
+    tolerance: ModelTolerance,
+) -> bool {
+    same_unoriented_edge(a, b, linear)
+        || (((a[0].distance(b[0]) <= linear && a[2].distance(b[2]) <= linear)
+            || (a[0].distance(b[2]) <= linear && a[2].distance(b[0]) <= linear))
+            && first.curve.project_on_trim(b[1], first.range, tolerance)
+                .is_ok_and(|projection| projection.distance <= linear)
+            && second.curve.project_on_trim(a[1], second.range, tolerance)
+                .is_ok_and(|projection| projection.distance <= linear))
+}
+
 fn deduplicate_patches(
     patches: &mut Vec<BrepPatch>,
     tolerance: ModelTolerance,
@@ -2423,6 +2440,14 @@ pub(super) fn patch_components(
     patches: Vec<BrepPatch>,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<Vec<BrepPatch>>> {
+    patch_components_with_edge_distance(patches, tolerance, tolerance.linear * 32.0)
+}
+
+pub(super) fn patch_components_with_edge_distance(
+    patches: Vec<BrepPatch>,
+    tolerance: ModelTolerance,
+    linear: f64,
+) -> KernelResult<Vec<Vec<BrepPatch>>> {
     if patches.is_empty() {
         return Ok(Vec::new());
     }
@@ -2430,10 +2455,6 @@ pub(super) fn patch_components(
         .iter()
         .map(patch_edge_samples)
         .collect::<KernelResult<Vec<_>>>()?;
-    let linear = tolerance.linear * 32.0;
-    // Equivalent exact intersection curves can have different parameterizations.
-    // Their parameter midpoints need not coincide in space; test containment on
-    // both trimmed curves before treating the faces as separate components.
     let segments = patches
         .iter()
         .map(|patch| {
@@ -2449,24 +2470,12 @@ pub(super) fn patch_components(
         for (index, sample) in edges.iter().enumerate() {
             let matching = edge_uses.iter().position(|uses| {
                 let (other_face, other_index) = uses[0];
-                let other = samples[other_face][other_index];
-                same_unoriented_edge(*sample, other, linear)
-                    || (((sample[0].distance(other[0]) <= linear
-                        && sample[2].distance(other[2]) <= linear)
-                        || (sample[0].distance(other[2]) <= linear
-                            && sample[2].distance(other[0]) <= linear))
-                        && segments[face][index]
-                            .curve
-                            .project_on_trim(other[1], segments[face][index].range, tolerance)
-                            .is_ok_and(|p| p.distance <= linear)
-                        && segments[other_face][other_index]
-                            .curve
-                            .project_on_trim(
-                                sample[1],
-                                segments[other_face][other_index].range,
-                                tolerance,
-                            )
-                            .is_ok_and(|p| p.distance <= linear))
+                same_patch_edge(
+                    (segments[face][index], *sample),
+                    (segments[other_face][other_index], samples[other_face][other_index]),
+                    linear,
+                    tolerance,
+                )
             });
             if let Some(group) = matching {
                 edge_uses[group].push((face, index));

@@ -130,7 +130,7 @@ fn history_does_not_accumulate_tolerance_as_unchanged_motion() {
 }
 
 #[test]
-fn unchanged_history_distinguishes_section_caps_from_existing_faces() {
+fn section_history_resolves_a_floor_extended_by_the_cap() {
     let cube = owned_cuboid(Point3::origin(), Point3::new(10.0, 10.0, 10.0));
     let pocket = owned_cuboid(Point3::new(3.0, 3.0, 5.0), Point3::new(7.0, 7.0, 12.0));
     let pocketed = cube.difference(&pocket).unwrap();
@@ -150,9 +150,15 @@ fn unchanged_history_distinguishes_section_caps_from_existing_faces() {
         .unwrap();
     let section = Plane3::from_origin_normal(Point3::new(0.0, 0.0, 5.0), Vec3::unit_z()).unwrap();
     let cut = pocketed.split(section, SplitKeep::Left).unwrap();
+    let mut section_faces = cut.faces().filter(|face| {
+        matches!(face.surface(), Surface3::Plane(plane)
+            if plane.normal().z.abs() > 0.9 && (plane.origin().z - 5.0).abs() < 1e-7)
+    });
+    let cap = section_faces.next().unwrap();
+    assert!(section_faces.next().is_none());
     assert!(
-        matches!(cut.resolve(floor), Resolution::Preserved(_)),
-        "coincident floor remains separate from the cut cap"
+        matches!(cut.resolve(floor), Resolution::Modified(face) if face == *cap),
+        "the old floor resolves to the unified cap"
     );
     assert!(
         matches!(cut.resolve(bottom), Resolution::Preserved(_)),
@@ -171,10 +177,10 @@ fn unchanged_history_distinguishes_section_caps_from_existing_faces() {
             "repeated section is unchanged"
         );
     }
-    assert!(
-        matches!(untouched.resolve(floor), Resolution::Preserved(_)),
-        "older floor stays preserved"
-    );
+    let Resolution::Preserved(current_cap) = untouched.resolve(cap) else {
+        panic!("the repeated cut preserves the unified cap");
+    };
+    assert_eq!(untouched.resolve(floor), Resolution::Modified(current_cap));
     assert!(
         matches!(untouched.resolve(bottom), Resolution::Preserved(_)),
         "unchanged ancestry is transitive"

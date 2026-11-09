@@ -519,6 +519,10 @@
 
       toggle: function() {
         this.expanded = !this.expanded
+        // Simulation pickers would stay in the viewport while their treelet is hidden
+        if(!this.expanded && this.component.creator.simulations.includes(this.document.activeSimulation)) {
+          this.document.activateSimulation(null)
+        }
       },
     },
   }

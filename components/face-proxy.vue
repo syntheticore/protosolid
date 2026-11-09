@@ -69,6 +69,8 @@
   watch(() => [highlighted.value, highlightedFeature.value?.operation], () => {
     faceMesh.alcHovered = highlighted.value
     faceMesh.alcCutHovered = highlightedFeature.value?.operation == 'cut'
+    if(highlighted.value) window.alcRenderer.hoveredMeshes.add(faceMesh)
+    else window.alcRenderer.hoveredMeshes.delete(faceMesh)
     renderNeeded.value = true
   }, { immediate: true })
 
@@ -231,6 +233,7 @@
 
   onUnmounted(() => {
     window.alcRenderer.remove(faceMesh)
+    window.alcRenderer.hoveredMeshes.delete(faceMesh)
     analysisGeometry?.dispose()
     props.face.mesh = null
     renderNeeded.value = true

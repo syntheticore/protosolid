@@ -83,6 +83,8 @@ export default class Renderer {
 
     // Scene Objects
     this.traceables = new THREE.Object3D()
+    // Face meshes flagged alcHovered, maintained by face proxies
+    this.hoveredMeshes = new Set()
     this.world = new THREE.Object3D()
     this.traceables.add(this.world)
     this.scene.add(this.traceables)
@@ -451,11 +453,7 @@ export default class Renderer {
     if(!pathTraced) {
       this.pathTracingViewport.stop()
       this.renderer.render(this.scene, this.activeCamera)
-      let hovered = false
-      this.scene.traverseVisible(object => {
-        if(object.alcHovered) hovered = true
-      })
-      if(hovered) {
+      if([...this.hoveredMeshes].some(mesh => mesh.visible)) {
         this.hoverGlow ||= new HoverGlow(this.renderer, this.scene)
         this.hoverGlow.render(this.activeCamera)
       }

@@ -214,7 +214,13 @@
                 strong Server address
                 small Add this URL to your AI client as a streamable HTTP MCP server
 
-              code.mcp-url(@click="selectText") {{ mcpStatus.url }}
+              span.mcp-address
+                code.mcp-url {{ mcpStatus.url }}
+                button.button(
+                  :title="urlCopied ? 'Copied' : 'Copy to clipboard'"
+                  @click="copyUrl"
+                )
+                  Icon(:icon="urlCopied ? 'check' : 'copy'" fixed-width)
 
             span.mcp-error(v-else-if="mcpStatus.error") {{ mcpStatus.error }}
             span.setting-label(v-else)
@@ -451,9 +457,18 @@
     min-height: 56px
     padding: 12px 0
 
+  .mcp-address
+    display: flex
+    align-items: stretch
+
+    .button
+      margin: 0
+      border-top-left-radius: 0
+      border-bottom-left-radius: 0
+
   .mcp-url
     padding: 6px 10px
-    border-radius: 4px
+    border-radius: 4px 0 0 4px
     color: bright1()
     background: tint(0.06)
     font-size: 12px
@@ -519,6 +534,7 @@
         ],
         isDesktop: !!window.ipc,
         mcpStatus: { running: false, url: null, error: null },
+        urlCopied: false,
       }
     },
 
@@ -554,8 +570,11 @@
         this.restartRequired = true
       },
 
-      selectText: function(event) {
-        window.getSelection().selectAllChildren(event.target)
+      copyUrl: async function() {
+        await navigator.clipboard.writeText(this.mcpStatus.url)
+        this.urlCopied = true
+        clearTimeout(this.urlCopiedTimeout)
+        this.urlCopiedTimeout = setTimeout(() => this.urlCopied = false, 1500)
       },
 
       restart: function() {

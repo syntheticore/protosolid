@@ -19,7 +19,7 @@
   const highlightedFeature = computed(() => props.face.topology &&
     [highlight.value, props.document.activeFeature || props.document.creatingFeature, ...props.document.selection.items]
       .find(feature => feature instanceof Feature && topologyIncludesFeature(props.face.topology, feature)))
-  const highlighted = computed(() => props.parentHighlighted || props.face == highlight.value || !!highlightedFeature.value)
+  const highlighted = computed(() => props.parentHighlighted || toRaw(props.face) == toRaw(highlight.value) || !!highlightedFeature.value)
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.face) ||
     pickerSelection.value.get(props.component.id)?.has(props.face.id))
 

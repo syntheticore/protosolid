@@ -8,11 +8,10 @@
     "test:exhaustive": "node --import ./tests/helpers/exhaustive.mjs --test tests/*.test.js",
     "dev": "npm run build-shapex && nuxt dev",
     "dev-tauri": "npm run build-shapex && npm run prepare-assets && tauri dev",
-    "build": "npm run build-shapex && npm run build-app",
+    "build": "npm run build-shapex && npm run clean && npm run prepare-assets && npm run generate",
     "pack": "tauri build",
     "prepare-assets": "node scripts/prepare-assets.mjs",
     "build-shapex": "npm run build --prefix js/shapexJS",
-    "build-app": "npm run clean && npm run prepare-assets && npm run generate",
     "generate": "nuxt generate",
     "clean": "node scripts/clean.mjs",
     "postinstall": "nuxt prepare"

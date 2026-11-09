@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npx nuxt dev --port 3000",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "npm run build-app",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../.output/public"
   },
   "app": {

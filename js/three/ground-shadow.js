@@ -81,9 +81,14 @@ export default class GroundShadow {
       toneMapped: false,
     }))
     this.ground.visible = false
+    this.hidden = false
   }
 
   update() {
+    if(this.hidden) {
+      this.ground.visible = false
+      return
+    }
     const bounds = new THREE.Box3()
     let count = 0
     this.world.updateMatrixWorld()

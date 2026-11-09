@@ -439,8 +439,9 @@
         this.renderer.setProjectionMode(mode)
       },
 
-      'document.activeSimulation': function() {
+      'document.activeSimulation': function(simulation) {
         this.thermalProbe = null
+        this.renderer.setGroundShadowHidden(simulation?.mode == 'static')
         this.$nextTick(this.updateSimulationFlow)
       },
 

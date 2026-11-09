@@ -543,6 +543,13 @@ export default class Renderer {
     this.shadowsNeedUpdate = true
   }
 
+  setGroundShadowHidden(hidden) {
+    if(!this.groundShadow) return
+    this.groundShadow.hidden = hidden
+    this.invalidateShadows()
+    this.render()
+  }
+
   addGizmo(gizmo) {
     this.gizmos.push(gizmo)
     gizmo.enabled = this.gizmoEnabled()

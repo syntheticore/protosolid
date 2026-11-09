@@ -361,9 +361,8 @@ export default class Snapper {
 
   getGuideSnapPoints() {
     const activePoints = this.viewport.activeTool.guideSnapPoints()
-    const origin = this.viewport.document.activeSketch.originPoint()
     const remembered = this.lastSnaps.map(reference => this.resolveSnapReference(reference))
-    return [...activePoints, ...(origin ? [origin] : []), ...remembered].filter((point, index, points) =>
+    return [...activePoints, ...remembered].filter((point, index, points) =>
       points.findIndex(other => other.equals(point)) === index
     )
   }

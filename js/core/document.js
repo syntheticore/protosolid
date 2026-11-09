@@ -949,7 +949,7 @@ export default class Document extends Emitter {
 
   // Target is a branch name or a commit id
   async checkoutVersion(target) {
-    if(this.hasChanges && !window.confirm('Discard unsaved changes and switch to another version?')) return
+    if(this.hasChanges && !await window.confirm('Discard unsaved changes and switch to another version?')) return
     await this.cancelFeature()
     const commitId = this.repository.branches[target] || target
     const { dump, materials } = this.readVersion(this.repository.read(commitId))

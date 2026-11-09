@@ -361,8 +361,9 @@
   async function closeDocument(doc) {
     if(documentBusy.value) return
     const name = doc.filePath || 'Untitled Document'
+    // The desktop app's confirm dialog resolves asynchronously
     if(doc.hasUnsavedChanges &&
-      !window.confirm(name + ' has unsaved changes. Close anyway?')
+      !await window.confirm(name + ' has unsaved changes. Close anyway?')
     ) return
     const index = documents.value.indexOf(doc)
     if(activeDocument.value === doc) {

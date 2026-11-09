@@ -292,8 +292,8 @@
     if(newName && newName != name) run(() => props.document.renameBranch(name, newName) )
   }
 
-  function deleteBranch(name) {
-    if(!window.confirm(`Delete branch '${name}'? Versions that are not part of another branch will be lost.`)) return
+  async function deleteBranch(name) {
+    if(!await window.confirm(`Delete branch '${name}'? Versions that are not part of another branch will be lost.`)) return
     run(() => props.document.deleteBranch(name) )
   }
 

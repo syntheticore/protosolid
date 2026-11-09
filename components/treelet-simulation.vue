@@ -283,7 +283,7 @@
         { key: 'outletPressure', label: 'Outlet Pa gauge' },
         { key: 'density', label: 'Density kg/m³', min: 0 },
         { key: 'viscosity', label: 'Viscosity Pa·s', min: 0 },
-        { key: 'resolution', label: 'Grid cells', step: 1, min: 8, max: 24 },
+        { key: 'resolution', label: 'Grid cells', step: 1, min: 8, max: 64 },
       ],
     },
     thermal: {

@@ -105,7 +105,7 @@ export function solveVoxelFlow(solid, inletFaces, outletFaces, settings, onProgr
       }
     })
   }
-  if(reached.size != points.length) return 'Every connected fluid region needs an outlet; check passages or increase grid cells'
+  if(reached.size != points.length) return 'Could not find path'
 
   // The grid never moves. Precompute the neighbor and interpolation indices
   // once instead of rebuilding trilinear samples for every timestep.

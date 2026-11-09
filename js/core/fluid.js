@@ -53,7 +53,7 @@ export class FluidSimulation {
     if(!Number.isFinite(this.density) || this.density <= 0) return 'Enter a positive density'
     if(!Number.isFinite(this.viscosity) || this.viscosity <= 0) return 'Enter a positive viscosity'
     if(!Number.isFinite(this.outletPressure)) return 'Enter an outlet pressure'
-    if(!Number.isInteger(this.resolution) || this.resolution < 8 || this.resolution > 24) return 'Grid cells must be an integer from 8 to 24'
+    if(!Number.isInteger(this.resolution) || this.resolution < 8 || this.resolution > 64) return 'Grid cells must be an integer from 8 to 64'
   }
 
   sampleAt(position) {

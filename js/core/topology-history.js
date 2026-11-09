@@ -143,6 +143,13 @@ export function trackOperations(out, parents, operations) {
   const correspondence = operations.flatMap(({ compound, operation, branch, bodyParents = parents }) => {
     const solidIds = new Set(compound.solids().map(solid => solid.kernelId))
     const cells = outputs.filter(item => solidIds.has((item.topologyKind == 'body' ? item : item.solid).kernelId))
+    const cellsById = new Map()
+    for(const item of cells) {
+      if(!cellsById.has(item.kernelId)) cellsById.set(item.kernelId, [])
+      cellsById.get(item.kernelId).push(item)
+    }
+    const cellOrder = new Map(cells.map((item, index) => [item, index]))
+    const inOutputOrder = items => [...items].sort((a, b) => cellOrder.get(a) - cellOrder.get(b))
     const history = compound.geom().topologyHistory()
     const policy = (namingPolicies[operation] || defaultPolicy)(operation, history)
     cells.forEach(item => roles.set(item, { name: policy.role(item), branch }))
@@ -162,36 +169,51 @@ export function trackOperations(out, parents, operations) {
       })
       if(tags?.length) construction.set(item, tags)
     }
-    const generatedFrom = (id, source, visited = new Set()) => {
-      if(visited.has(id)) return false
-      const origin = origins.get(id)
-      return !!origin && origin.sources.some(parent => parent == source ||
-        generatedFrom(parent, source, new Set([...visited, id])))
+    const childrenBySource = new Map()
+    for(const origin of origins.values()) {
+      for(const source of origin.sources) {
+        if(!childrenBySource.has(source)) childrenBySource.set(source, [])
+        childrenBySource.get(source).push(origin.id)
+      }
     }
     const records = []
+    const modifiedBodies = new Map()
     for(const source of inputs.filter(item => item.topologyKind != 'body')) {
       const resolution = compound.geom().resolve(source.geom())
       const entityIds = consumeEntityIds(resolution.entities)
-      const resolved = cells.filter(item => item.topologyKind == source.topologyKind && entityIds.includes(item.kernelId))
+      const resolved = inOutputOrder(new Set(entityIds.flatMap(id => cellsById.get(id) || [])
+        .filter(item => item.topologyKind == source.topologyKind)))
       const descendants = resolved.filter(policy.continues)
+      const generated = new Set(resolved)
+      const visited = new Set()
+      const pending = [...(childrenBySource.get(source.kernelId) || [])]
+      while(pending.length) {
+        const id = pending.pop()
+        if(visited.has(id)) continue
+        visited.add(id)
+        for(const item of cellsById.get(id) || []) generated.add(item)
+        for(const child of childrenBySource.get(id) || []) pending.push(child)
+      }
+      for(const item of descendants) generated.delete(item)
       records.push({ source, relation: 'modified', outputs: descendants })
-      records.push({ source, relation: 'generated', outputs: cells.filter(item =>
-        !descendants.includes(item) && (resolved.includes(item) || generatedFrom(item.kernelId, source.kernelId))) })
+      records.push({ source, relation: 'generated', outputs: inOutputOrder(generated) })
+      if(source.topologyKind == 'face' && descendants.length) {
+        if(!modifiedBodies.has(source.solid)) modifiedBodies.set(source.solid, new Set())
+        const bodies = modifiedBodies.get(source.solid)
+        for(const face of descendants) bodies.add(face.solid)
+      }
       if(resolution.kind == 'preserved') for(const item of descendants) {
         item.tessId = source.tessId
         item.cachedTesselation = source.cachedTesselation
       }
     }
-    const bodySources = bodyParents.flatMap(parent => parent.solids())
+    const bodySources = new Set(bodyParents.flatMap(parent => parent.solids()))
     for(const source of inputs.filter(item => item.topologyKind == 'body')) {
       const ids = changes.get(source.kernelId)?.outputs || []
-      const descendants = cells.filter(item => item.topologyKind == 'body' &&
-        (item.kernelId == source.kernelId || ids.includes(item.kernelId)))
-      const faces = new Set(records.filter(record => record.relation == 'modified' &&
-        source.faces().includes(record.source)).flatMap(record => record.outputs))
-      records.push({ source, relation: bodySources.includes(source) ? 'modified' : 'contributed',
-        outputs: descendants.length ? descendants : cells.filter(item =>
-          item.topologyKind == 'body' && item.faces().some(face => faces.has(face))) })
+      const descendants = new Set([source.kernelId, ...ids].flatMap(id => cellsById.get(id) || [])
+        .filter(item => item.topologyKind == 'body'))
+      records.push({ source, relation: bodySources.has(source) ? 'modified' : 'contributed',
+        outputs: inOutputOrder(descendants.size ? descendants : modifiedBodies.get(source) || []) })
     }
     return records
   })

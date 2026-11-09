@@ -72,7 +72,12 @@ impl Lineage {
 
         let generated = generated_index(history);
         let mut entries = BTreeMap::<(EntityKind, PersistentId, uuid::Uuid), LineageEntry>::new();
-        for parent in parents {
+        let mut seen = BTreeSet::new();
+        for parent in &parents {
+            // Several solids split out of one compound share its lineage.
+            if !seen.insert(Arc::as_ptr(parent)) {
+                continue;
+            }
             for ((kind, ancestor, revision), previous) in &parent.entries {
                 let entry = entries.entry((*kind, *ancestor, *revision)).or_default();
                 for source in &previous.descendants {
@@ -893,7 +898,7 @@ impl Compound {
             return self.boolean_single(other, kind);
         }
         match kind {
-            BooleanKind::Union => self.union_components_iterative(other),
+            BooleanKind::Union => self.union_components(other),
             BooleanKind::Intersection => {
                 let mut results = Vec::new();
                 for first in &self.solids {
@@ -933,14 +938,75 @@ impl Compound {
         }
     }
 
-    fn union_components_iterative(&self, other: &Self) -> KernelResult<Self> {
-        let mut components = Vec::<Self>::new();
-        for solid in self.solids.iter().chain(&other.solids) {
+    /// Bodies joined with many tools, as from a pattern, are arranged once with
+    /// all tools near them. Uniting the tools one by one would rearrange the
+    /// growing body for each of them. Overlapping tools are united among
+    /// themselves first, which is cheap for small tools.
+    fn union_components(&self, other: &Self) -> KernelResult<Self> {
+        let tolerance = self.tolerance();
+        if other.solids.len() <= 1 {
+            return Self::united_components(self.solids.iter().chain(&other.solids), tolerance);
+        }
+        let gap = tolerance.linear * 8.0;
+        let bounds_of = |solid: &Solid| super::bounds::compound(&solid.to_compound()).ok();
+        let bodies = Self::united_components(self.solids.iter(), tolerance)?;
+        let tools = Self::united_components(other.solids.iter(), tolerance)?;
+        let body_bounds = bodies.solids.iter().map(bounds_of).collect::<Vec<_>>();
+        let near = |first: Option<super::bounds::Bounds>, second: Option<super::bounds::Bounds>|
+            !matches!((first, second), (Some(first), Some(second)) if first.separated(second, gap));
+        let mut batches = vec![Vec::new(); bodies.solids.len()];
+        let mut results = Vec::new();
+        let mut bridging = false;
+        for tool in &tools.solids {
+            let bounds = bounds_of(tool);
+            let mut nearby = body_bounds.iter().enumerate().filter(|(_, body)| near(**body, bounds)).map(|(index, _)| index);
+            match nearby.next() {
+                Some(index) => {
+                    bridging |= nearby.next().is_some();
+                    batches[index].push(tool.to_compound());
+                }
+                None => results.push(tool.to_compound()),
+            }
+        }
+        for (body, batch) in bodies.solids.iter().zip(batches) {
+            results.push(if batch.is_empty() {
+                body.to_compound()
+            } else {
+                super::boolean::boolean_brep(&body.to_compound(), &combine_compounds(batch, tolerance)?, BooleanKind::Union)?
+            });
+        }
+        let united = combine_compounds(results, tolerance)?;
+        // A tool near several bodies can connect them.
+        if bridging {
+            return Self::united_components(united.solids.iter(), tolerance);
+        }
+        Ok(united)
+    }
+
+    /// Unites solids into separate components. Bounds are kept per component,
+    /// so that solids apart from each other skip the exact Boolean.
+    fn united_components<'a>(solids: impl Iterator<Item = &'a Solid>, tolerance: ModelTolerance) -> KernelResult<Self> {
+        let gap = tolerance.linear * 8.0;
+        let bounds_of = |compound: &Self| super::bounds::compound(compound).ok();
+        let mut components = Vec::<(Self, Option<super::bounds::Bounds>)>::new();
+        for solid in solids {
             let mut candidate = solid.to_compound();
+            let mut candidate_bounds = bounds_of(&candidate);
             let mut index = 0;
             while index < components.len() {
-                let united = components[index].boolean_single(&candidate, BooleanKind::Union)?;
+                if let (Some(first), Some(second)) = (components[index].1, candidate_bounds) {
+                    if first.separated(second, gap) {
+                        index += 1;
+                        continue;
+                    }
+                }
+                let united = super::boolean::boolean_brep(
+                    &components[index].0,
+                    &candidate,
+                    BooleanKind::Union,
+                )?;
                 if united.solids.len() == 1 {
+                    candidate_bounds = bounds_of(&united);
                     candidate = united;
                     components.remove(index);
                     index = 0;
@@ -948,9 +1014,9 @@ impl Compound {
                     index += 1;
                 }
             }
-            components.push(candidate);
+            components.push((candidate, candidate_bounds));
         }
-        combine_compounds(components, self.state.tolerance())
+        combine_compounds(components.into_iter().map(|(component, _)| component).collect(), tolerance)
     }
 
     fn boolean_single(&self, other: &Self, kind: BooleanKind) -> KernelResult<Self> {
@@ -1333,24 +1399,26 @@ impl Compound {
         let mut bodies = Vec::new();
         let mut history = OperationHistory::default();
         let mut certificates = BTreeMap::new();
-        for parent in &parents {
-            ensure_compatible_tolerances(self.state.tolerance(), parent.state.tolerance())?;
-            for solid in &parent.solids {
-                let body = kernel
-                    .topology
-                    .import_body(solid.state.topology(), solid.body)?;
-                bodies.push(body);
-                certificates.insert(
-                    body,
-                    PhysicalCertificate {
-                        properties: solid.mass_properties(),
-                    },
-                );
-                history.absorb(
-                    parent
-                        .history
-                        .identity(parent.topology().body_entity_names(solid.body)?),
-                );
+        for group in parents.chunk_by(|first, second| Arc::ptr_eq(&first.history, &second.history)) {
+            let mut names = Vec::new();
+            for parent in group {
+                ensure_compatible_tolerances(self.state.tolerance(), parent.state.tolerance())?;
+                for solid in &parent.solids {
+                    let body = kernel
+                        .topology
+                        .import_body(solid.state.topology(), solid.body)?;
+                    bodies.push(body);
+                    certificates.insert(
+                        body,
+                        PhysicalCertificate {
+                            properties: solid.mass_properties(),
+                        },
+                    );
+                    names.extend(parent.topology().body_entity_names(solid.body)?);
+                }
+            }
+            if !names.is_empty() {
+                history.absorb(group[0].history.identity(names));
             }
         }
         Self::from_parts(

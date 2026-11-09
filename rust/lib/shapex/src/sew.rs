@@ -381,7 +381,16 @@ fn conform_boundaries(
                 continue;
             }
             let mut parameters = vec![segment.range.start, segment.range.end];
+            // Projections are costly; vertices outside the segment's enclosure
+            // cannot be close to it.
+            let enclosure = super::bounds::curve3(&segment.curve, segment.range).ok().map(|bounds| {
+                let scale = bounds.corners().map(|corner| corner.to_vec().magnitude()).fold(1.0, f64::max);
+                bounds.expanded(tolerance.linear_at_scale(scale) * 16.0)
+            });
             for point in &vertices {
+                if enclosure.is_some_and(|bounds| !bounds.contains(*point)) {
+                    continue;
+                }
                 if ends[current].iter().any(|end| close(*end, *point)) {
                     continue;
                 }

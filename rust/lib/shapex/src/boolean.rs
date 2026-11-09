@@ -287,24 +287,29 @@ impl<'a> Arrangement<'a> {
                 );
             }
         }
-        let source = curves.clone();
+        let source_bounds = curves.iter()
+            .map(|(key, boundary)| Ok((*key, face_parameter_bounds(boundary, tolerance)?)))
+            .collect::<KernelResult<BTreeMap<_, _>>>()?;
+        let mut original_bounds = source_bounds.clone();
         for operand in 0..2 {
             for (index, face) in faces[operand].iter().enumerate() {
-                rechart_periodic_band(
+                let key = (operand, index);
+                let boundary = curves.get_mut(&key).expect("every face has a trim");
+                if rechart_periodic_band(
                     face.surface(),
-                    curves.get_mut(&(operand, index)).expect("every face has a trim"),
+                    boundary,
+                    source_bounds[&key],
                     &faces[1 - operand],
-                    &source,
+                    &source_bounds,
                     1 - operand,
-                    spatial_bounds[&(operand, index)],
+                    spatial_bounds[&key],
                     &spatial_bounds,
                     tolerance,
-                )?;
+                )? {
+                    original_bounds.insert(key, face_parameter_bounds(boundary, tolerance)?);
+                }
             }
         }
-        let original_bounds = curves.iter()
-            .map(|(key, boundary)| Ok((*key, face_parameter_bounds(boundary, tolerance)?)))
-            .collect::<KernelResult<_>>()?;
         Ok(Self {
             operands,
             faces,
@@ -358,11 +363,11 @@ impl<'a> Arrangement<'a> {
             for (second_index, second_face) in faces[1].iter().enumerate() {
                 let first_boundary = &original[&(0, first_index)];
                 let second_boundary = &original[&(1, second_index)];
-                if bounds_separated(
+                let spatial_bounds = [
                     self.spatial_bounds[&(0, first_index)],
                     self.spatial_bounds[&(1, second_index)],
-                    tolerance,
-                ) {
+                ];
+                if bounds_separated(spatial_bounds[0], spatial_bounds[1], tolerance) {
                     continue;
                 }
                 let first_bounds = original_bounds[&(0, first_index)];
@@ -423,6 +428,7 @@ impl<'a> Arrangement<'a> {
                                 second_pcurve,
                                 second_boundary,
                                 Some([first_samples, second_samples]),
+                                spatial_bounds,
                                 tolerance,
                             )?;
                             for range in trimmed {
@@ -774,31 +780,30 @@ fn boundary_curves(compound: &Compound, face: super::FaceId) -> KernelResult<Vec
 fn rechart_periodic_band(
     surface: &Surface3,
     boundary: &mut [FaceCurve],
+    bounds: [ParameterRange; 2],
     opposite: &[super::FaceHandle],
-    sources: &BTreeMap<(usize, usize), Vec<FaceCurve>>,
+    source_bounds: &BTreeMap<FaceKey, [ParameterRange; 2]>,
     operand: usize,
     bounds3: Option<Bounds>,
     spatial_bounds: &BTreeMap<FaceKey, Option<Bounds>>,
     tolerance: ModelTolerance,
-) -> KernelResult<()> {
+) -> KernelResult<bool> {
     if !matches!(surface, Surface3::Cylinder(_)) || boundary.len() != 4
         || boundary.iter().filter(|curve| curve.parameter_seam).count() != 2
         || boundary.iter().any(|curve| !matches!(curve.pcurve, Curve2::Line(_)))
         || boundary.iter().any(|curve| !curve.parameter_seam && !matches!(curve.curve, Curve3::Circle(_)))
     {
-        return Ok(());
+        return Ok(false);
     }
-    let bounds = face_parameter_bounds(boundary, tolerance)?;
     let period = std::f64::consts::TAU;
     if (bounds[0].span() - period).abs() > tolerance.parameter * 64.0 {
-        return Ok(());
+        return Ok(false);
     }
     let mut occupied = Vec::new();
     for (index, face) in opposite.iter().enumerate() {
-        let other = &sources[&(operand, index)];
         if bounds_separated(bounds3, spatial_bounds[&(operand, index)], tolerance) { continue; }
         let intersections = surface.intersect_surface_in_bounds(face.surface(), bounds,
-            face_parameter_bounds(other, tolerance)?, tolerance)?;
+            source_bounds[&(operand, index)], tolerance)?;
         let IntersectionSet::Isolated(intersections) = intersections else { continue; };
         for intersection in intersections {
             let super::DomainBounds::Bounded(range) = intersection.curve.domain().bounds else { continue; };
@@ -809,14 +814,14 @@ fn rechart_periodic_band(
                 minimum = minimum.min(u);
                 maximum = maximum.max(u);
             }
-            if maximum - minimum >= period - tolerance.parameter * 64.0 { return Ok(()); }
+            if maximum - minimum >= period - tolerance.parameter * 64.0 { return Ok(false); }
             let start = (minimum - bounds[0].start).rem_euclid(period);
             let end = start + maximum - minimum;
             occupied.push((start, end.min(period)));
             if end > period { occupied.push((0.0, end - period)); }
         }
     }
-    if occupied.is_empty() { return Ok(()); }
+    if occupied.is_empty() { return Ok(false); }
     occupied.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut end = occupied[0].1;
     let mut gap = (0.0, 0.0);
@@ -825,10 +830,10 @@ fn rechart_periodic_band(
         end = end.max(interval.1);
     }
     if occupied[0].0 + period - end > gap.1 - gap.0 { gap = (end, occupied[0].0 + period); }
-    if gap.1 - gap.0 <= tolerance.parameter * 64.0 { return Ok(()); }
+    if gap.1 - gap.0 <= tolerance.parameter * 64.0 { return Ok(false); }
     // Preserve a seam that already lies in the free interval.
     if occupied[0].0 > tolerance.parameter * 64.0 && end < period - tolerance.parameter * 64.0 {
-        return Ok(());
+        return Ok(false);
     }
     let seam = bounds[0].start + (gap.0 + gap.1) * 0.5;
     for curve in boundary {
@@ -848,7 +853,7 @@ fn rechart_periodic_band(
         curve.provenance = curve.provenance.modified();
         curve.provenance.vertices = Default::default();
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Reuse an existing exact face-boundary curve when a surface/surface
@@ -862,12 +867,24 @@ fn boundary_curve_for_intersection(
     boundary: &[FaceCurve],
     tolerance: ModelTolerance,
 ) -> KernelResult<Option<FaceCurve>> {
+    let mut points = Vec::with_capacity(9);
     for candidate in boundary {
         let mut parameters = Vec::with_capacity(9);
         let mut matches = true;
         for index in 0..=8 {
-            let parameter = range.start + range.span() * index as f64 / 8.0;
-            let point = intersection.evaluate(parameter)?.point;
+            if index == points.len() {
+                let parameter = range.start + range.span() * index as f64 / 8.0;
+                let point = intersection.evaluate(parameter)?.point;
+                let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0;
+                points.push((point, allowed));
+            }
+            let (point, allowed) = points[index];
+            if index == 0 && super::bounds::curve3(&candidate.curve, candidate.range)
+                .is_ok_and(|bounds| !bounds.expanded(allowed).contains(point))
+            {
+                matches = false;
+                break;
+            }
             let Ok(projection) = candidate
                 .curve
                 .project_on_trim(point, candidate.range, tolerance)
@@ -880,7 +897,6 @@ fn boundary_curve_for_intersection(
                 .copied()
                 .unwrap_or(candidate.range.middle());
             let projected = candidate.curve.domain().nearest(projection.parameter, reference);
-            let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0;
             if projection.distance > allowed || !candidate.range.contains(projected, tolerance) {
                 matches = false;
                 break;
@@ -934,6 +950,15 @@ fn arrange_face(
     let kind = self.kind;
     let classification_offset = self.classification_offset;
     let tolerance = self.tolerance;
+    if !has_coincident_support && curves.len() == original_boundary.len()
+        && classifiers[1 - operand].separated_from(self.spatial_bounds[&key])
+    {
+        return if kind == BooleanKind::Union || (kind == BooleanKind::Difference && operand == 0) {
+            Ok(vec![unchanged_face_patch(surface, original_boundary, source_orientation, source_orientation, tolerance)?])
+        } else {
+            Ok(Vec::new())
+        };
+    }
     let mut uv_bounds = [
         Point2::new(f64::INFINITY, f64::INFINITY),
         Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),

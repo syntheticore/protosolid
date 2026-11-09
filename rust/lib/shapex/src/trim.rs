@@ -191,8 +191,8 @@ pub(super) fn face_parameter_bounds<P>(
         // A merged guide need not reach a chart extremum at a uniform sample.
         // Tracing against an underestimated box terminates an intersection
         // inside the face and leaves an open arrangement boundary.
+        let mut first = curve.pcurve.first_order(samples[0].0)?.1;
         for pair in samples.windows(2) {
-            let first = curve.pcurve.first_order(pair[0].0)?.1;
             let second = curve.pcurve.first_order(pair[1].0)?.1;
             for axis in 0..2 {
                 if first[axis] * second[axis] >= 0.0 { continue; }
@@ -206,6 +206,7 @@ pub(super) fn face_parameter_bounds<P>(
                 }
                 points.push(curve.pcurve.first_order((low + high) * 0.5)?.0);
             }
+            first = second;
         }
         for point in points {
             minimum.x = minimum.x.min(point.x);
@@ -555,7 +556,7 @@ pub(super) fn trim_to_faces<P, Q>(
     second_boundary: &[FaceCurve<Q>],
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<ParameterRange>> {
-    trim_to_faces_sampled(curve, first, first_boundary, second, second_boundary, None, tolerance)
+    trim_to_faces_sampled(curve, first, first_boundary, second, second_boundary, None, [None; 2], tolerance)
 }
 
 pub(super) fn trim_to_faces_sampled<P, Q>(
@@ -565,9 +566,10 @@ pub(super) fn trim_to_faces_sampled<P, Q>(
     second: &Curve2,
     second_boundary: &[FaceCurve<Q>],
     samples: Option<[&TrimSamples; 2]>,
+    face_bounds: [Option<super::bounds::Bounds>; 2],
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<ParameterRange>> {
-    let ranges = partition_to_faces_sampled(curve, first, first_boundary, second, second_boundary, samples, tolerance)?;
+    let ranges = partition_to_faces_sampled(curve, first, first_boundary, second, second_boundary, samples, face_bounds, tolerance)?;
     let mut merged = Vec::<ParameterRange>::new();
     for range in ranges {
         if let Some(previous) = merged.last_mut() {
@@ -591,7 +593,7 @@ pub(super) fn partition_to_faces<P, Q>(
     second_boundary: &[FaceCurve<Q>],
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<ParameterRange>> {
-    partition_to_faces_sampled(curve, first, first_boundary, second, second_boundary, None, tolerance)
+    partition_to_faces_sampled(curve, first, first_boundary, second, second_boundary, None, [None; 2], tolerance)
 }
 
 fn partition_to_faces_sampled<P, Q>(
@@ -601,6 +603,7 @@ fn partition_to_faces_sampled<P, Q>(
     second: &Curve2,
     second_boundary: &[FaceCurve<Q>],
     samples: Option<[&TrimSamples; 2]>,
+    face_bounds: [Option<super::bounds::Bounds>; 2],
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<ParameterRange>> {
     fn finite_domain<P>(curve: &Curve2, boundary: &[FaceCurve<P>], tolerance: ModelTolerance) -> KernelResult<ParameterRange> {
@@ -712,7 +715,16 @@ fn partition_to_faces_sampled<P, Q>(
     let mut parameters = vec![domain.start, domain.end];
     // Recover shallow crossings before testing interval interiors. The clipped
     // endpoints then enter the arrangement as existing trim vertices.
+    let enclosure = super::bounds::curve3(curve, domain).ok();
+    // A trim crossing outside the other face's enclosure cannot change
+    // membership in the intersection of the two trimmed faces.
+    let separated = |curve: &Curve3, range: ParameterRange, opposite| {
+        let bounds = super::bounds::curve3(curve, range).ok();
+        super::bounds::bounds_separated(enclosure, bounds, tolerance)
+            || super::bounds::bounds_separated(face_bounds[opposite], bounds, tolerance)
+    };
     for (boundary, samples) in first_boundary.iter().zip(first_boundary_samples.iter()) {
+        if separated(&boundary.curve, boundary.range, 1) { continue; }
         parameters.extend(
             curve_intersections_sampled(&first_curve, boundary, Some([&first_samples, samples]), true, tolerance)?
                 .into_iter()
@@ -720,6 +732,7 @@ fn partition_to_faces_sampled<P, Q>(
         );
     }
     for (boundary, samples) in second_boundary.iter().zip(second_boundary_samples.iter()) {
+        if separated(&boundary.curve, boundary.range, 0) { continue; }
         parameters.extend(
             curve_intersections_sampled(&second_curve, boundary, Some([&second_samples, samples]), true, tolerance)?
                 .into_iter()
@@ -778,23 +791,28 @@ pub(super) fn curve_intersections_sampled<P, Q>(
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<(f64, f64)>> {
     let endpoint_hits = || -> KernelResult<Vec<(f64, f64)>> {
-        let fit = |curve: &Curve3, range: ParameterRange, point: Point3| -> Option<f64> {
+        let fit = |curve: &Curve3, range: ParameterRange, bounds: Option<super::bounds::Bounds>, point: Point3| -> Option<f64> {
+            let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0;
+            if bounds.is_some_and(|bounds| !bounds.expanded(allowed).contains(point)) {
+                return None;
+            }
             let projection = curve.project_on_trim(point, range, tolerance).ok()?;
             let parameter = curve.domain().nearest(projection.parameter, range.middle());
-            let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0;
             (projection.distance <= allowed && range.contains(parameter, tolerance))
                 .then_some(parameter.clamp(range.start.min(range.end), range.start.max(range.end)))
         };
+        let first_bounds = super::bounds::curve3(&first.curve, first.range).ok();
+        let second_bounds = super::bounds::curve3(&second.curve, second.range).ok();
         let mut hits = Vec::<(f64, f64)>::new();
         for first_parameter in [first.range.start, first.range.end] {
-            let point = first.curve.evaluate(first_parameter)?.point;
-            if let Some(second_parameter) = fit(&second.curve, second.range, point) {
+            let point = first.curve.first_order(first_parameter)?.0;
+            if let Some(second_parameter) = fit(&second.curve, second.range, second_bounds, point) {
                 hits.push((first_parameter, second_parameter));
             }
         }
         for second_parameter in [second.range.start, second.range.end] {
-            let point = second.curve.evaluate(second_parameter)?.point;
-            if let Some(first_parameter) = fit(&first.curve, first.range, point) {
+            let point = second.curve.first_order(second_parameter)?.0;
+            if let Some(first_parameter) = fit(&first.curve, first.range, first_bounds, point) {
                 hits.push((first_parameter, second_parameter));
             }
         }

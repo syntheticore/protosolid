@@ -87,39 +87,30 @@ impl Transaction<'_> {
                 if !split {
                     continue;
                 }
-                let mut corners = Vec::new();
-                for (vertex, edges) in boundary {
-                    if endpoints.contains(&vertex) || edges.len() != 2 {
-                        continue;
-                    }
+                // Corners are tried in name order. Continuity is costly to
+                // decide, so only candidates up to the first anchor are tested.
+                // A relocated seam cuts the rings of its own loop, so corners of
+                // other loops cannot anchor it.
+                let seam_loop = self.working.coedge(self.working.edge(seam)?.coedges[0])?.loop_id;
+                let ring = self.working.loop_coedges(seam_loop)?.into_iter()
+                    .map(|id| self.working.coedge_vertices(id).map(|vertices| (vertices[0], id)))
+                    .collect::<KernelResult<BTreeMap<_, _>>>()?;
+                let mut candidates = boundary.into_iter()
+                    .filter(|(vertex, edges)| !endpoints.contains(vertex) && edges.len() == 2 && ring.contains_key(vertex))
+                    .collect::<Vec<_>>();
+                candidates.sort_by_key(|(vertex, _)| self.working.vertex(*vertex).unwrap().name);
+                let bounds = self.face_chart_bounds(face)?;
+                for (vertex, edges) in candidates {
                     let mut edges = edges.into_iter();
-                    if !self.continuous_boundary_edges(
+                    if self.continuous_boundary_edges(
                         vertex,
                         [edges.next().unwrap(), edges.next().unwrap()],
                     )? {
-                        corners.push(vertex);
+                        continue;
                     }
-                }
-                corners.sort_by_key(|vertex| self.working.vertex(*vertex).unwrap().name);
-                for vertex in corners {
-                    let use_id = self
-                        .working
-                        .vertex_edges(vertex)?
-                        .into_iter()
-                        .flat_map(|edge| self.working.edge(edge).unwrap().coedges.clone())
-                        .find(|id| {
-                            self.working.coedge_vertices(*id).unwrap()[0] == vertex
-                                && self
-                                    .working
-                                    .loop_(self.working.coedge(*id).unwrap().loop_id)
-                                    .unwrap()
-                                    .face
-                                    == face
-                        })
-                        .unwrap();
-                    let coedge = self.working.coedge(use_id)?;
+                    let coedge = self.working.coedge(ring[&vertex])?;
                     let target = coedge.pcurve.evaluate(coedge.range.start)?.point;
-                    if self.relocate_periodic_seam(
+                    if self.relocate_periodic_seam_within(
                         seam,
                         face,
                         target,
@@ -129,6 +120,7 @@ impl Transaction<'_> {
                             DerivationRole::PeriodicSeamEdge,
                             DerivationRole::PeriodicSeamUse,
                         ],
+                        bounds,
                     )? {
                         relocated = true;
                         break;
@@ -214,6 +206,26 @@ impl Transaction<'_> {
         placement: SeamPlacement,
         roles: [DerivationRole; 3],
     ) -> KernelResult<bool> {
+        let bounds = self.face_chart_bounds(face)?;
+        self.relocate_periodic_seam_within(seam_id, face, target, placement, roles, bounds)
+    }
+
+    fn face_chart_bounds(&self, face: FaceId) -> KernelResult<[ParameterRange; 2]> {
+        let tolerance = self.kernel.tolerance;
+        face_parameter_bounds(&face_boundary_curves(&self.working, face, tolerance)?, tolerance)
+    }
+
+    /// Relocates a seam with the parameter bounds of its face, which callers
+    /// trying many targets compute once. A rejected target changes nothing.
+    fn relocate_periodic_seam_within(
+        &mut self,
+        seam_id: EdgeId,
+        face: FaceId,
+        target: Point2,
+        placement: SeamPlacement,
+        roles: [DerivationRole; 3],
+        bounds: [ParameterRange; 2],
+    ) -> KernelResult<bool> {
         let tolerance = self.kernel.tolerance;
         let surface = self.working.face(face)?.surface.clone();
         let seam = self.working.edge(seam_id)?.clone();
@@ -253,10 +265,6 @@ impl Transaction<'_> {
         // point, and reject any other crossings between the chosen endpoints.
         let mut rings = Vec::new();
         let mut crossings = Vec::new();
-        let bounds = face_parameter_bounds(
-            &face_boundary_curves(&self.working, face, tolerance)?,
-            tolerance,
-        )?;
         for start in [first.next, second.next] {
             let mut current = start;
             let mut crossing = Vec::<(EdgeId, f64, Option<VertexId>, f64)>::new();
@@ -340,6 +348,30 @@ impl Transaction<'_> {
         }) {
             return Ok(false);
         }
+        // Moving the chart cut cannot split an independent hole. Check its
+        // trim before editing either ring, then move the whole hole together.
+        let mut holes = Vec::new();
+        for loop_id in self.working.face(face)?.loops() {
+            if *loop_id == first.loop_id || self.working.loop_(*loop_id)?.kind != super::LoopKind::Inner {
+                continue;
+            }
+            let coedges = self.working.loop_coedges(*loop_id)?;
+            for id in &coedges {
+                let value = self.working.coedge(*id)?;
+                let midpoint = value.pcurve.first_order(value.range.middle())?.0[axis];
+                let mut origin = Point2::new(0.0, 0.0);
+                origin[axis] = domain.nearest(target, midpoint);
+                let mut direction = Vec2::new(0.0, 0.0);
+                direction[other_axis] = 1.0;
+                let cut = TrimmedCurve2::new(Line2::new(origin, direction)?, bounds[other_axis])?;
+                let trim = TrimmedCurve2::new(value.pcurve.clone(), value.range)?;
+                let intersection = curve_pair_intersection(&trim, &cut, tolerance)?;
+                if intersection.coincident || !intersection.hits.is_empty() {
+                    return Ok(false);
+                }
+            }
+            holes.push(coedges);
+        }
         let loops = self.kemr(seam_id, seam.coedges[0])?;
         let mut outgoing = Vec::new();
         // KEMR puts the successor of the first seam use in the inner
@@ -412,6 +444,23 @@ impl Transaction<'_> {
         let name = self.working.edge(relocated.edge)?.name;
         self.history
             .changed(seam.name, ChangeKind::Modified, [name]);
+        let chart_start = endpoints[0][axis].min(endpoints[1][axis]);
+        for coedges in holes {
+            let first = self.working.coedge(coedges[0])?;
+            let start = first.pcurve.first_order(first.range.start)?.0[axis];
+            let mut offset = Vec2::new(0.0, 0.0);
+            offset[axis] = domain.whole_periods(chart_start + period * 0.5 - start);
+            if offset[axis] == 0.0 {
+                continue;
+            }
+            for id in coedges {
+                let coedge = self.working.coedge(id)?;
+                let name = coedge.name;
+                let pcurve = translate_pcurve(&coedge.pcurve, offset, tolerance)?;
+                self.working.coedges.get_mut(id)?.pcurve = pcurve;
+                self.history.modified(name);
+            }
+        }
         for vertex in seam.vertices {
             self.unify_edge_vertex(vertex)?;
         }

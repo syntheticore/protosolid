@@ -738,7 +738,7 @@ function defaultWasmUrl() {
 
 /** Create the public API around this package's initialized private transport. */
 export function createShapex(bindings) {
-  const required = ['wireProperties', 'profileArea', 'extrude', 'revolve', 'loft', 'sweep', 'NativeWire3', 'NativeCompound', 'NativeFaceList', 'NativeEdgeList', 'NativeSolidList']
+  const required = ['wireProperties', 'profileArea', 'extrude', 'revolve', 'loft', 'sweep', 'NativeWire3', 'NativeCompound', 'NativeCompoundList', 'NativeFaceList', 'NativeEdgeList', 'NativeSolidList']
   required.forEach(name => {
     if(typeof bindings?.[name] != 'function') throw new TypeError(`invalid ShapexJS transport: missing ${name}`)
   })
@@ -1130,10 +1130,12 @@ export function createShapex(bindings) {
     difference(other) { return this._boolean(other, 'difference') }
     intersection(other) { return this._boolean(other, 'intersection') }
     combined(others) {
-      return array(others, 'others').reduce((result, other) => {
-        instance(other, Compound, 'other')
-        return nativeCall(() => new Compound(result._raw().combined(other._raw())))
-      }, this)
+      if(!array(others, 'others').length) return this
+      const list = new bindings.NativeCompoundList()
+      try {
+        others.forEach(other => list.add(instance(other, Compound, 'other')._raw()))
+        return nativeCall(() => new Compound(this._raw().combined(list)))
+      } finally { free(list) }
     }
     dissolveFaces(faces) {
       const list = new bindings.NativeFaceList()

@@ -714,10 +714,7 @@ export class PatternFeature extends RepeatingFeature {
         })
       )
       if(!copies.length) return
-      const tool = copies.slice(1).reduce(
-        (combined, copy) => combined.boolean(copy, 'join'),
-        copies[0],
-      )
+      const tool = unitedTool(copies, comp.compound, this.operation)
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) { this.error = featureError(err, 'Pattern could not be created') }
@@ -826,6 +823,19 @@ export class PatternFeature extends RepeatingFeature {
 Serialize.register(PatternFeature, 'PatternFeature')
 
 
+// Unites tool bodies in one Boolean. Joining them one by one would arrange
+// the growing union again for every tool. A join into existing bodies unites
+// overlapping tools itself, so they are only merged for it.
+function unitedTool(compounds, target, operation) {
+  const [first, ...others] = compounds
+  if(!others.length) return first
+  if(operation == 'join' && target.geom) return first.merge(others)
+  const [second, ...remaining] = others
+  const tools = remaining.length ? second.merge(remaining) : second
+  return first.boolean(tools, 'join')
+}
+
+
 // A stand-in for evaluating a feature again without touching its published
 // state. It shares identities and values, but keeps its own inputs and results.
 function replayReplica(feature) {
@@ -902,7 +912,7 @@ export class MirrorFeature extends RepeatingFeature {
         .map(input => input.toCompound())
         .map(source => source.mirror(plane).namespaceTopology(`mirror/${source.componentId}`))
       if(!copies.length) return
-      const tool = copies.reduce((combined, copy) => combined.boolean(copy, 'join'))
+      const tool = unitedTool(copies, comp.compound, this.operation)
       comp.compound = comp.compound.boolean(tool, this.operation)
       this.previewBody = tool
     } catch(err) { this.error = featureError(err, 'Mirror could not be created') }
@@ -3392,13 +3402,16 @@ export class BooleanFeature extends SolidFeature {
         return { tool, compound, external }
       })
       const tools = inputs.map(input => input.compound)
-      const tool = tools.reduce((acc, tool) => acc.boolean(tool, 'join') )
       const localTools = inputs.filter(input => !input.external)
-      if(localTools.length) comp.compound = comp.compound.removeShapes(localTools.map(input => input.tool))
-      comp.compound = comp.compound.boolean(tool, this.operation)
+      const targetCompound = localTools.length
+        ? comp.compound.removeShapes(localTools.map(input => input.tool))
+        : comp.compound
+      const tool = unitedTool(tools, targetCompound, this.operation)
+      let result = targetCompound.boolean(tool, this.operation)
       if(this.keepTools && localTools.length) {
-        comp.compound = comp.compound.merge(localTools.map(input => input.compound))
+        result = result.merge(localTools.map(input => input.compound))
       }
+      comp.compound = result
       this.previewBody = tool
     } catch(err) { this.error = featureError(err, 'Boolean operation could not be performed') }
   }

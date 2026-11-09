@@ -38,6 +38,10 @@ impl Bounds {
         Self::points([self.0, self.1, other.0, other.1])
     }
 
+    pub(crate) fn contains(self, point: Point3) -> bool {
+        (0..3).all(|axis| self.0[axis] <= point[axis] && point[axis] <= self.1[axis])
+    }
+
     pub(crate) fn expanded(self, radius: f64) -> Self {
         let padding = Vec3::new(radius, radius, radius);
         Self(self.0 - padding, self.1 + padding)
@@ -105,18 +109,12 @@ pub(super) fn wire2(wire: &super::Wire2) -> KernelResult<Bounds> {
 fn parameter_bounds(s: &Surface3, bounds: Bounds) -> KernelResult<Bounds> {
     match s {
         Surface3::Cylinder(c) => {
-            let heights = Bounds::points(bounds.corners().map(|q| {
-                Point3::new(
-                    0.0,
-                    (q - c.origin()).dot(c.axis()) / c.axis().magnitude2(),
-                    0.0,
-                )
-            }));
+            let heights = axial_range(bounds, c.origin(), c.axis(), c.x_radius(), c.y_radius());
             // Azimuth may be unwrapped by any number of periods. Cylinder
             // enclosures only need height and include every azimuth anyway.
             Ok(Bounds(
-                Point3::new(f64::NEG_INFINITY, heights.0.y, 0.0),
-                Point3::new(f64::INFINITY, heights.1.y, 0.0),
+                Point3::new(f64::NEG_INFINITY, heights[0], 0.0),
+                Point3::new(f64::INFINITY, heights[1], 0.0),
             ))
         }
         Surface3::Plane(p) => {
@@ -136,16 +134,10 @@ fn parameter_bounds(s: &Surface3, bounds: Bounds) -> KernelResult<Bounds> {
             })))
         }
         Surface3::Cone(c) => {
-            let heights = Bounds::points(bounds.corners().map(|q| {
-                Point3::new(
-                    0.0,
-                    (q - c.apex()).dot(c.axis()) / c.axis().magnitude2(),
-                    0.0,
-                )
-            }));
+            let heights = axial_range(bounds, c.apex(), c.axis(), c.x_radius(), c.y_radius());
             Ok(Bounds(
-                Point3::new(f64::NEG_INFINITY, heights.0.y, 0.0),
-                Point3::new(f64::INFINITY, heights.1.y, 0.0),
+                Point3::new(f64::NEG_INFINITY, heights[0], 0.0),
+                Point3::new(f64::INFINITY, heights[1], 0.0),
             ))
         }
         Surface3::Offset(offset) => {
@@ -153,6 +145,21 @@ fn parameter_bounds(s: &Surface3, bounds: Bounds) -> KernelResult<Bounds> {
         }
         _ => Err(unavailable()),
     }
+}
+
+fn axial_range(bounds: Bounds, origin: Point3, axis: Vec3, x: Vec3, y: Vec3) -> [f64; 2] {
+    // The radial frame and axis are perpendicular to modeling tolerance.
+    // The frame normal cancels the radial term even if the axis is skewed.
+    let normal = x.cross(y);
+    let scale = normal.dot(axis);
+    bounds.corners().map(|point| normal.dot(point - origin) / scale)
+        .fold([f64::INFINITY, f64::NEG_INFINITY], |[low, high], value| {
+            [low.min(value), high.max(value)]
+        })
+}
+
+fn radial_extent(x: Vec3, y: Vec3) -> Vec3 {
+    Vec3::new(x.x.hypot(y.x), x.y.hypot(y.y), x.z.hypot(y.z))
 }
 
 pub(super) fn curve3(curve: &Curve3, range: ParameterRange) -> KernelResult<Bounds> {
@@ -164,8 +171,25 @@ pub(super) fn curve3(curve: &Curve3, range: ParameterRange) -> KernelResult<Boun
         Curve3::Circle(c) => {
             let x = c.x_radius();
             let y = c.y_radius();
-            let extent = Vec3::new(x.x.hypot(y.x), x.y.hypot(y.y), x.z.hypot(y.z));
-            Bounds(c.center() - extent, c.center() + extent)
+            let extent = radial_extent(x, y);
+            let start = range.start.min(range.end);
+            let end = range.start.max(range.end);
+            let period = std::f64::consts::TAU;
+            if end - start >= period {
+                Bounds(c.center() - extent, c.center() + extent)
+            } else {
+                let mut bounds = Bounds::points([c.evaluate(start)?.point, c.evaluate(end)?.point]);
+                for axis in 0..3 {
+                    let peak = y[axis].atan2(x[axis]);
+                    if (peak - start).rem_euclid(period) <= end - start {
+                        bounds.1[axis] = c.center()[axis] + extent[axis];
+                    }
+                    if (peak + std::f64::consts::PI - start).rem_euclid(period) <= end - start {
+                        bounds.0[axis] = c.center()[axis] - extent[axis];
+                    }
+                }
+                bounds
+            }
         }
         Curve3::Nurbs(c) => Bounds::points(c.control_points().iter().copied()),
         Curve3::SurfaceCurve(c) => surface_curve(c.surface(), c.pcurve(), range)?,
@@ -423,20 +447,18 @@ pub(super) fn surface(s: &Surface3, boundary: Option<Bounds>) -> KernelResult<Bo
             // Axial height has no interior extremum on a cylinder. Enclose its
             // boundary heights, then include the full circular cross-sections.
             let b = boundary.ok_or_else(unavailable)?;
-            Bounds::points(b.corners().map(|p| {
-                c.origin() + c.axis() * ((p - c.origin()).dot(c.axis()) / c.axis().magnitude2())
-            }))
-            .expanded(c.x_radius().magnitude().max(c.y_radius().magnitude()))
+            let heights = axial_range(b, c.origin(), c.axis(), c.x_radius(), c.y_radius());
+            let axial = Bounds::points(heights.map(|h| c.origin() + c.axis() * h));
+            let extent = radial_extent(c.x_radius(), c.y_radius());
+            Bounds(axial.0 - extent, axial.1 + extent)
         }
         Surface3::Cone(c) => {
             let b = boundary.ok_or_else(unavailable)?;
-            let heights: Vec<_> = b
-                .corners()
-                .map(|p| (p - c.apex()).dot(c.axis()) / c.axis().magnitude2())
-                .collect();
-            let radius = heights.iter().copied().map(f64::abs).fold(0.0, f64::max)
-                * c.x_radius().magnitude().max(c.y_radius().magnitude());
-            Bounds::points(heights.into_iter().map(|h| c.apex() + c.axis() * h)).expanded(radius)
+            let heights = axial_range(b, c.apex(), c.axis(), c.x_radius(), c.y_radius());
+            let height = heights[0].abs().max(heights[1].abs());
+            let axial = Bounds::points(heights.map(|h| c.apex() + c.axis() * h));
+            let extent = radial_extent(c.x_radius(), c.y_radius()) * height;
+            Bounds(axial.0 - extent, axial.1 + extent)
         }
         Surface3::Sphere(s) => {
             let x = s.x_radius();

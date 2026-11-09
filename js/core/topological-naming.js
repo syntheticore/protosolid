@@ -294,15 +294,24 @@ export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
   // Names and incidence stay fixed until the branch annotation pass below.
   // Share lookup tables across recipes only within this resolution phase.
   const contextFor = incidenceContexts(neighbors)
+  const itemsByName = new Map()
+  for(const item of items) {
+    for(const name of item.topology.names) {
+      if(!itemsByName.has(name)) itemsByName.set(name, [])
+      itemsByName.get(name).push(item)
+    }
+  }
   for(const item of items) {
     const origin = item.topology.origin
     if(origin.recipe) continue
     const recipe = topologySelection(item, neighbors)
-    const siblings = items.filter(candidate => matchesSelection(candidate, recipe))
+    const candidates = recipe.anchors.map(name => itemsByName.get(name) || [])
+      .reduce((smallest, matches) => matches.length < smallest.length ? matches : smallest, items)
+    const siblings = candidates.filter(candidate => matchesSelection(candidate, recipe))
     const contexts = siblings.length > 1 ? siblings.map(contextFor) : []
     recipe.branch = siblings.length > 1 ? recipe.context.filter(path =>
       contexts.some(context => !context.has(path))) : []
-    const resolution = resolveRecipe(items, recipe, contextFor, sides)
+    const resolution = resolveRecipe(siblings, recipe, contextFor, sides)
     origin.recipe = recipe
     origin.incidenceResolves = !!origin.feature && resolution.status == 'resolved' && resolution.items[0] === item
     // Retain the producer's evidence for picks made after later modifiers.

@@ -1236,6 +1236,22 @@ pub struct NativeCompound {
     inner: Compound,
 }
 
+#[wasm_bindgen(js_name = NativeCompoundList)]
+pub struct NativeCompoundList {
+    values: Vec<Compound>,
+}
+
+#[wasm_bindgen(js_class = NativeCompoundList)]
+impl NativeCompoundList {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { values: Vec::new() }
+    }
+    pub fn add(&mut self, value: &NativeCompound) {
+        self.values.push(value.inner.clone())
+    }
+}
+
 #[wasm_bindgen(js_class = NativeCompound)]
 impl NativeCompound {
     #[wasm_bindgen(js_name = topologyHistory)]
@@ -1356,9 +1372,9 @@ impl NativeCompound {
             .map(|inner| Self { inner })
             .map_err(js_error)
     }
-    pub fn combined(&self, other: &NativeCompound) -> Result<Self, JsValue> {
+    pub fn combined(&self, others: &NativeCompoundList) -> Result<Self, JsValue> {
         self.inner
-            .combined(std::slice::from_ref(&other.inner))
+            .combined(&others.values)
             .map(|inner| Self { inner })
             .map_err(js_error)
     }

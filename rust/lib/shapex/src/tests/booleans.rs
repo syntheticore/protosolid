@@ -1136,3 +1136,32 @@ fn rotated_loft_section_extrusion_touches_inside_a_patch() {
     }
     assert!(volumes[0][0] > loft.volume() && volumes[0][1] < loft.volume());
 }
+
+// Separate blades on a revolved hub. Joining the second moves the hub's seam
+// through its footprint; the first blade's hole must follow into that chart,
+// or the third union drops it as outside the hub's trim.
+#[test]
+fn separate_blades_keep_hub_holes_on_periodic_support() {
+    let tolerance = ModelTolerance::default();
+    let rect = |x0: f64, y0: f64, x1: f64, y1: f64| Profile::new(Wire2::polygon([
+        Point2::new(x0, y0), Point2::new(x1, y0), Point2::new(x1, y1), Point2::new(x0, y1),
+    ], tolerance).unwrap(), [], tolerance).unwrap();
+    let mut hub = rect(-480.0, 0.0, -200.0, 66.0)
+        .revolve(Plane3::xy(), Axis3::new(Point3::origin(), Vec3::unit_x()).unwrap(), std::f64::consts::TAU)
+        .unwrap();
+    let mut volume = hub.volume();
+    for (copy, stage) in [(8, 2), (9, 0), (9, 1)] {
+        let (a, x) = (0.7_f64, -230.0 - stage as f64 * 20.0);
+        let plane = Plane3::new(Point3::new(x, 64.5, 0.0), Vec3::new(a.cos(), 0.0, a.sin()),
+            Vec3::new(-a.sin(), 0.0, a.cos()), tolerance).unwrap();
+        let angle = std::f64::consts::TAU * copy as f64 / 12.0;
+        let rotation = RigidTransform3::from_quaternion(
+            crate::Quaternion::new((angle / 2.0).cos(), (angle / 2.0).sin(), 0.0, 0.0), Vec3::zero(), tolerance).unwrap();
+        let blade = rect(-6.0, -0.8, 6.0, 0.8).extrude(plane, Vec3::unit_y() * 40.0).unwrap()
+            .transformed(rotation).unwrap();
+        volume += blade.volume() - hub.intersection(&blade).unwrap().volume();
+        hub = hub.union(&blade).unwrap();
+    }
+    assert_eq!(hub.solids().count(), 1);
+    assert!((hub.volume() - volume).abs() < 1.0e-6 * volume);
+}

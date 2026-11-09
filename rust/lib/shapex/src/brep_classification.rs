@@ -23,6 +23,7 @@ struct ClassificationFace {
 
 struct ClassificationRegion {
     faces: Range<usize>,
+    bounds: Option<Bounds>,
     orientation: OnceCell<KernelResult<f64>>,
     shell: ShellId,
 }
@@ -75,8 +76,11 @@ impl<'a> BrepClassifier<'a> {
                     });
                 }
             }
+            let bounds = faces[start..].iter().map(|face| face.bounds)
+                .reduce(|first, second| Some(first?.union(second?))).flatten();
             regions.push(ClassificationRegion {
                 faces: start..faces.len(),
+                bounds,
                 shell: shell_id,
                 orientation: OnceCell::new(),
             });
@@ -154,6 +158,10 @@ impl<'a> BrepClassifier<'a> {
         self.classify(point).map(|location| location != PointClassification::Outside)
     }
 
+    pub(super) fn separated_from(&self, bounds: Option<Bounds>) -> bool {
+        self.regions.iter().all(|region| super::bounds::bounds_separated(bounds, region.bounds, self.tolerance))
+    }
+
     pub(super) fn sides_at_point(&self, point: Point3, normal: Vec3) -> KernelResult<(bool, bool)> {
         let step = self.tolerance.linear_at_scale(point.to_vec().magnitude().max(1.0)) * 16.0;
         let offset = normal.normalize() * step;
@@ -176,10 +184,7 @@ impl<'a> BrepClassifier<'a> {
 
 
     fn region_contains(&self, region: &ClassificationRegion, faces: &[ClassificationFace], point: Point3) -> KernelResult<PointClassification> {
-        let bounds = faces.iter().map(|face| face.bounds)
-            .reduce(|first, second| Some(first?.union(second?))).flatten();
-        if bounds.is_some_and(|bounds|
-            (0..3).any(|axis| point[axis] < bounds.0[axis] || point[axis] > bounds.1[axis])) {
+        if region.bounds.is_some_and(|bounds| !bounds.contains(point)) {
             return Ok(PointClassification::Outside);
         }
         let directions = [

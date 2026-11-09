@@ -6,7 +6,7 @@
 
       Icon(icon="square-root-alt" fixed-width)
 
-      input.input.variable(type="text" v-model.trim="name" @keydown.stop @change="commit" @keydown.enter="commitAndSelect")
+      input.input.variable(type="text" v-model.trim="name" :style="{ width: `${nameWidth}px` }" @keydown.stop @change="commit" @keydown.enter="commitAndSelect")
 
       span =
 
@@ -35,7 +35,7 @@
       color: var(--fg)
 
   .variable
-    max-width: 38px !important
+    flex: none
     text-align: right
 
   span
@@ -49,6 +49,19 @@
 
 
 <script>
+
+  // Padding and border of the name input
+  const NAME_INSET = 10
+
+  let measureContext
+
+  function measureName(text) {
+    if(!measureContext) {
+      measureContext = window.document.createElement('canvas').getContext('2d')
+      measureContext.font = `800 9px ${getComputedStyle(window.document.body).fontFamily}`
+    }
+    return measureContext.measureText(text).width
+  }
 
   export default {
     name: 'TreeletParameter',
@@ -64,6 +77,16 @@
         name: this.parameter.name,
         value: this.parameter.value,
       }
+    },
+
+    computed: {
+      // Widest name among the component's parameters, using the edited name for this one
+      nameWidth: function() {
+        const names = this.component.creator.parameters.map(param =>
+          param === this.parameter ? this.name : param.name
+        )
+        return Math.ceil(Math.max(...names.map(measureName))) + NAME_INSET
+      },
     },
 
     watch: {

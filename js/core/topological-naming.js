@@ -157,13 +157,15 @@ export function propagateTopology(items, correspondence, operation, neighbors) {
   }
 }
 
-function incidencePaths(item, neighbors, depth = 2, visited = new Set()) {
+const topologyAnchors = item => item.topology.anchors
+
+function incidencePaths(item, neighbors, anchors = topologyAnchors, depth = 2, visited = new Set()) {
   const paths = []
   const nextVisited = new Set([...visited, item])
   for(const neighbor of neighbors(item).filter(neighbor => !nextVisited.has(neighbor))) {
-    const names = neighbor.topology.anchors
+    const names = anchors(neighbor)
     const descendants = depth > 1 && names.length ?
-      incidencePaths(neighbor, neighbors, depth - 1, nextVisited) : []
+      incidencePaths(neighbor, neighbors, anchors, depth - 1, nextVisited) : []
     for(const name of names) {
       paths.push([name])
       for(const path of descendants) paths.push([name, ...path])
@@ -237,7 +239,7 @@ export function supportName(item, candidates, neighbors) {
   return { anchors: item.topology.anchors, branch, ...(excludes.length ? { excludes } : {}) }
 }
 
-export function topologySelection(item, neighbors, policy = 'single') {
+function selectionRecipe(item, policy) {
   if(!item.topology) throw new Error('This entity has no construction identity')
   return {
     version: 1,
@@ -245,8 +247,11 @@ export function topologySelection(item, neighbors, policy = 'single') {
     identity: item.topology.identity,
     anchors: item.topology.anchors,
     policy,
-    context: incidencePaths(item, neighbors),
   }
+}
+
+export function topologySelection(item, neighbors, policy = 'single') {
+  return { ...selectionRecipe(item, policy), context: incidencePaths(item, neighbors) }
 }
 
 // References store only the selection identity; its recipe holds the context
@@ -294,17 +299,31 @@ export function initializeTopologyOrigins(items, neighbors, sides = () => []) {
   // Names and incidence stay fixed until the branch annotation pass below.
   // Share lookup tables across recipes only within this resolution phase.
   const contextFor = incidenceContexts(neighbors)
+  const needsRecipes = items.some(item => !item.topology.origin.recipe)
   const itemsByName = new Map()
-  for(const item of items) {
+  // Freeze the producer's incidence and anchors before names can change.
+  // Most cells resolve by name alone, so only expand their paths on demand.
+  const producer = new Map()
+  for(const item of needsRecipes ? items : []) {
+    const adjacent = [...neighbors(item)]
+    producer.set(item, { anchors: item.topology.anchors, adjacent })
     for(const name of item.topology.names) {
       if(!itemsByName.has(name)) itemsByName.set(name, [])
       itemsByName.get(name).push(item)
     }
   }
+  const originalNeighbors = item => producer.get(item).adjacent
+  const originalAnchors = item => producer.get(item).anchors
   for(const item of items) {
     const origin = item.topology.origin
     if(origin.recipe) continue
-    const recipe = topologySelection(item, neighbors)
+    let context
+    const recipe = {
+      ...selectionRecipe(item, 'single'),
+      get context() {
+        return context ??= incidencePaths(item, originalNeighbors, originalAnchors)
+      },
+    }
     const candidates = recipe.anchors.map(name => itemsByName.get(name) || [])
       .reduce((smallest, matches) => matches.length < smallest.length ? matches : smallest, items)
     const siblings = candidates.filter(candidate => matchesSelection(candidate, recipe))

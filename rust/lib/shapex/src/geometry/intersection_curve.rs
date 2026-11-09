@@ -1,4 +1,6 @@
 //! Exact surface intersection curves, curves on surfaces, and their p-curves.
+use std::sync::Arc;
+
 use super::*;
 
 /// Guide data fixing the parameterization of an intersection curve.
@@ -38,10 +40,12 @@ fn clamped_difference<T: std::ops::Sub<Output = T> + std::ops::Div<f64, Output =
 /// rather than a polyline or a sampled 3D replacement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurfaceIntersectionCurve {
-    pub(super) first_surface: Box<Surface3>,
-    pub(super) second_surface: Box<Surface3>,
-    pub(super) first_pcurve: Curve2,
-    pub(super) second_pcurve: Curve2,
+    // Arrangement, sewing and topology imports copy trims repeatedly. The
+    // supports and parameter guides are immutable across those copies.
+    first_surface: Arc<Surface3>,
+    second_surface: Arc<Surface3>,
+    first_pcurve: Arc<Curve2>,
+    second_pcurve: Arc<Curve2>,
     pub(super) range: ParameterRange,
     pub(super) tolerance: ModelTolerance,
     pub(super) achieved_error: f64,
@@ -263,7 +267,7 @@ impl SurfaceCurve3 {
 /// curve as the 3D edge, so a BREP coedge never stores a fitted UV surrogate.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurfaceIntersectionPcurve2 {
-    pub(super) curve: Box<SurfaceIntersectionCurve>,
+    pub(super) curve: Arc<SurfaceIntersectionCurve>,
     pub(super) first: bool,
 }
 
@@ -345,9 +349,9 @@ impl SurfaceIntersectionPcurve2 {
 /// boundaries, where a regular surface/surface intersection is singular.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurfaceProjectionPcurve2 {
-    pub(super) curve: Box<Curve3>,
-    pub(super) surface: Box<Surface3>,
-    pub(super) guide: Box<Curve2>,
+    pub(super) curve: Arc<Curve3>,
+    pub(super) surface: Arc<Surface3>,
+    pub(super) guide: Arc<Curve2>,
     pub(super) range: ParameterRange,
     pub(super) tolerance: ModelTolerance,
     pub(super) evaluations: ParameterEvaluationCache<(Point2, Vec2)>,
@@ -370,9 +374,9 @@ impl SurfaceProjectionPcurve2 {
             ));
         }
         let value = Self {
-            curve: Box::new(curve),
-            surface: Box::new(surface),
-            guide: Box::new(guide),
+            curve: Arc::new(curve),
+            surface: Arc::new(surface),
+            guide: Arc::new(guide),
             range,
             tolerance,
             evaluations: ParameterEvaluationCache::default(),
@@ -862,10 +866,10 @@ impl SurfaceIntersectionCurve {
             ));
         }
         let curve = Self {
-            first_surface: Box::new(first_surface),
-            second_surface: Box::new(second_surface),
-            first_pcurve,
-            second_pcurve,
+            first_surface: Arc::new(first_surface),
+            second_surface: Arc::new(second_surface),
+            first_pcurve: Arc::new(first_pcurve),
+            second_pcurve: Arc::new(second_pcurve),
             range,
             tolerance,
             achieved_error,
@@ -930,13 +934,14 @@ impl SurfaceIntersectionCurve {
     }
 
     pub fn exact_pcurves(&self) -> [Curve2; 2] {
+        let curve = Arc::new(self.clone());
         [
             Curve2::SurfaceIntersection(SurfaceIntersectionPcurve2 {
-                curve: Box::new(self.clone()),
+                curve: curve.clone(),
                 first: true,
             }),
             Curve2::SurfaceIntersection(SurfaceIntersectionPcurve2 {
-                curve: Box::new(self.clone()),
+                curve,
                 first: false,
             }),
         ]

@@ -212,7 +212,7 @@ impl Curve2 {
             Self::Projected(curve) => curve.extended(range).map(Self::Projected),
             Self::SurfaceIntersection(pcurve) => {
                 Ok(Self::SurfaceIntersection(SurfaceIntersectionPcurve2 {
-                    curve: Box::new(pcurve.curve.extended(range)?),
+                    curve: std::sync::Arc::new(pcurve.curve.extended(range)?),
                     first: pcurve.first,
                 }))
             }
@@ -306,11 +306,11 @@ impl Curve2 {
             Self::SurfaceIntersection(curve) => {
                 curve
                     .curve
-                    .first_pcurve
+                    .first_pcurve()
                     .collect_parameter_breaks(parameters);
                 curve
                     .curve
-                    .second_pcurve
+                    .second_pcurve()
                     .collect_parameter_breaks(parameters);
             }
             Self::SurfaceProjection(curve) => {
@@ -513,11 +513,8 @@ impl Curve2 {
                     // unambiguous winding; integrate that guide geometrically
                     // without substituting it for the modeled p-curve.
                     let guide = match self {
-                        Self::SurfaceIntersection(pcurve) if pcurve.first => {
-                            &pcurve.curve.first_pcurve
-                        }
-                        Self::SurfaceIntersection(pcurve) => &pcurve.curve.second_pcurve,
-                        Self::SurfaceProjection(pcurve) => &pcurve.guide,
+                        Self::SurfaceIntersection(pcurve) => pcurve.guide(),
+                        Self::SurfaceProjection(pcurve) => pcurve.guide(),
                         _ => unreachable!(),
                     };
                     let mut previous = guide
@@ -699,8 +696,8 @@ impl Curve3 {
         match self {
             Self::Nurbs(curve) => parameters.extend_from_slice(curve.knots()),
             Self::SurfaceIntersection(curve) => {
-                curve.first_pcurve.collect_parameter_breaks(parameters);
-                curve.second_pcurve.collect_parameter_breaks(parameters);
+                curve.first_pcurve().collect_parameter_breaks(parameters);
+                curve.second_pcurve().collect_parameter_breaks(parameters);
             }
             Self::SurfaceCurve(curve) => curve.pcurve().collect_parameter_breaks(parameters),
             Self::Line(_) | Self::Circle(_) => {}

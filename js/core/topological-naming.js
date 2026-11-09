@@ -19,8 +19,10 @@ export class TopologySelectionError extends Error {}
 
 const geometricFrames = new Set(['plane', 'axis', 'cylinder', 'axes'])
 
+// A cell split by a feature continues its source identity, which makes it an
+// ancestor of itself. Only cells with a fresh identity were created here.
 export function topologyIncludesFeature(topology, feature) {
-  return topology.origin.feature?.id == feature.id ||
+  return topology.origin.feature?.id == feature.id && !topology.ancestors.includes(topology.identity) ||
     [topology.identity, ...topology.ancestors].some(name => name.startsWith(`${feature.id}/topology/`)) ||
     (feature.constructor.modifiedFaceInputs || []).some(key => feature[key] &&
       [feature[key]()].flat().some(ref => topology.names.includes(ref.selection.identity)))

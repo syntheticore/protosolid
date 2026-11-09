@@ -650,6 +650,7 @@
         setTimeout(() => {
           if(this.destroyed) return
           this.bus.emit('clear-pickers')
+          if(this.isSketchFeature) return
           const tree = this.document.top(this.document.timeline.features.indexOf(this.activeFeature))
           for(const key in this.activeFeature.settings) {
             const data = this.activeFeature[key]

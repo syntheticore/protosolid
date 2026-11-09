@@ -276,7 +276,7 @@ fn validate_planar_face_regions(
             let outer = outer.ok_or_else(|| {
                 geometry_error("planar face has no outer boundary")
             })?;
-            super::Profile::new(outer, holes, uv_tolerance)?;
+            super::Profile::from_face_wires(outer, holes, uv_tolerance)?;
             Ok(())
         };
         // Analytic circle images are costly to validate, so only fall back to

@@ -1,0 +1,176 @@
+{
+  "lastId": "9n",
+  "timeline": {
+    "$class": "Timeline",
+    "marker": 4,
+    "features": [
+      {
+        "$class": "CreateSketchFeature",
+        "id": "id-1",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XY"
+            }
+          }
+        },
+        "expressions": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "sketch": {
+          "$class": "Sketch",
+          "id": "id-2",
+          "elements": [
+            {
+              "$class": "Circle",
+              "id": "id-3",
+              "_center": {
+                "$class": "Vector3",
+                "elements": [7,0,0]
+              },
+              "radius": 3,
+              "isReference": false
+            }
+          ],
+          "constraints": [],
+          "projections": []
+        }
+      },
+      {
+        "$class": "RevolveFeature",
+        "id": "id-4",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "extent": "angle",
+          "profiles": [
+            {
+              "$class": "ProfileReference",
+              "id": "id-5",
+              "sketchId": "id-2",
+              "rings": [
+                ["id-3"]
+              ]
+            }
+          ],
+          "axis": {
+            "$class": "AxialReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/Y"
+            }
+          },
+          "angle": 360,
+          "offset": 0,
+          "fromFace": null,
+          "limitFace": null,
+          "side": true,
+          "operation": "join"
+        },
+        "expressions": {},
+        "topologyNames": {
+          "version": 2
+        }
+      },
+      {
+        "$class": "PlaneFeature",
+        "id": "id-6",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "mode": "offset",
+          "axis": null,
+          "path": null,
+          "base": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-0/XZ"
+            }
+          },
+          "base2": null,
+          "point": null,
+          "point2": null,
+          "point3": null,
+          "angle": 0,
+          "position": 0,
+          "offset": -1.2909944487358056,
+          "rotationX": 0,
+          "rotationY": 14.477512185929923,
+          "rotationTransform": {
+            "$class": "Matrix4",
+            "elements": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]
+          },
+          "rotationAppliedX": 0,
+          "rotationAppliedY": 0
+        },
+        "expressions": {},
+        "topologyNames": {
+          "version": 2
+        },
+        "planeId": "id-7"
+      },
+      {
+        "$class": "SplitFeature",
+        "id": "id-8",
+        "componentId": "id-0",
+        "componentOccurrenceId": "id-0",
+        "values": {
+          "plane": {
+            "$class": "PlanarReference",
+            "item": {
+              "$class": "HelperReference",
+              "componentId": "id-0",
+              "helperId": "id-7"
+            }
+          },
+          "keep": "left"
+        },
+        "expressions": {},
+        "topologyNames": {
+          "version": 2
+        }
+      }
+    ],
+    "baseCompDef": {
+      "$class": "ComponentDefinition",
+      "title": "Shallow torus saddle section",
+      "hidden": false,
+      "material": null,
+      "cog": false,
+      "sectionViews": [],
+      "parameters": [],
+      "variant": null,
+      "exportConfigs": [],
+      "simulations": [],
+      "canvases": [],
+      "itemsHidden": {
+        "id-2": true
+      },
+      "color": "hsl(47.88, 100%, 59.22%)"
+    }
+  },
+  "views": [
+    {
+      "id": "id-home",
+      "title": "Home",
+      "system": true,
+      "position": {
+        "$class": "Vector3",
+        "elements": [27,19,24]
+      },
+      "target": {
+        "$class": "Vector3",
+        "elements": [0,0,0]
+      }
+    }
+  ]
+}

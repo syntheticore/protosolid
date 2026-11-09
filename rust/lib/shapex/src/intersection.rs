@@ -867,8 +867,10 @@ impl Surface3 {
                 Some(curves) => Ok(IntersectionSet::Isolated(curves)),
                 None => self.intersect_bounded(&Self::Plane(plane), domains, plane_domains, tolerance, true),
             },
-            Self::Torus(torus) if plane.normal().cross(torus.normal()).magnitude() < 0.01 =>
-                Ok(swap_surface_curves(section_plane_torus(plane, *torus, domains, tolerance)?)),
+            Self::Torus(torus) => match section_plane_torus(plane, *torus, domains, tolerance)? {
+                Some(result) => Ok(swap_surface_curves(result)),
+                None => self.intersect_bounded(&Self::Plane(plane), domains, plane_domains, tolerance, true),
+            },
             _ => self.intersect_bounded(&Self::Plane(plane), domains, plane_domains, tolerance, true),
         }
     }
@@ -1524,9 +1526,9 @@ fn regular_revolution_section(
 /// discriminant determines every branch interval, including arbitrarily thin
 /// sections that a grid of numerical tracing seeds can miss.
 fn section_plane_torus(plane: Plane3, torus: super::Torus3, domains: [super::ParameterRange; 2], tolerance: ModelTolerance)
-    -> KernelResult<IntersectionSet<SurfaceSurfaceCurve>> {
+    -> KernelResult<Option<IntersectionSet<SurfaceSurfaceCurve>>> {
     match plane_torus(plane, torus, tolerance) {
-        Ok(result) => return Ok(result),
+        Ok(result) => return Ok(Some(result)),
         Err(error) if error.diagnostics().iter().all(|d| d.kind == DiagnosticKind::UnsupportedGeometry) => {},
         Err(error) => return Err(error),
     }
@@ -1538,13 +1540,20 @@ fn section_plane_torus(plane: Plane3, torus: super::Torus3, domains: [super::Par
     let d = n.dot(torus.center() - plane.origin());
     let major = torus.major_radius();
     let minor = torus.minor_radius();
+    let scale = plane.origin().to_vec().magnitude().max(torus.center().to_vec().magnitude()).max(major);
+    let roundoff = f64::EPSILON * scale * 128.0;
+    // At a saddle the two branches meet at an extremum of the projected major circle.
+    // The bounded tracer separates the incident arcs at that junction.
+    if (d.abs() - (major * h - minor).abs()).abs() <= roundoff {
+        return Ok(None);
+    }
     let quadratic = (major - minor) * (major + minor);
     let reach = minor * (d * d + quadratic * c * c).sqrt();
     let large = (-major * d - reach.copysign(major * d)) / quadratic;
     let small = (d - minor * c) * (d + minor * c) / (quadratic * large);
     let low = large.min(small);
     let high = large.max(small);
-    if low > h || high < -h { return Ok(IntersectionSet::Empty); }
+    if low > h || high < -h { return Ok(Some(IntersectionSet::Empty)); }
     let phase = b.atan2(a);
     let tau = std::f64::consts::TAU;
     let mut cuts = vec![0.0, tau];
@@ -1615,7 +1624,7 @@ fn section_plane_torus(plane: Plane3, torus: super::Torus3, domains: [super::Par
             curves.push(SurfaceSurfaceCurve { curve: implicit.into(), first_pcurve, second_pcurve, achieved_error });
         }
     }
-    Ok(if curves.is_empty() { IntersectionSet::Empty } else { IntersectionSet::Isolated(curves) })
+    Ok(Some(if curves.is_empty() { IntersectionSet::Empty } else { IntersectionSet::Isolated(curves) }))
 }
 
 /// Periodic Hermite guide with the same tangent at both seam representatives.
@@ -2548,12 +2557,23 @@ fn trace_surface_intersections_in_domains(
                 let length = *guide_parameters.last().unwrap();
                 for parameter in &mut guide_parameters { *parameter /= length; }
             }
+            // Component-wise monotone smoothing can zero the entire tangent
+            // when two traced chords have no coordinate moving in the same
+            // direction. The exact corrector needs a nonzero guide gauge.
+            let smooth = first_points.windows(3).zip(second_points.windows(3)).all(|(a, b)| {
+                [a, b].into_iter().any(|p| {
+                    let before = p[1] - p[0];
+                    let after = p[2] - p[1];
+                    before.x * after.x > 0.0 || before.y * after.y > 0.0
+                })
+            });
             let guide = |points: &[Point2]| {
                 if nested_intersection && !interpolate_guides {
                     let parameters = (0..points.len()).map(|index| index as f64 / (points.len() - 1) as f64).collect::<Vec<_>>();
                     interpolating_nurbs_guide(points, &parameters)
                 } else if torus_plane || interpolate_guides {
                     let linear = interpolating_nurbs_guide(points, &guide_parameters)?;
+                    if !smooth { return Ok(linear); }
                     match smooth_interpolating_guide(&linear)? {
                         Curve2::Nurbs(curve) => Ok(curve),
                         _ => unreachable!(),

@@ -7,9 +7,9 @@ use super::boolean::{arrange_section_regions,
     patch_complexity_key, patch_components, same_unoriented_edge, unchanged_face_patch};
 use super::sew::{BrepPatch, BrepPatchLoop, BrepPatchSegment, SegmentProvenance};
 use super::trim::{align_pcurve_to_face_chart, face_boundary_curves, face_parameter_bounds,
-    intersection_chart_copies, partition_to_faces, point_in_sampled_trim, trim_samples};
+    intersection_chart_copies, partition_to_face, point_in_sampled_trim, trim_samples};
 use super::{BooleanKind, Compound, FaceOrientation, IntersectionSet, Kernel, KernelResult,
-    Curve2, Curve3, Line2, Line3, LoopKind, ModelTolerance, ParameterRange, Plane3,
+    Curve2, Curve3, LoopKind, ModelTolerance, ParameterRange, Plane3,
     PlaneCurveProjection, SplitKeep, Surface3};
 
 type FaceCurve = super::trim::FaceCurve<SegmentProvenance>;
@@ -23,34 +23,24 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
     if nearest.abs() <= tolerance.linear {
         plane = Plane3::from_origin_normal(plane.origin() + plane.normal() * nearest, plane.normal())?;
     }
-    let bounds = super::bounds::compound(source)?;
+    let bounds = super::bounds::compound(source).ok();
     let signed = |point: Point3| (point - plane.origin()).dot(plane.normal());
     // Keep the arrangement's accumulated weld allowances below a resolved
     // gap between the plane and an existing vertex.
     let clearance = source.vertices().map(|vertex| signed(vertex.point()).abs())
         .filter(|distance| *distance > tolerance.linear).fold(f64::INFINITY, f64::min);
     tolerance.linear = tolerance.linear.min(clearance / 64.0);
-    let low = bounds.corners().map(signed).fold(f64::INFINITY, f64::min);
-    let high = bounds.corners().map(signed).fold(f64::NEG_INFINITY, f64::max);
-    if high < -tolerance.linear || low > tolerance.linear {
-        let retain = keep == SplitKeep::Both || (high < 0.0) == (keep == SplitKeep::Left);
-        return if retain { source.unchanged() } else { publish(source, Vec::new(), keep, tolerance) };
-    }
-    let mut minimum = Point2::new(f64::INFINITY, f64::INFINITY);
-    let mut maximum = Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
-    for corner in bounds.corners() {
-        let point = plane.coordinates(corner)?;
-        for axis in 0..2 {
-            minimum[axis] = minimum[axis].min(point[axis]);
-            maximum[axis] = maximum[axis].max(point[axis]);
+    let plane_bounds = if let Some(bounds) = bounds {
+        let low = bounds.corners().map(signed).fold(f64::INFINITY, f64::min);
+        let high = bounds.corners().map(signed).fold(f64::NEG_INFINITY, f64::max);
+        if high < -tolerance.linear || low > tolerance.linear {
+            let retain = keep == SplitKeep::Both || (high < 0.0) == (keep == SplitKeep::Left);
+            return if retain { source.unchanged() } else { publish(source, Vec::new(), keep, tolerance) };
         }
-    }
-    let margin = (maximum - minimum).magnitude() * 0.01 + tolerance.linear * 64.0;
-    minimum -= Vec2::new(margin, margin);
-    maximum += Vec2::new(margin, margin);
-    let plane_bounds = [ParameterRange::new(minimum.x, maximum.x)?,
-        ParameterRange::new(minimum.y, maximum.y)?];
-    let rectangle = plane_boundary(plane, minimum, maximum)?;
+        Some(plane_window(plane, bounds.corners().map(Ok), 0.01, tolerance)?)
+    } else {
+        None
+    };
     let scale = source.vertices().map(|vertex| vertex.point().to_vec().magnitude())
         .fold(1.0_f64, f64::max);
     let probe = (tolerance.linear_at_scale(scale) * 128.0).max(scale * 1e-4);
@@ -59,11 +49,32 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
     let contact = tolerance.linear_at_scale(scale) * 128.0;
     let mut prepared = Vec::new();
     for face in source.faces() {
-        let boundary = face_boundary_curves(source.topology(), face.topology_id(), tolerance)?
+        let mut boundary = face_boundary_curves(source.topology(), face.topology_id(), tolerance)?
             .into_iter().map(|curve| {
                 let provenance = SegmentProvenance::from_coedge(source.topology(), curve.provenance)?;
                 Ok(curve.with_provenance(provenance))
             }).collect::<KernelResult<Vec<_>>>()?;
+        let domains = face.surface().domains();
+        if domains.iter().any(|domain| domain.period.is_some())
+            && boundary.iter().any(|edge| edge.loop_kind == LoopKind::Inner)
+        {
+            let outer = boundary.split_inclusive(|edge| edge.loop_end)
+                .find(|loop_| loop_[0].loop_kind == LoopKind::Outer).unwrap();
+            let center = super::box_center(face_parameter_bounds(outer, tolerance)?);
+            for hole in boundary.split_inclusive_mut(|edge| edge.loop_end)
+                .filter(|loop_| loop_[0].loop_kind == LoopKind::Inner)
+            {
+                // A closed inner loop can retain an independent periodic lift.
+                // Move it into the outer loop's chart before clipping either.
+                let offset = super::whole_periods(domains,
+                    center - super::box_center(face_parameter_bounds(hole, tolerance)?));
+                if offset.magnitude2() > 0.0 {
+                    for edge in hole {
+                        edge.pcurve = super::trim::translate_pcurve(&edge.pcurve, offset, tolerance)?;
+                    }
+                }
+            }
+        }
         let parameters = face_parameter_bounds(&boundary, tolerance)?;
         let mut curves = boundary.clone();
         let context = |stage: &str, error: super::KernelError| {
@@ -71,18 +82,38 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
                 diagnostic.with_entity(face.persistent_id()).with_operation(format!("section {stage} on {}", face.surface().kind_name()))
             }).collect())
         };
-        let intersections = face.surface().intersect_section_plane(
-            plane, parameters, plane_bounds, tolerance)
+        let surface = face.surface();
+        let window = match plane_bounds {
+            Some(bounds) => bounds,
+            // The support tracer needs finite plane coordinates. Estimate
+            // that window for procedural faces without a certified enclosure.
+            // Trim the resulting curves in the source face's chart.
+            None => match super::bounds::face(source.topology(), face.topology_id()) {
+                Ok(bounds) => plane_window(plane, bounds.corners().map(Ok), 0.01, tolerance)?,
+                Err(_) => plane_window(plane, (0..=8).flat_map(|u| {
+                    let surface = &surface;
+                    (0..=8).map(move |v| {
+                        let u = parameters[0].start + parameters[0].span() * u as f64 / 8.0;
+                        let v = parameters[1].start + parameters[1].span() * v as f64 / 8.0;
+                        surface.first_order(u, v).map(|value| value.0)
+                    })
+                }), 0.25, tolerance)?,
+            },
+        };
+        let intersections = surface.intersect_section_plane(
+            plane, parameters, window, tolerance)
             .map_err(|error| context("intersection", error))?;
         let coincident = matches!(intersections, IntersectionSet::Coincident);
+        let mut samples = None;
         if let IntersectionSet::Isolated(intersections) = intersections {
+            let boundary_samples = trim_samples(&boundary)?;
             for intersection in intersections {
                 let aligned = align_pcurve_to_face_chart(&intersection.first_pcurve, None,
                     face.surface(), &boundary, tolerance)?;
                 for pcurve in intersection_chart_copies(intersection.curve.domain().bounds,
                     &aligned, face.surface(), parameters, tolerance)? {
-                    for range in partition_to_faces(&intersection.curve, &pcurve, &boundary,
-                        &intersection.second_pcurve, &rectangle, tolerance)
+                    for range in partition_to_face(&intersection.curve, &pcurve, &boundary,
+                        &intersection.second_pcurve, &boundary_samples, tolerance)
                         .map_err(|error| context("trim", error))? {
                         if !lies_on_boundary(&intersection.curve, range, &boundary, tolerance)?
                             && crosses_plane(face.surface(), &pcurve, range, contact, signed)? {
@@ -93,8 +124,9 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
                     }
                 }
             }
+            if curves.len() > boundary.len() { samples = Some(boundary_samples); }
         }
-        prepared.push((face, boundary, parameters, curves, coincident));
+        prepared.push((face, boundary, parameters, curves, coincident, samples));
     }
     let sides: &[SplitKeep] = match keep {
         SplitKeep::Both => &[SplitKeep::Left, SplitKeep::Right],
@@ -104,7 +136,7 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
     let mut results = Vec::new();
     for side in sides {
         let mut patches = Vec::new();
-        for (face, boundary, parameters, curves, coincident) in &prepared {
+        for (face, boundary, parameters, curves, coincident, samples) in &prepared {
             let orientation = source.topology().face(face.topology_id())?.orientation();
             let surface = face.surface();
             let inside = |point: Point3| signed(point) * if *side == SplitKeep::Left { 1.0 } else { -1.0 } < 0.0;
@@ -114,29 +146,28 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
                 let retain = (outward.dot(plane.normal()) > 0.0) == (*side == SplitKeep::Left);
                 if retain { vec![unchanged_face_patch(surface, boundary, orientation, orientation, tolerance)?] }
                 else { Vec::new() }
-            } else if curves.len() == boundary.len() {
+            } else if let Some(samples) = samples {
+                arrange_section_regions(surface, curves, limit, tolerance, plane, *side, orientation, |uv| {
+                    Ok(point_in_sampled_trim(uv, boundary, samples)?.then_some(orientation))
+                }).map_err(|error| super::KernelError::from_diagnostics(error.diagnostics().iter().cloned()
+                    .map(|diagnostic| diagnostic.with_entity(face.persistent_id())
+                        .with_operation(format!("section arrangement on {}", surface.kind_name()))).collect()))?
+            } else {
                 let mut retained = false;
                 for edge in boundary.iter().filter(|edge| !edge.parameter_seam) {
                     let (uv, tangent) = edge.pcurve.first_order(edge.range.middle())?;
                     let tangent = tangent * edge.range.span().signum() * orientation.sign();
                     if tangent.magnitude2() <= tolerance.parameter.powi(2) { continue; }
                     let inward = Vec2::new(-tangent.y, tangent.x).normalize();
-                    let value = surface.evaluate(uv.x, uv.y)?;
-                    let direction = value.du * inward.x + value.dv * inward.y;
+                    let (_, du, dv) = surface.first_order(uv.x, uv.y)?;
+                    let direction = du * inward.x + dv * inward.y;
                     if direction.magnitude2() <= tolerance.linear.powi(2) { continue; }
                     let candidate = uv + inward * (probe / direction.magnitude()).min(limit);
-                    retained = inside(surface.evaluate(candidate.x, candidate.y)?.point);
+                    retained = inside(surface.first_order(candidate.x, candidate.y)?.0);
                     break;
                 }
                 if retained { vec![unchanged_face_patch(surface, boundary, orientation, orientation, tolerance)?] }
                 else { Vec::new() }
-            } else {
-                let samples = trim_samples(boundary)?;
-                arrange_section_regions(surface, curves, probe, limit, tolerance, plane, *side, orientation, |uv| {
-                    Ok(point_in_sampled_trim(uv, boundary, &samples)?.then_some(orientation))
-                }).map_err(|error| super::KernelError::from_diagnostics(error.diagnostics().iter().cloned()
-                    .map(|diagnostic| diagnostic.with_entity(face.persistent_id())
-                        .with_operation(format!("section arrangement on {}", surface.kind_name()))).collect()))?
             };
             for patch in &mut clipped {
                 patch.sources.push(face.persistent_id());
@@ -168,11 +199,18 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
 
 fn lies_on_boundary(curve: &Curve3, range: ParameterRange, boundary: &[FaceCurve],
     tolerance: ModelTolerance) -> KernelResult<bool> {
+    let middle = curve.first_order(range.middle())?.0;
+    let linear = tolerance.linear * 0.5;
     for edge in boundary {
+        if super::bounds::curve3(&edge.curve, edge.range).is_ok_and(|bounds| !bounds.expanded(linear).contains(middle))
+            || edge.curve.project_on_trim(middle, edge.range, tolerance)?.distance > linear
+        {
+            continue;
+        }
         let mut coincident = true;
-        for index in 0..=8 {
-            let point = curve.evaluate(range.start + range.span() * index as f64 / 8.0)?.point;
-            if edge.curve.project_on_trim(point, edge.range, tolerance)?.distance > tolerance.linear * 0.5 {
+        for index in [0, 8, 1, 2, 3, 5, 6, 7] {
+            let point = curve.first_order(range.start + range.span() * index as f64 / 8.0)?.0;
+            if edge.curve.project_on_trim(point, edge.range, tolerance)?.distance > linear {
                 coincident = false;
                 break;
             }
@@ -189,23 +227,27 @@ fn crosses_plane(surface: &Surface3, pcurve: &Curve2, range: ParameterRange, dis
     signed: impl Fn(Point3) -> f64) -> KernelResult<bool> {
     let (uv, tangent) = pcurve.first_order(range.middle())?;
     let across = Vec2::new(-tangent.y, tangent.x).normalize();
-    let value = surface.evaluate(uv.x, uv.y)?;
-    let step = across * distance / (value.du * across.x + value.dv * across.y).magnitude();
-    let first = signed(surface.evaluate(uv.x + step.x, uv.y + step.y)?.point);
-    let second = signed(surface.evaluate(uv.x - step.x, uv.y - step.y)?.point);
+    let (_, du, dv) = surface.first_order(uv.x, uv.y)?;
+    let step = across * distance / (du * across.x + dv * across.y).magnitude();
+    let first = signed(surface.first_order(uv.x + step.x, uv.y + step.y)?.0);
+    let second = signed(surface.first_order(uv.x - step.x, uv.y - step.y)?.0);
     Ok((first > 0.0) != (second > 0.0))
 }
 
-fn plane_boundary(plane: Plane3, low: Point2, high: Point2) -> KernelResult<Vec<FaceCurve>> {
-    let corners = [low, Point2::new(high.x, low.y), high, Point2::new(low.x, high.y)];
-    (0..4).map(|index| {
-        let point = corners[index];
-        let delta = corners[(index + 1) % 4] - point;
-        Ok(FaceCurve { curve: Line3::new(plane.point_at(point), plane.vector_at(delta))?.into(),
-            pcurve: Line2::new(point, delta)?.into(), range: ParameterRange::new(0.0, 1.0)?,
-            provenance: Default::default(), loop_end: index == 3,
-            loop_kind: LoopKind::Outer, parameter_seam: false })
-    }).collect()
+fn plane_window(plane: Plane3, points: impl Iterator<Item = KernelResult<Point3>>,
+    padding: f64, tolerance: ModelTolerance) -> KernelResult<[ParameterRange; 2]> {
+    let mut minimum = Point2::new(f64::INFINITY, f64::INFINITY);
+    let mut maximum = Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for point in points {
+        let uv = plane.coordinates(point?)?;
+        for axis in 0..2 {
+            minimum[axis] = minimum[axis].min(uv[axis]);
+            maximum[axis] = maximum[axis].max(uv[axis]);
+        }
+    }
+    let margin = (maximum - minimum).magnitude() * padding + tolerance.linear * 64.0;
+    Ok([ParameterRange::new(minimum.x - margin, maximum.x + margin)?,
+        ParameterRange::new(minimum.y - margin, maximum.y + margin)?])
 }
 
 fn cap_boundaries(patches: &[BrepPatch], plane: Plane3, tolerance: ModelTolerance) -> KernelResult<Vec<FaceCurve>> {
@@ -319,9 +361,12 @@ fn cap_patches(boundary: Vec<FaceCurve>, plane: Plane3, orientation: FaceOrienta
 
 fn publish(source: &Compound, mut patches: Vec<BrepPatch>, side: SplitKeep,
     precision: ModelTolerance) -> KernelResult<Compound> {
-    // Sewing accumulates several weld allowances. Use the cut's clearance
-    // budget during construction, then certify at the model's tolerance.
-    let tolerance = ModelTolerance { linear: precision.linear * 0.5, ..precision };
+    // Keep sewing's eightfold vertex weld inside the model tolerance and
+    // below the resolved clearance used to construct the cut.
+    let tolerance = ModelTolerance {
+        linear: (precision.linear * 0.5).min(source.tolerance().linear / 8.0),
+        ..precision
+    };
     patches.sort_by_key(patch_complexity_key);
     let mut components = patch_components(patches, tolerance)?;
     let mut kernel = Kernel::new(tolerance)?;
@@ -343,6 +388,7 @@ fn publish(source: &Compound, mut patches: Vec<BrepPatch>, side: SplitKeep,
 mod tests {
     use super::*;
     use crate::Vec3;
+    use super::super::{Line2, Line3};
 
     fn check_halves(body: &Compound, origin: Point3, normal: Vec3) {
         let plane = Plane3::from_origin_normal(origin, normal).unwrap();

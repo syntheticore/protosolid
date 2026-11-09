@@ -317,11 +317,21 @@ impl Transaction<'_> {
         }
         // The removed edge's use adjacent to each surviving use in its loop.
         let mate = |keep: &super::Coedge| {
-            second.coedges.iter().copied().find(|other| {
+            let other = second.coedges.iter().copied().find(|other| {
                 self.working.coedge(*other).is_ok_and(|value| {
                     value.loop_id == keep.loop_id && (keep.next == *other || keep.previous == *other)
                 })
-            })
+            });
+            let Some(id) = other else { return Ok(None); };
+            let other = self.working.coedge(id)?;
+            let (before, after) = if keep.next == id { (keep, other) } else { (other, keep) };
+            let end = before.pcurve.first_order(before.range.end)?.0;
+            let start = after.pcurve.first_order(after.range.start)?.0;
+            let domains = self.working.face(self.working.loop_(keep.loop_id)?.face)?.surface.domains();
+            // A collapsed surface interval can join two uses in topology
+            // while their UV endpoints are distinct. Keep that pole vertex.
+            Ok((0..2).all(|axis| domains[axis].equivalent(end[axis], start[axis],
+                self.kernel.tolerance.parameter * 64.0)).then_some(id))
         };
         if let Some((a, b)) = intersection_curves_to_join(first, second, vertex, self.kernel.tolerance)? {
             let prepend = first.vertices[0] == vertex;
@@ -342,7 +352,7 @@ impl Transaction<'_> {
             let mut coedges = Vec::new();
             for id in &first.coedges {
                 let keep = self.working.coedge(*id)?;
-                let Some(other) = mate(keep) else {
+                let Some(other) = mate(keep)? else {
                     return Ok(None);
                 };
                 let surface = &self.working.face(self.working.loop_(keep.loop_id)?.face)?.surface;
@@ -399,7 +409,7 @@ impl Transaction<'_> {
         let mut coedges = Vec::new();
         for id in &first.coedges {
             let keep = self.working.coedge(*id)?;
-            let Some(other) = mate(keep) else {
+            let Some(other) = mate(keep)? else {
                 break;
             };
             let map = |t: f64| {

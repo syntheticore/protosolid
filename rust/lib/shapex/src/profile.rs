@@ -26,6 +26,23 @@ impl Profile {
         holes: impl IntoIterator<Item = Wire2>,
         tolerance: ModelTolerance,
     ) -> KernelResult<Self> {
+        Self::from_wires(outer, holes, tolerance, false)
+    }
+
+    pub(crate) fn from_face_wires(
+        outer: Wire2,
+        holes: Vec<Wire2>,
+        tolerance: ModelTolerance,
+    ) -> KernelResult<Self> {
+        Self::from_wires(outer, holes, tolerance, true)
+    }
+
+    fn from_wires(
+        outer: Wire2,
+        holes: impl IntoIterator<Item = Wire2>,
+        tolerance: ModelTolerance,
+        allow_tangent_contacts: bool,
+    ) -> KernelResult<Self> {
         tolerance.validate()?;
         let holes = holes.into_iter().collect::<Vec<_>>();
         // Profile boundaries must be simple closed loops enclosing an area
@@ -60,6 +77,9 @@ impl Profile {
             if wires_intersect(&outer, hole, tolerance)?
                 || !wire_contains_point(&outer, hole.segments()[0].start()?, tolerance)?
             {
+                if allow_tangent_contacts && tangent_hole_inside(&outer, hole, tolerance)? {
+                    continue;
+                }
                 return Err(invalid(
                     "profile holes must lie strictly inside the outer wire",
                 ));
@@ -214,6 +234,35 @@ impl Profile {
         }
         profiles_from_fragments(selected, self.tolerance)
     }
+}
+
+/// A section can leave a cavity tangent to a new face boundary at a point.
+/// Verify that every open span of the hole remains in the face and that no
+/// coincident boundary interval or transverse crossing is present.
+fn tangent_hole_inside(outer: &Wire2, hole: &Wire2, tolerance: ModelTolerance) -> KernelResult<bool> {
+    for segment in hole.segments() {
+        let range = segment.range();
+        let mut parameters = vec![range.start, range.end];
+        for boundary in outer.segments() {
+            let hits = curve_pair_intersection(segment, boundary, tolerance)?;
+            if hits.coincident { return Ok(false); }
+            for hit in hits.hits {
+                let first = segment.curve().first_order(hit.first_parameter)?.1.normalize();
+                let second = boundary.curve().first_order(hit.second_parameter)?.1.normalize();
+                if (first.x * second.y - first.y * second.x).abs() > tolerance.angular * 16.0 {
+                    return Ok(false);
+                }
+                parameters.push(hit.first_parameter.clamp(range.start.min(range.end), range.start.max(range.end)));
+            }
+        }
+        parameters.sort_by(f64::total_cmp);
+        parameters.dedup_by(|a, b| (*a - *b).abs() <= tolerance.parameter);
+        for pair in parameters.windows(2) {
+            let point = segment.curve().first_order((pair[0] + pair[1]) * 0.5)?.0;
+            if !wire_contains_point(outer, point, tolerance)? { return Ok(false); }
+        }
+    }
+    Ok(true)
 }
 
 fn split_coincident_segments(

@@ -569,7 +569,8 @@ pub(super) fn trim_to_faces_sampled<P, Q>(
     face_bounds: [Option<super::bounds::Bounds>; 2],
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<ParameterRange>> {
-    let ranges = partition_to_faces_sampled(curve, first, first_boundary, second, second_boundary, samples, face_bounds, tolerance)?;
+    let samples = samples.map_or([None; 2], |samples| samples.map(Some));
+    let ranges = partition_to_faces_sampled(curve, first, first_boundary, second, Some(second_boundary), samples, face_bounds, tolerance)?;
     let mut merged = Vec::<ParameterRange>::new();
     for range in ranges {
         if let Some(previous) = merged.last_mut() {
@@ -585,15 +586,16 @@ pub(super) fn trim_to_faces_sampled<P, Q>(
 
 /// Retain boundary crossings as separate intervals, including where an
 /// intersection changes from an existing boundary into a face interior.
-pub(super) fn partition_to_faces<P, Q>(
+pub(super) fn partition_to_face<P>(
     curve: &Curve3,
     first: &Curve2,
     first_boundary: &[FaceCurve<P>],
     second: &Curve2,
-    second_boundary: &[FaceCurve<Q>],
+    samples: &TrimSamples,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<ParameterRange>> {
-    partition_to_faces_sampled(curve, first, first_boundary, second, second_boundary, None, [None; 2], tolerance)
+    partition_to_faces_sampled::<P, ()>(curve, first, first_boundary, second, None,
+        [Some(samples), None], [None; 2], tolerance)
 }
 
 fn partition_to_faces_sampled<P, Q>(
@@ -601,8 +603,8 @@ fn partition_to_faces_sampled<P, Q>(
     first: &Curve2,
     first_boundary: &[FaceCurve<P>],
     second: &Curve2,
-    second_boundary: &[FaceCurve<Q>],
-    samples: Option<[&TrimSamples; 2]>,
+    second_boundary: Option<&[FaceCurve<Q>]>,
+    samples: [Option<&TrimSamples>; 2],
     face_bounds: [Option<super::bounds::Bounds>; 2],
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<ParameterRange>> {
@@ -659,7 +661,9 @@ fn partition_to_faces_sampled<P, Q>(
         (None, None) if curve_natural.is_some() => curve_natural.unwrap(),
         (None, None) => {
             let first_domain = finite_domain(first, first_boundary, tolerance)?;
-            let second_domain = finite_domain(second, second_boundary, tolerance)?;
+            let second_domain = second_boundary
+                .map(|boundary| finite_domain(second, boundary, tolerance))
+                .transpose()?.unwrap_or(first_domain);
             let start = first_domain
                 .start
                 .min(first_domain.end)
@@ -682,15 +686,22 @@ fn partition_to_faces_sampled<P, Q>(
         if end - start <= tolerance.parameter * 16.0 { return Ok(Vec::new()); }
         ParameterRange::new(start, end)?
     } else { domain };
-    let (first_boundary_samples, second_boundary_samples) = match samples {
-        Some([first, second]) => (Cow::Borrowed(first), Cow::Borrowed(second)),
-        None => (Cow::Owned(trim_samples(first_boundary)?), Cow::Owned(trim_samples(second_boundary)?)),
+    let first_boundary_samples = match samples[0] {
+        Some(samples) => Cow::Borrowed(samples),
+        None => Cow::Owned(trim_samples(first_boundary)?),
+    };
+    let second_boundary_samples = match samples[1] {
+        Some(samples) => Cow::Borrowed(samples),
+        None => Cow::Owned(trim_samples(second_boundary.unwrap_or_default())?),
     };
     let inside = |parameter: f64| -> KernelResult<bool> {
-        Ok(
-            point_in_sampled_trim(first.evaluate(parameter)?.point, first_boundary, &first_boundary_samples)?
-                && point_in_sampled_trim(second.evaluate(parameter)?.point, second_boundary, &second_boundary_samples)?,
-        )
+        if !point_in_sampled_trim(first.evaluate(parameter)?.point, first_boundary, &first_boundary_samples)? {
+            return Ok(false);
+        }
+        match second_boundary {
+            Some(boundary) => point_in_sampled_trim(second.evaluate(parameter)?.point, boundary, &second_boundary_samples),
+            None => Ok(true),
+        }
     };
     let first_curve: FaceCurve = FaceCurve {
         provenance: Default::default(),
@@ -701,17 +712,7 @@ fn partition_to_faces_sampled<P, Q>(
         loop_kind: LoopKind::Outer,
         parameter_seam: false,
     };
-    let second_curve: FaceCurve = FaceCurve {
-        provenance: Default::default(),
-        curve: curve.clone(),
-        pcurve: second.clone(),
-        range: domain,
-        loop_end: false,
-        loop_kind: LoopKind::Outer,
-        parameter_seam: false,
-    };
     let first_samples = sample_pcurve(&first_curve, 32)?;
-    let second_samples = sample_pcurve(&second_curve, 32)?;
     let mut parameters = vec![domain.start, domain.end];
     // Recover shallow crossings before testing interval interiors. The clipped
     // endpoints then enter the arrangement as existing trim vertices.
@@ -726,18 +727,23 @@ fn partition_to_faces_sampled<P, Q>(
     for (boundary, samples) in first_boundary.iter().zip(first_boundary_samples.iter()) {
         if separated(&boundary.curve, boundary.range, 1) { continue; }
         parameters.extend(
-            curve_intersections_sampled(&first_curve, boundary, Some([&first_samples, samples]), true, tolerance)?
+            intersect_sampled_trims(&first_curve, boundary, Some([&first_samples, samples]), true, tolerance,
+                second_boundary.is_none())?
                 .into_iter()
                 .map(|hit| hit.0),
         );
     }
-    for (boundary, samples) in second_boundary.iter().zip(second_boundary_samples.iter()) {
-        if separated(&boundary.curve, boundary.range, 0) { continue; }
-        parameters.extend(
-            curve_intersections_sampled(&second_curve, boundary, Some([&second_samples, samples]), true, tolerance)?
-                .into_iter()
-                .map(|hit| hit.0),
-        );
+    if let Some(second_boundary) = second_boundary {
+        let second_curve = FaceCurve { pcurve: second.clone(), ..first_curve };
+        let second_samples = sample_pcurve(&second_curve, 32)?;
+        for (boundary, samples) in second_boundary.iter().zip(second_boundary_samples.iter()) {
+            if separated(&boundary.curve, boundary.range, 0) { continue; }
+            parameters.extend(
+                curve_intersections_sampled(&second_curve, boundary, Some([&second_samples, samples]), true, tolerance)?
+                    .into_iter()
+                    .map(|hit| hit.0),
+            );
+        }
     }
     parameters.sort_by(f64::total_cmp);
     parameters.dedup_by(|first, second| (*first - *second).abs() <= tolerance.parameter * 64.0);
@@ -790,9 +796,21 @@ pub(super) fn curve_intersections_sampled<P, Q>(
     seed_near_misses: bool,
     tolerance: ModelTolerance,
 ) -> KernelResult<Vec<(f64, f64)>> {
+    intersect_sampled_trims(first, second, samples, seed_near_misses, tolerance, false)
+}
+
+pub(super) fn intersect_sampled_trims<P, Q>(
+    first: &FaceCurve<P>,
+    second: &FaceCurve<Q>,
+    samples: Option<[&[(f64, Point2)]; 2]>,
+    seed_near_misses: bool,
+    tolerance: ModelTolerance,
+    section: bool,
+) -> KernelResult<Vec<(f64, f64)>> {
     let endpoint_hits = || -> KernelResult<Vec<(f64, f64)>> {
         let fit = |curve: &Curve3, range: ParameterRange, bounds: Option<super::bounds::Bounds>, point: Point3| -> Option<f64> {
-            let allowed = tolerance.linear_at_scale(point.to_vec().magnitude()) * 16.0;
+            let allowed = tolerance.linear_at_scale(point.to_vec().magnitude())
+                * if section { 1.0 } else { 16.0 };
             if bounds.is_some_and(|bounds| !bounds.expanded(allowed).contains(point)) {
                 return None;
             }
@@ -818,7 +836,26 @@ pub(super) fn curve_intersections_sampled<P, Q>(
         }
         Ok(hits)
     };
-    let deduplicate = |mut hits: Vec<(f64, f64)>| {
+    let finish = |mut hits: Vec<(f64, f64)>| -> KernelResult<Vec<(f64, f64)>> {
+        let endpoints = endpoint_hits()?;
+        if section {
+            for &(a, b) in &endpoints {
+                if b != second.range.start && b != second.range.end { continue; }
+                let point = second.curve.first_order(b)?.0;
+                let linear = tolerance.linear_at_scale(point.to_vec().magnitude());
+                if first.curve.first_order(a)?.0.distance(point) > linear * 0.25 { continue; }
+                // A shallow crossing can converge on both sides of the same
+                // trim vertex. Anchor it at the exact existing contact.
+                for hit in &mut hits {
+                    if second.curve.first_order(hit.1)?.0.distance(point) <= linear * 2.0
+                        && first.curve.first_order(hit.0)?.0.distance(point) <= linear * 2.0
+                    {
+                        *hit = (a, b);
+                    }
+                }
+            }
+        }
+        hits.extend(endpoints);
         hits.sort_by(|first, second| {
             first
                 .0
@@ -829,8 +866,21 @@ pub(super) fn curve_intersections_sampled<P, Q>(
             (first.0 - second.0).abs() <= tolerance.parameter * 64.0
                 && (first.1 - second.1).abs() <= tolerance.parameter * 64.0
         });
-        hits
+        Ok(hits)
     };
+    if section && matches!((&first.pcurve, &second.pcurve), (Curve2::Line(_), Curve2::Line(_))) {
+        let ends = |curve: &Curve2, range: ParameterRange| -> KernelResult<[Point2; 2]> {
+            Ok([curve.first_order(range.start)?.0, curve.first_order(range.end)?.0])
+        };
+        let [a, b] = ends(&first.pcurve, first.range)?;
+        let [c, d] = ends(&second.pcurve, second.range)?;
+        let mut hits = Vec::new();
+        if let Some((u, v)) = segment_intersection_parameters(a, b, c, d) {
+            hits.push((first.range.start + first.range.span() * u.clamp(0.0, 1.0),
+                second.range.start + second.range.span() * v.clamp(0.0, 1.0)));
+        }
+        return finish(hits);
+    }
     if let (Curve3::SurfaceIntersection(a), Curve3::SurfaceIntersection(b)) =
         (&first.curve, &second.curve)
     {
@@ -842,7 +892,7 @@ pub(super) fn curve_intersections_sampled<P, Q>(
             // Two guides of the same regular support intersection can overlap.
             // Intersecting their approximation splines invents crossings along
             // that overlap; only trim endpoints subdivide the common curve.
-            return Ok(deduplicate(endpoint_hits()?));
+            return finish(Vec::new());
         }
     }
     if matches!(first.curve, Curve3::Line(_) | Curve3::Circle(_))
@@ -850,7 +900,7 @@ pub(super) fn curve_intersections_sampled<P, Q>(
     {
         match first.curve.intersect_curve(&second.curve, tolerance)? {
             IntersectionSet::Isolated(hits) => {
-                let mut hits = hits
+                let hits = hits
                     .into_iter()
                     .filter_map(|hit| {
                         let fit = |parameter: f64, curve: &Curve3, range: ParameterRange| {
@@ -864,8 +914,7 @@ pub(super) fn curve_intersections_sampled<P, Q>(
                         ))
                     })
                     .collect::<Vec<_>>();
-                hits.extend(endpoint_hits()?);
-                return Ok(deduplicate(hits));
+                return finish(hits);
             }
             IntersectionSet::Empty | IntersectionSet::Coincident => {
                 // Coincident trims can cover different portions of the same
@@ -874,7 +923,7 @@ pub(super) fn curve_intersections_sampled<P, Q>(
                 // they are not transferred to both parameter ranges, a long
                 // edge and a shorter duplicate survive with different node
                 // pairs and leave the selected boundary graph non-manifold.
-                return Ok(deduplicate(endpoint_hits()?));
+                return finish(Vec::new());
             }
         }
     }
@@ -961,8 +1010,7 @@ pub(super) fn curve_intersections_sampled<P, Q>(
             }
         }
     }
-    hits.extend(endpoint_hits()?);
-    Ok(deduplicate(hits))
+    finish(hits)
 }
 
 // Estimate the deviation of each sampling chord from the turns at its ends.

@@ -1328,7 +1328,6 @@ fn pinched_trim_contact(
 pub(super) fn arrange_section_regions(
     surface: &Surface3,
     curves: &[FaceCurve],
-    classification_offset: f64,
     uv_probe_limit: f64,
     tolerance: ModelTolerance,
     plane: super::Plane3,
@@ -1336,7 +1335,7 @@ pub(super) fn arrange_section_regions(
     orientation: FaceOrientation,
     orientation_at: impl Fn(Point2) -> KernelResult<Option<FaceOrientation>>,
 ) -> KernelResult<Vec<BrepPatch>> {
-    arrange_regions(surface, curves, classification_offset, uv_probe_limit, tolerance,
+    arrange_regions(surface, curves, 0.0, uv_probe_limit, tolerance,
         tolerance.linear * 2.0, Some((plane, keep, orientation)), orientation_at)
 }
 
@@ -1361,12 +1360,27 @@ fn arrange_regions(
         .collect::<Vec<_>>();
     for first in 0..curves.len() {
         for second in first + 1..curves.len() {
+            // The source loops already form a valid arrangement. Only the
+            // section can introduce new intersections into their boundaries.
+            if section.is_some()
+                && !curves[first].provenance.edges.is_empty()
+                && !curves[second].provenance.edges.is_empty()
+            {
+                continue;
+            }
             if bounds_separated(spatial_bounds[first], spatial_bounds[second], tolerance) {
                 continue;
             }
-            for (first_parameter, second_parameter) in curve_intersections_sampled(
-                &curves[first], &curves[second], Some([&samples[first], &samples[second]]), false, tolerance,
-            )? {
+            let hits = if section.is_some() && !curves[first].provenance.edges.is_empty() {
+                // Anchor section curves to existing trim vertices.
+                super::trim::intersect_sampled_trims(&curves[second], &curves[first],
+                    Some([&samples[second], &samples[first]]), false, tolerance, true)?
+                    .into_iter().map(|(cut, trim)| (trim, cut)).collect()
+            } else {
+                curve_intersections_sampled(&curves[first], &curves[second],
+                    Some([&samples[first], &samples[second]]), false, tolerance)?
+            };
+            for (first_parameter, second_parameter) in hits {
                 split_parameters[first].push(first_parameter);
                 split_parameters[second].push(second_parameter);
             }
@@ -1464,11 +1478,12 @@ fn arrange_regions(
             let (point, derivative) = piece.curve.first_order(parameter)?;
             let slot = if orientation == FaceOrientation::Forward { 0 } else { 1 };
             if !piece.provenance.edges.is_empty() {
-                let distance = signed(point);
-                let retain = if distance.abs() > tolerance.linear { distance < 0.0 } else {
+                let (surface_point, du, dv) = surface.first_order(uv.x, uv.y)?;
+                let distance = signed(surface_point);
+                let uncertainty = (distance - signed(point)).abs().max(tolerance.linear);
+                let retain = if distance.abs() > uncertainty { distance < 0.0 } else {
                     let tangent = tangent * piece.range.span().signum() * orientation.sign();
                     let inward = Vec2::new(-tangent.y, tangent.x).normalize();
-                    let (_, du, dv) = surface.first_order(uv.x, uv.y)?;
                     let step = (tolerance.linear * 128.0 / (du * inward.x + dv * inward.y).magnitude()).min(uv_probe_limit);
                     let probe = uv + inward * step;
                     signed(surface.first_order(probe.x, probe.y)?.0) < 0.0
@@ -1621,6 +1636,15 @@ fn arrange_regions(
                 projected_match || sampled_match
             });
             if let Some(index) = duplicate {
+                if section.is_some() && piece.parameter_seam && unique[index].parameter_seam
+                    && piece.start_node == unique[index].end_node && piece.end_node == unique[index].start_node
+                    && piece.start_node != piece.end_node
+                {
+                    // Both sides of a chart cut can land in the same UV lift.
+                    // Their opposite uses cancel in the combined region.
+                    unique.remove(index);
+                    continue;
+                }
                 let candidate = &mut unique[index];
                 let a = candidate
                     .curve
@@ -1642,7 +1666,7 @@ fn arrange_regions(
             }
         }
         if section.is_none() { add_periodic_seams(&mut unique, &pieces, surface, tolerance)?; }
-        let loops = connect_loops(&unique, tolerance, surface, orientation)?;
+        let loops = connect_loops(&unique, tolerance, surface, orientation, section.is_none())?;
         if loops.is_empty() {
             continue;
         }
@@ -1676,9 +1700,9 @@ fn arrange_regions(
         // Enclosing loops must be classified before their holes, regardless
         // of which source face supplied the first arrangement edge.
         loops.sort_by(|first, second| second.1.abs().total_cmp(&first.1.abs()));
-        let curved_nesting = loops.len() > 1 && matches!(surface, Surface3::Plane(_));
+        let curved_nesting = loops.len() > 1 && (section.is_some() || matches!(surface, Surface3::Plane(_)));
         let mut classified = Vec::<(Vec<DirectedPiece>, Vec<Point2>, f64, bool, Option<usize>)>::new();
-        let mut planar_trims: Vec<(Vec<FaceCurve>, _)> = Vec::new();
+        let mut loop_trims: Vec<(Vec<FaceCurve>, _)> = Vec::new();
         for (mut loop_, area) in loops {
             if area.abs() <= tolerance.parameter.powi(2) {
                 continue;
@@ -1695,7 +1719,7 @@ fn arrange_regions(
                     continue;
                 }
                 let contains = if curved_nesting {
-                    let (boundary, samples) = &planar_trims[index];
+                    let (boundary, samples) = &loop_trims[index];
                     point_in_sampled_trim(sample, boundary, samples)?
                 } else {
                     point_in_polygon(sample, enclosing)
@@ -1729,7 +1753,7 @@ fn arrange_regions(
                     parameter_seam: false,
                 }).collect::<Vec<_>>();
                 let samples = trim_samples(&boundary)?;
-                planar_trims.push((boundary, samples));
+                loop_trims.push((boundary, samples));
             }
             classified.push((loop_, polygon, area, outer, parent));
         }
@@ -2002,6 +2026,7 @@ fn connect_loops(
     tolerance: ModelTolerance,
     surface: &Surface3,
     orientation: FaceOrientation,
+    reverse_seams: bool,
 ) -> KernelResult<Vec<Vec<DirectedPiece>>> {
     let domains = surface.domains();
     let equivalent = |first: Point2, second: Point2| {
@@ -2023,7 +2048,7 @@ fn connect_loops(
                 .copied()
                 .filter(|index| {
                     pieces[*index].start_node == end_node
-                        || (pieces[*index].parameter_seam && pieces[*index].end_node == end_node)
+                        || (reverse_seams && pieces[*index].parameter_seam && pieces[*index].end_node == end_node)
                 })
                 .collect::<Vec<_>>();
             if candidates.is_empty() {
@@ -2080,6 +2105,16 @@ fn connect_loops(
                         // a counterclockwise turn would splice separate caps.
                         (angle * orientation.sign()).rem_euclid(std::f64::consts::TAU)
                     };
+                    let distance = |index: usize| pieces[index].start_uv.distance2(end_uv);
+                    if !reverse_seams {
+                        // At a pole multiple longitudes share one vertex. Pair
+                        // the nearest chart endpoints before comparing turns.
+                        let a = distance(*first);
+                        let b = distance(*second);
+                        if a.max(b) > tolerance.parameter.powi(2) * 4096.0 && a != b {
+                            return a.total_cmp(&b);
+                        }
+                    }
                     turn(*first).total_cmp(&turn(*second))
                 })
                 .expect("nonempty candidate set");

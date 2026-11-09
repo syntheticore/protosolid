@@ -70,6 +70,8 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .background_color(BACKGROUND)
         .theme(theme_source(app))
         .visible(false)
+        // Tauri's file drop handling would swallow the page's own drag and drop on Windows
+        .disable_drag_drop_handler()
         .initialization_script(&bridge_script())
         // Requests in flight are never answered by a reloaded page
         .on_page_load(|window, payload| {
@@ -126,6 +128,8 @@ fn show_preferences(app: &AppHandle, section: Option<String>) -> tauri::Result<(
         .background_color(BACKGROUND)
         .theme(theme_source(app))
         .visible(false)
+        // Tauri's file drop handling would swallow the page's own drag and drop on Windows
+        .disable_drag_drop_handler()
         .initialization_script(&bridge_script())
         .on_page_load(|window, payload| {
             if matches!(payload.event(), PageLoadEvent::Finished) {

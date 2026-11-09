@@ -6,6 +6,7 @@
     :draggable="true"
     :aria-disabled="document.isRegenerating"
     @dragstart="dragstart"
+    @dragend="dragend"
     @dragenter="dragenter"
     @dragleave="dragleave"
     @dragover.prevent="dragover"
@@ -135,6 +136,13 @@
   .future
     opacity: 0.3
 
+  .drag-ghost
+    position: fixed
+    top: 0
+    left: 0
+    z-index: 1000
+    pointer-events: none
+
   .actions
     position: absolute
     bottom: -10px
@@ -177,6 +185,9 @@
 
   import { toRaw } from 'vue'
   import { topologyIncludesFeature } from '../js/core/topological-naming.js'
+
+  const emptyImg = new Image()
+  emptyImg.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs='
 
   export default {
     name: 'FeatureIcon',
@@ -277,8 +288,33 @@
         this.$emit('move-marker')
       },
 
+      // WebView2 draws native drag images opaque, so a copy of the icon follows the pointer instead
       dragstart(e) {
         e.dataTransfer.setData('text/plain', this.feature.id)
+        e.dataTransfer.setDragImage(emptyImg, 0, 0)
+
+        const icon = this.$el.querySelector(':scope > svg')
+        const { width, height } = icon.getBoundingClientRect()
+        const ghost = icon.cloneNode(true)
+        ghost.classList.add('drag-ghost')
+        ghost.style.width = `${width}px`
+        ghost.style.height = `${height}px`
+        ghost.style.color = getComputedStyle(icon).color
+        document.body.appendChild(ghost)
+
+        const follow = event => {
+          ghost.style.transform = `translate(${event.clientX - width / 2}px, ${event.clientY - height / 2}px)`
+        }
+        follow(e)
+        document.addEventListener('dragover', follow)
+        this.removeGhost = () => {
+          document.removeEventListener('dragover', follow)
+          ghost.remove()
+        }
+      },
+
+      dragend() {
+        this.removeGhost()
       },
 
       dragenter(e) {

@@ -47,6 +47,10 @@
   .tab-bar
     height: 38px
 
+    // Tauri keeps the top pixel row of windowed frameless windows for the system border on Windows 11
+    [data-platform="win32"] #app:not(.fullscreen):not(.maximized) &
+      height: 37px
+
     .fullscreen &
     [data-platform="win32"] .maximized &
     [data-platform="browser"] &
@@ -149,35 +153,35 @@
 
   if(!isPreferencesWindow) createDocument()
 
-  if(window.ipc) {
-    window.ipc.on('preferences-updated', (e, value) => applyPreferences(value))
-    window.ipc.send('set-theme', preferences.theme)
+  if(window.desktop) {
+    window.desktop.on('preferences-updated', (e, value) => applyPreferences(value))
+    window.desktop.send('set-theme', preferences.theme)
 
     if(!isPreferencesWindow) {
-      window.ipc.on('fullscreen-changed', (e, value) => {
+      window.desktop.on('fullscreen-changed', (e, value) => {
         fullscreen.value = value
       })
 
-      window.ipc.on('maximize-changed', (e, value) => {
+      window.desktop.on('maximize-changed', (e, value) => {
         maximized.value = value
       })
 
-      window.ipc.on('createFile', createDocument)
-      window.ipc.on('openFile', (e, path) => loadDocument(path) )
-      window.ipc.on('saveFile', saveDocument)
-      window.ipc.on('saveFileAs', saveDocumentAs)
-      window.ipc.on('importFile', importFile)
-      window.ipc.on('exportFile', exportFile)
-      window.ipc.on('closeFile', () => closeDocument(activeDocument.value) )
+      window.desktop.on('createFile', createDocument)
+      window.desktop.on('openFile', (e, path) => loadDocument(path) )
+      window.desktop.on('saveFile', saveDocument)
+      window.desktop.on('saveFileAs', saveDocumentAs)
+      window.desktop.on('importFile', importFile)
+      window.desktop.on('exportFile', exportFile)
+      window.desktop.on('closeFile', () => closeDocument(activeDocument.value) )
 
       startMcpBridge({ bus, activeDocument: () => activeDocument.value })
 
       watch(() => activeDocument.value?.canSave ?? false, canSave => {
-        window.ipc.send('set-save-enabled', canSave)
+        window.desktop.send('set-save-enabled', canSave)
       }, { immediate: true })
     }
 
-    window.ipc.on('dark-mode', (e, darkMode) => {
+    window.desktop.on('dark-mode', (e, darkMode) => {
       if(darkMode) {
         document.body.setAttribute('data-dark-mode', true)
       } else {
@@ -260,8 +264,8 @@
     window.addEventListener('blur', releaseModifiers)
     window.addEventListener('pointerdown', syncModifiers, true)
 
-    if(!window.ipc) return
-    setTimeout(() => window.ipc.send('vue-ready'), 200)
+    if(!window.desktop) return
+    setTimeout(() => window.desktop.send('vue-ready'), 200)
   })
 
 

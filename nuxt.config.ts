@@ -5,7 +5,7 @@
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-30',
 
-  ignore: ['dist', 'dist/**', 'rust/**', 'electron/**', 'js/shapexJS/rust/**'],
+  ignore: ['dist', 'dist/**', 'rust/**', 'src-tauri/**', 'js/shapexJS/rust/**'],
 
   experimental: {
     watcher: 'parcel',
@@ -26,24 +26,7 @@ export default defineNuxtConfig({
 
   modules: [
     '@pinia/nuxt',
-    (process.env.NODE_ENV === 'production') && 'nuxt-electron',
-  ].filter(Boolean),
-
-  electron: {
-    build: [
-      // {
-      //   entry: 'electron/main.js',
-      // },
-      // {
-      //   entry: 'electron/preload.js',
-      //   onstart(args) {
-      //     // Notify the Renderer-Process to reload the page when the Preload-Scripts build is complete,
-      //     // instead of restarting the entire Electron App.
-      //     args.reload()
-      //   },
-      // },
-    ],
-  },
+  ],
 
   nitro: {
     // output: {
@@ -56,9 +39,11 @@ export default defineNuxtConfig({
 
   vite: {
     // plugins: [wasm()],
+    // Keeps the Tauri CLI output visible
+    clearScreen: false,
     server: {
       watch: {
-        ignored: ['**/rust/**', '**/electron/**'],
+        ignored: ['**/rust/**', '**/src-tauri/**'],
       },
     },
     css: {

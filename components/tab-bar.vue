@@ -18,9 +18,9 @@
         @delete-document="$emit('delete-document', $event)"
       )
 
-    .grab-handle.dynamic
+    .grab-handle.dynamic(data-tauri-drag-region)
 
-    .grab-handle.fixed
+    .grab-handle.fixed(data-tauri-drag-region)
 
     .window-controls
 
@@ -84,6 +84,10 @@
     margin-top: 5px
     margin-bottom: 3px
 
+    // Matches the shorter tab bar of windowed frameless windows on Windows 11
+    [data-platform="win32"] #app:not(.fullscreen):not(.maximized) &
+      margin-top: 4px
+
     :deep(.button)
       border-radius: 4px
 
@@ -102,7 +106,6 @@
     height: 100%
 
   .grab-handle
-    -webkit-app-region: drag
     -webkit-user-select: none
     min-width: 24px
     height: 100%
@@ -164,19 +167,19 @@
 
     methods: {
       minimize: function() {
-        window.ipc.send('minimize')
+        window.desktop.send('minimize')
       },
 
       maximize: function() {
-        window.ipc.send('maximize')
+        window.desktop.send('maximize')
       },
 
       unmaximize: function() {
-        window.ipc.send('unmaximize')
+        window.desktop.send('unmaximize')
       },
 
       close: function() {
-        window.ipc.send('close')
+        window.desktop.send('close')
       },
     }
   }

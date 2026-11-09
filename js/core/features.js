@@ -1942,7 +1942,7 @@ Serialize.register(PlaneFeature, 'PlaneFeature')
 // The file is compared again when the document is opened; a newer revision
 // is offered for update but never applied silently.
 async function readNewerRevision(feature, filetype, normalize = data => data) {
-  if(!feature.filePath || !feature.cachedData || !window.ipc) return null
+  if(!feature.filePath || !feature.cachedData || !window.desktop) return null
   try {
     const file = await loadFile(filetype, 'binary', feature.filePath)
     const data = normalize(await decodeFile(file.data))

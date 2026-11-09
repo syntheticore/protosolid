@@ -4,7 +4,7 @@ import preferences, { emitter as prefEmitter } from './preferences.js'
 
 // Resolves the theme preference to 'light' or 'dark' and exposes it to the
 // styles through the data-theme attribute of the root element.
-// In Electron, the system preference reflects nativeTheme.themeSource.
+// In the desktop app, the system preference reflects the window theme.
 
 const emitter = createNanoEvents()
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)')

@@ -290,12 +290,12 @@ export default class Document extends Emitter {
     await this.addFeature(feature)
   }
 
-  // The save dialog's extension selects the format. Without Electron there
+  // The save dialog's extension selects the format. Outside the desktop app there
   // is no save dialog, so the export downloads as STEP.
   async exportComponent(component = this.activeComponent) {
     const title = component.creator.title
-    const path = window.ipc ? await chooseSavePath('step,stl,3mf', title) : null
-    if(window.ipc && !path) return
+    const path = window.desktop ? await chooseSavePath('step,stl,3mf', title) : null
+    if(window.desktop && !path) return
     const extension = path?.split('.').pop().toUpperCase()
     const format = !extension || extension == 'STP' ? 'STEP' : extension
     await exportConfigured(component, { format, path })
@@ -888,7 +888,7 @@ export default class Document extends Emitter {
         data = preferences.saveDebugInfo ? formatDocument(this.debugSnapshot()) : JSON.stringify(this.snapshot())
       }
       this.filePath = await saveFile(await encodeFile(data), 'cad', as ? null : this.filePath)
-      if(window.ipc) window.ipc.send('add-recent-file', this.filePath)
+      if(window.desktop) window.desktop.send('add-recent-file', this.filePath)
       this.repository = repository ? markRaw(repository) : null
       this.repositoryVersion++
       this.hasChanges = false
@@ -942,7 +942,7 @@ export default class Document extends Emitter {
   async writeRepository() {
     this.repositoryVersion++
     this.hasRepositoryChanges = true
-    if(!window.ipc || !this.filePath) return
+    if(!window.desktop || !this.filePath) return
     await saveFile(await encodeFile(this.repository.stringify()), 'cad', this.filePath)
     this.hasRepositoryChanges = false
   }
@@ -1024,12 +1024,12 @@ export default class Document extends Emitter {
         console.error(error)
         alert('The document could not be opened.')
         // Recent files may have been moved or deleted since
-        if(path) window.ipc.send('remove-recent-file', path)
+        if(path) window.desktop.send('remove-recent-file', path)
       }
       throw error
     }
     this.filePath = file.path
-    if(window.ipc) window.ipc.send('add-recent-file', file.path)
+    if(window.desktop) window.desktop.send('add-recent-file', file.path)
     this.repository = repository && markRaw(repository)
     this.repositoryVersion++
     this.hasRepositoryChanges = false

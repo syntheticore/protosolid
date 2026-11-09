@@ -2,6 +2,8 @@
 
   .preferences-view
 
+    .drag-region(data-tauri-drag-region)
+
     button.window-close(
       title="Close settings"
       aria-label="Close settings"
@@ -311,15 +313,13 @@
     color: bright1()
     background: dark2(0.8)
 
-    &::before
-      content: ''
-      position: absolute
-      z-index: 2
-      top: 0
-      right: 0
-      left: 0
-      height: 28px
-      -webkit-app-region: drag
+  .drag-region
+    position: absolute
+    z-index: 2
+    top: 0
+    right: 0
+    left: 0
+    height: 28px
 
   .window-close
     position: absolute
@@ -333,7 +333,6 @@
     color: bright2()
     background: transparent
     font-size: 12px
-    -webkit-app-region: no-drag
 
     &:hover
       color: white
@@ -532,24 +531,24 @@
           { id: 'tolerances', title: 'Tolerances', icon: 'crosshairs' },
           { id: 'ai', title: 'AI Agents', icon: 'robot' },
         ],
-        isDesktop: !!window.ipc,
+        isDesktop: !!window.desktop,
         mcpStatus: { running: false, url: null, error: null },
         urlCopied: false,
       }
     },
 
     mounted() {
-      if(!window.ipc) return
-      window.ipc.on('show-preferences-section', (e, section) => this.activeSection = section )
-      window.ipc.on('mcp-status', (e, status) => this.mcpStatus = status )
-      window.ipc.invoke('mcp-status').then(status => this.mcpStatus = status )
+      if(!window.desktop) return
+      window.desktop.on('show-preferences-section', (e, section) => this.activeSection = section )
+      window.desktop.on('mcp-status', (e, status) => this.mcpStatus = status )
+      window.desktop.invoke('mcp-status').then(status => this.mcpStatus = status )
     },
 
     watch: {
       preferences: {
         handler() {
           savePreferences()
-          if(window.ipc) window.ipc.send('set-theme', preferences.theme)
+          if(window.desktop) window.desktop.send('set-theme', preferences.theme)
         },
         deep: true,
       },
@@ -557,8 +556,8 @@
 
     methods: {
       close: function() {
-        if(window.ipc) {
-          window.ipc.send('close-preferences')
+        if(window.desktop) {
+          window.desktop.send('close-preferences')
         } else {
           window.close()
         }
@@ -578,7 +577,7 @@
       },
 
       restart: function() {
-        if(window.ipc) window.ipc.send('restart')
+        if(window.desktop) window.desktop.send('restart')
       },
     },
   }

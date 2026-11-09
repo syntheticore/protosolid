@@ -29,12 +29,14 @@ pkg
 wasm-pack.log
 debug.log
 
-electron/app
+# Generated app icons; retain the master artwork
+/src-tauri/icons/*
+!/src-tauri/icons/icon-source.svg
+!/src-tauri/icons/hinted/
+/src-tauri/gen
 
-# Generated Electron icon assets; retain the master artwork and instructions
-/electron/build/*
-!/electron/build/icon-source.svg
-!/electron/build/hinted/
-!/electron/build/README.md
+# Generated splash screen assets
+/public/logo.png
+/public/fonts
 
 docs

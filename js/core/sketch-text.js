@@ -4,7 +4,7 @@ const loads = new Map()
 let fontList
 let lastFont = { family: 'Arial', style: 'Regular' }
 
-// Only Chromium based browsers, including Electron, grant access to system fonts
+// Only Chromium based browsers, including WebView2 on Windows, grant access to system fonts
 export const hasSystemFonts = () => 'queryLocalFonts' in window
 
 export function listSystemFonts() {

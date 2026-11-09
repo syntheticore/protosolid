@@ -56,13 +56,8 @@ export default class Renderer {
     var atmosphere = new THREE.HemisphereLight(0xffffbb, 0x080820, 1)
     this.scene.add(atmosphere)
 
-    // The generated Electron app is loaded from disk, the dev server serves the public folder
-    const basePath = window.location.protocol == 'file:'
-      ? `file://${window.appPath}/app/cubemap/`
-      : '/cubemap/'
-
     new HDRCubeTextureLoader()
-    .setPath(basePath)
+    .setPath('/cubemap/')
     // .setDataType(THREE.HalfFloatType)
     .load(['px.hdr', 'nx.hdr', 'py.hdr', 'ny.hdr', 'pz.hdr', 'nz.hdr'], (texture) => {
       var pmremGenerator = new THREE.PMREMGenerator(this.renderer)

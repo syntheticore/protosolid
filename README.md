@@ -1,11 +1,11 @@
 # ProtoSolid
 
-Cross-platform parametric CAD. Built with Rust & Electron + Nuxt
+Cross-platform parametric CAD. Built with Rust & Tauri + Nuxt
 
 
 ## Installation
 
-  Install Rust & Node.js
+  Install Rust, Node.js and the [Tauri prerequisites](https://tauri.app/start/prerequisites/)
 
   ```sh
   npm install
@@ -16,6 +16,11 @@ Cross-platform parametric CAD. Built with Rust & Electron + Nuxt
   ### Debug in a browser
   ```sh
   npm run dev
+  ```
+
+  ### Debug in the desktop app
+  ```sh
+  npm run dev-tauri
   ```
 
   ### Build as a standalone application

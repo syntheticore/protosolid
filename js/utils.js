@@ -2,40 +2,40 @@
 import { isProxy, toRaw } from 'vue'
 
 export async function loadFile(filetype, datatype, path) {
-  if(window.ipc) {
-    return loadFileElectron(filetype, datatype, path)
+  if(window.desktop) {
+    return loadFileDesktop(filetype, datatype, path)
   } else {
     return loadFileWeb(filetype, datatype)
   }
 }
 
 export async function loadFiles(filetype, datatype) {
-  if(window.ipc) {
-    return loadFilesElectron(filetype, datatype)
+  if(window.desktop) {
+    return loadFilesDesktop(filetype, datatype)
   } else {
     return loadFilesWeb(filetype, datatype)
   }
 }
 
 export async function saveFile(data, filetype, path, title) {
-  if(window.ipc) {
-    return saveFileElectron(data, filetype, path)
+  if(window.desktop) {
+    return saveFileDesktop(data, filetype, path)
   } else {
     saveFileWeb(data, filetype, path || title)
   }
 }
 
 export async function chooseSavePath(filetype, title) {
-  return await window.ipc.invoke('get-save-path', filetype, title)
+  return await window.desktop.invoke('get-save-path', filetype, title)
 }
 
-// Electron
-async function loadFileElectron(filetype, datatype, path) {
-  path = path || await window.ipc.invoke('get-load-path', filetype)
+// Desktop app
+async function loadFileDesktop(filetype, datatype, path) {
+  path = path || await window.desktop.invoke('get-load-path', filetype)
   if(!path) throw 'canceled'
 
   if(datatype == 'dataUrl') {
-    const base64 = await window.ipc.invoke('load-file', path, 'base64')
+    const base64 = await window.desktop.invoke('load-file', path, 'base64')
     const extension = path.split('.').pop().toLowerCase()
     const mimeType = {
       avif: 'image/avif',
@@ -54,14 +54,14 @@ async function loadFileElectron(filetype, datatype, path) {
   }
 
   const encoding = datatype == 'text' ? 'utf-8' : undefined
-  const data = await window.ipc.invoke('load-file', path, encoding)
+  const data = await window.desktop.invoke('load-file', path, encoding)
   return {data, path}
 }
 
-async function loadFilesElectron(filetype, datatype) {
-  const paths = await window.ipc.invoke('get-load-path', filetype, true)
+async function loadFilesDesktop(filetype, datatype) {
+  const paths = await window.desktop.invoke('get-load-path', filetype, true)
   if(!paths.length) throw 'canceled'
-  return Promise.all(paths.map(path => loadFileElectron(filetype, datatype, path)))
+  return Promise.all(paths.map(path => loadFileDesktop(filetype, datatype, path)))
 }
 
 function loadImageDimensions(src) {
@@ -76,10 +76,10 @@ function loadImageDimensions(src) {
   })
 }
 
-async function saveFileElectron(data, filetype, path) {
-  path = path || await window.ipc.invoke('get-save-path', filetype)
+async function saveFileDesktop(data, filetype, path) {
+  path = path || await window.desktop.invoke('get-save-path', filetype)
   if(!path) throw 'canceled'
-  await window.ipc.invoke('save-file', path, data)
+  await window.desktop.invoke('save-file', path, data)
   return path
 }
 

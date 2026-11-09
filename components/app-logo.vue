@@ -13,5 +13,5 @@
 </style>
 
 <script setup>
-  import logoUrl from '../electron/build/icon-source.svg'
+  import logoUrl from '../src-tauri/icons/icon-source.svg'
 </script>

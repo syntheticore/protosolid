@@ -1,6 +1,6 @@
 import { reactive } from 'vue'
 
-// Electron does not implement window.prompt, so text input goes through an
+// Desktop web views do not implement window.prompt, so text input goes through an
 // in-app dialog rendered by DialogView.
 export const dialogState = reactive({ current: null })
 

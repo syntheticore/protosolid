@@ -33,7 +33,7 @@ export const defaultPreferences = Object.freeze({ ...preferences })
 function savePreferences() {
   window.localStorage.setItem('preferences', JSON.stringify(preferences))
   emitter.emit('updated')
-  if(window.ipc) window.ipc.send('preferences-updated', { ...preferences })
+  if(window.desktop) window.desktop.send('preferences-updated', { ...preferences })
 }
 
 function loadPreferences() {
@@ -69,8 +69,8 @@ if(typeof window !== 'undefined') window.addEventListener('storage', event => {
 
 // Opens the settings window, optionally at a section such as 'files'
 function openPreferences(section) {
-  if(window.ipc) {
-    window.ipc.send('open-preferences', section)
+  if(window.desktop) {
+    window.desktop.send('open-preferences', section)
     return
   }
   const url = new URL(window.location.href)

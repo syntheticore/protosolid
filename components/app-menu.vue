@@ -182,7 +182,7 @@
 
     // The menu is mounted whenever it opens, so the list is always current
     created() {
-      if(window.ipc) window.ipc.invoke('get-recent-files').then(files => this.recentFiles = files)
+      if(window.desktop) window.desktop.invoke('get-recent-files').then(files => this.recentFiles = files)
     },
 
     methods: {

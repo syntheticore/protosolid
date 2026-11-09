@@ -12,7 +12,7 @@ if(import.meta.hot) {
   })
 }
 
-// Answers MCP messages the Electron main process receives over HTTP. Tool
+// Answers MCP messages the desktop app receives over HTTP. Tool
 // calls run one after another on the active document.
 
 const protocolVersions = ['2025-11-25', '2025-06-18', '2025-03-26']
@@ -91,7 +91,7 @@ async function dispatch(message, app) {
 
 // App gives access to the documents: { bus, activeDocument() }
 export function startMcpBridge(app) {
-  const configure = () => window.ipc.send('mcp-configure', {
+  const configure = () => window.desktop.send('mcp-configure', {
     enabled: preferences.mcpEnabled,
     port: preferences.mcpPort,
   })
@@ -99,7 +99,7 @@ export function startMcpBridge(app) {
   prefEmitter.on('updated', configure)
 
   let queue = Promise.resolve()
-  window.ipc.on('mcp-request', (e, id, message) => {
+  window.desktop.on('mcp-request', (e, id, message) => {
     queue = queue.then(async () => {
       let response
       try {
@@ -107,7 +107,7 @@ export function startMcpBridge(app) {
       } catch(error) {
         response = { jsonrpc: '2.0', id: message.id, error: { code: error.code || -32603, message: error.message } }
       }
-      window.ipc.send('mcp-response', id, response)
+      window.desktop.send('mcp-response', id, response)
     })
   })
 }

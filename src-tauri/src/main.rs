@@ -154,10 +154,12 @@ fn show_splash(app: &AppHandle) -> tauri::Result<()> {
         .build()?;
 
     let app = app.clone();
+    // New windows get time to settle before they animate in, which avoids stutter on Windows.
+    // The main window loads hidden as soon as the splash screen has transitioned in.
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(500));
         splash.show().unwrap();
-        thread::sleep(Duration::from_millis(1500));
+        thread::sleep(Duration::from_millis(500));
         create_main_window(&app).unwrap();
     });
     Ok(())
@@ -232,10 +234,12 @@ fn remove_recent_file(app: AppHandle, path: String) -> tauri::Result<()> {
     menu::set_recent_files(&app, files)
 }
 
-// Creating windows from synchronous commands deadlocks on Windows
+// Runs on the main thread, so quick repeated requests can't create the window twice.
+// The command is asynchronous, as creating windows from synchronous commands deadlocks on Windows.
 #[tauri::command]
 async fn open_preferences(app: AppHandle, section: Option<String>) -> tauri::Result<()> {
-    show_preferences(&app, section)
+    let handle = app.clone();
+    app.run_on_main_thread(move || show_preferences(&handle, section).unwrap())
 }
 
 #[tauri::command]
@@ -293,8 +297,9 @@ fn set_theme(app: AppHandle, theme: String) -> tauri::Result<()> {
 #[tauri::command]
 fn vue_ready(app: AppHandle) {
     emit_dark_mode(&app);
+    // Lets the loaded window settle before it animates in
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(1000));
+        thread::sleep(Duration::from_millis(500));
         if let Some(main) = app.get_webview_window(MAIN) {
             main.show().unwrap();
         }

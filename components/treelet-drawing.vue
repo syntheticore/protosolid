@@ -113,7 +113,7 @@
 <script>
   import { drawingScales, exportDrawing, sheetSizes } from './../js/core/drawing.js'
   import { toRaw } from 'vue'
-  import { chooseSavePath } from './../js/utils.js'
+  import { chooseSavePath, exportWithToast } from './../js/utils.js'
 
   export default {
     name: 'TreeletDrawing',
@@ -200,7 +200,8 @@
           await this.chooseDestination()
           if(!this.drawing.path) return
         }
-        const path = await exportDrawing(toRaw(this.component), toRaw(this.drawing), toRaw(this.document.top()))
+        const path = await exportWithToast(this.document.bus, 'Drawing', () =>
+          exportDrawing(toRaw(this.component), toRaw(this.drawing), toRaw(this.document.top())))
         if(path && path != this.drawing.path) this.set('path', path)
       },
 

@@ -25,6 +25,20 @@ export async function saveFile(data, filetype, path, title) {
   }
 }
 
+// Reports the outcome of an export in the footer, the browser has no path to show
+export async function exportWithToast(bus, title, run) {
+  try {
+    const path = await run()
+    const message = path ? `Exported to ${path.split(/[\\/]/).pop()}` : 'Exported'
+    bus.emit('toast', { title, message, success: true })
+    return path
+  } catch(error) {
+    if(error == 'canceled') return
+    console.error(error)
+    bus.emit('toast', { title, message: `Export failed: ${error.message || error}` })
+  }
+}
+
 export async function chooseSavePath(filetype, title) {
   return await window.desktop.invoke('get-save-path', filetype, title)
 }

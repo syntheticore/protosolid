@@ -111,7 +111,7 @@
 
 <script>
   import { exportConfigured } from './../js/core/export.js'
-  import { chooseSavePath } from './../js/utils.js'
+  import { chooseSavePath, exportWithToast } from './../js/utils.js'
 
   export default {
     name: 'TreeletExport',
@@ -203,7 +203,7 @@
         }
 
         this.config.path = this.path
-        const path = await exportConfigured(this.component, this.config)
+        const path = await exportWithToast(this.document.bus, 'Export', () => exportConfigured(this.component, this.config))
         if(path && path != this.config.path) {
           this.path = path
           this.config.path = path

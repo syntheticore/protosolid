@@ -133,7 +133,7 @@
   import { exportFlatPattern } from './../js/core/flat-pattern.js'
   import { flatPattern } from './../js/core/sheet-metal.js'
   import { featureError } from './../js/core/errors.js'
-  import { chooseSavePath } from './../js/utils.js'
+  import { chooseSavePath, exportWithToast } from './../js/utils.js'
 
   export default {
     name: 'TreeletFlatPattern',
@@ -258,14 +258,10 @@
           if(!this.path) return
         }
         this.config.path = this.path
-        try {
-          const path = await exportFlatPattern(this.component, this.config)
-          if(path && path != this.config.path) {
-            this.path = this.config.path = path
-            this.document.markChanged()
-          }
-        } catch(error) {
-          this.document.bus.emit('toast', { title: 'Flatten', message: `Export failed: ${error.message || error}` })
+        const path = await exportWithToast(this.document.bus, 'Flatten', () => exportFlatPattern(this.component, this.config))
+        if(path && path != this.config.path) {
+          this.path = this.config.path = path
+          this.document.markChanged()
         }
       },
 

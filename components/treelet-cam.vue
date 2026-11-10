@@ -192,7 +192,7 @@
     postProcessors, toolShapes,
   } from '../js/core/cam.js'
   import CamPlayer from '../js/cam-player.js'
-  import { chooseSavePath } from '../js/utils.js'
+  import { chooseSavePath, exportWithToast } from '../js/utils.js'
 
   const operationFields = [
     { key: 'shape', label: 'Tool', options: toolShapes },
@@ -291,7 +291,7 @@
   }
 
   async function exportFile() {
-    const path = await exportGcode(props.setup, props.component)
+    const path = await exportWithToast(props.document.bus, 'CAM', () => exportGcode(props.setup, props.component))
     if(path && path != props.setup.path) set(props.setup, 'path', path)
   }
 

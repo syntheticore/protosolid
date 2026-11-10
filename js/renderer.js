@@ -183,8 +183,7 @@ export default class Renderer {
       this.updateGizmoEnabled()
       this.cameraTarget = null
       this.viewControlsTarget = null
-      this.cameraTransitionUp = null
-      this.cameraUpTarget = null
+      this.cameraRotationTarget = null
       this.reportViewChange()
       this.startAnimation()
     })
@@ -328,24 +327,15 @@ export default class Renderer {
   }
 
   setView(position, target, plane=null) {
-    const camera = this.activeCamera
-    const polePosition = this.poleSafePosition(position, target, plane)
-    this.cameraTarget = polePosition || position
+    this.cameraTarget = this.poleSafePosition(position, target, plane) || position
     this.viewControlsTarget = target
     this.dualCamera.retarget(target, this.cameraTarget)
-    if(polePosition || this.cameraUpTarget) {
-      camera.updateMatrixWorld()
-      this.cameraTransitionUp = new THREE.Vector3()
-        .setFromMatrixColumn(camera.matrixWorld, 1)
-        .normalize()
-      const rotation = new THREE.Matrix4().lookAt(this.cameraTarget, target, camera.up)
-      this.cameraUpTarget = new THREE.Vector3()
-        .setFromMatrixColumn(rotation, 1)
-        .normalize()
-    } else {
-      this.cameraTransitionUp = null
-      this.cameraUpTarget = null
-    }
+    // The orientation OrbitControls derives from the final pose. Transitions
+    // interpolate towards it directly, as deriving it from the moving position
+    // spins the camera wherever the path passes close to the world-up axis.
+    this.cameraRotationTarget = new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().lookAt(this.cameraTarget, target, this.activeCamera.up)
+    )
     this.startAnimation()
     this.endAnimation()
   }
@@ -474,36 +464,44 @@ export default class Renderer {
   animate(timestamp) {
     const delta = this.lastTimestamp ? timestamp - this.lastTimestamp : 1
     this.lastTimestamp = timestamp
-    if(this.isAnimating || this.viewControlsTarget || this.cameraTarget || this.cameraUpTarget || this.dualCamera.isTransitioning) requestAnimationFrame(this.animate.bind(this))
-    // Transition to target positions
-    this.cameraTarget = this.lerp(this.activeCamera.position, this.cameraTarget)
-    this.viewControlsTarget = this.lerp(this.viewControls.target, this.viewControlsTarget)
-    // Update the projection before OrbitControls renders the new camera pose.
+    if(this.isAnimating || this.cameraTarget || this.dualCamera.isTransitioning) requestAnimationFrame(this.animate.bind(this))
+    const transitioning = this.cameraTarget && this.updateCameraTransition()
+    // Update the projection before the new camera pose is rendered.
     if(!this.dualCamera.isTransitioning) {
-      this.dualCamera.updateOrthographic(this.viewControlsTarget || this.viewControls.target)
+      this.dualCamera.updateOrthographic(this.viewControls.target)
     }
-    // Let OrbitControls derive the camera orientation from the interpolated
-    // position and target, keeping WebGL and projected UI handles in sync.
-    if(!this.cameraUpTarget) this.viewControls.update(delta)
-    if(this.cameraUpTarget) {
-      // Interpolate only the roll; rebuilding the look-at rotation keeps the
-      // moving target fixed in the center of the screen throughout the move.
-      this.slerpDirection(this.cameraTransitionUp, this.cameraUpTarget)
-      const transitionDone = !this.cameraTarget &&
-        !this.viewControlsTarget &&
-        this.cameraTransitionUp.angleTo(this.cameraUpTarget) < 1e-3
-      if(transitionDone) this.cameraTransitionUp.copy(this.cameraUpTarget)
-      const viewDirection = this.viewControls.target.clone().sub(this.activeCamera.position).normalize()
-      const viewUp = this.cameraTransitionUp.clone().projectOnPlane(viewDirection).normalize()
-      const rotation = new THREE.Matrix4().lookAt(this.activeCamera.position, this.viewControls.target, viewUp)
-      this.activeCamera.quaternion.setFromRotationMatrix(rotation)
-      if(transitionDone) {
-        this.cameraTransitionUp = null
-        this.cameraUpTarget = null
-      }
-      this.render()
-    }
+    // OrbitControls would rebuild the orientation from the camera position,
+    // so it only takes over again once the transition has reached its pose.
+    if(transitioning) this.render()
+    else this.viewControls.update(delta)
     this.updateProjectionTransition()
+  }
+
+  // Orbit towards the target pose: orientation, orbit center and distance are
+  // interpolated on their own, and the position follows from them. That keeps
+  // the orbit center fixed in the middle of the screen and the rotation on
+  // the shortest path. Returns false once the target pose is reached.
+  updateCameraTransition() {
+    const camera = this.activeCamera
+    const center = this.viewControls.target
+    const targetDistance = this.cameraTarget.distanceTo(this.viewControlsTarget)
+    const distance = THREE.MathUtils.lerp(camera.position.distanceTo(center), targetDistance, 0.3)
+    center.lerp(this.viewControlsTarget, 0.3)
+    camera.quaternion.slerp(this.cameraRotationTarget, 0.3)
+    const done = camera.quaternion.angleTo(this.cameraRotationTarget) < 1e-5 &&
+      center.distanceToSquared(this.viewControlsTarget) < 1e-4 &&
+      Math.abs(distance - targetDistance) < 1e-2
+    if(done) {
+      center.copy(this.viewControlsTarget)
+      camera.position.copy(this.cameraTarget)
+      camera.quaternion.copy(this.cameraRotationTarget)
+      this.cameraTarget = null
+      this.viewControlsTarget = null
+      this.cameraRotationTarget = null
+      return false
+    }
+    camera.position.set(0, 0, 1).applyQuaternion(camera.quaternion).multiplyScalar(distance).add(center)
+    return true
   }
 
   updateProjectionTransition() {
@@ -514,23 +512,6 @@ export default class Renderer {
     this.setActiveCamera(update.camera)
     this.viewControls.target.copy(update.target)
     this.viewControls.update()
-  }
-
-  lerp(vec, target) {
-    if(!target) return
-    vec.multiplyScalar(0.7).add(
-      target.clone().multiplyScalar(0.3)
-    )
-    if(target.clone().sub(vec).lengthSq() < 0.0001) {
-      vec.copy(target)
-      return null
-    }
-    return target
-  }
-
-  slerpDirection(direction, target) {
-    const rotation = new THREE.Quaternion().setFromUnitVectors(direction, target)
-    direction.applyQuaternion(new THREE.Quaternion().slerp(rotation, 0.15)).normalize()
   }
 
   // The ground shadow is redrawn before the next frame

@@ -12,7 +12,7 @@ impl Transaction<'_> {
         junction_surfaces: &BTreeMap<VertexId, Surface3>,
         closed_seams: &BTreeSet<VertexId>,
         kind: EdgeBlendKind,
-    ) -> KernelResult<()> {
+    ) -> KernelResult<Option<BlendTrimViolation>> {
         let first_patch = patches.first().ok_or_else(|| {
             invalid("blend network is empty")
         })?;
@@ -42,6 +42,9 @@ impl Transaction<'_> {
         self.close_rim_corners(&mut rewrite, patches, junctions, junction_surfaces, kind)?;
         self.close_blend_loops(&mut rewrite)?;
         let modified_faces = self.remove_blended_topology(&rewrite, patches)?;
+        if self.blend_leaves_hole_outside_trim(&modified_faces)? {
+            return Ok(Some(BlendTrimViolation::LeavesHoleOutsideTrim));
+        }
         self.merge_transition_faces(&rewrite, closed_seams)?;
         for face in modified_faces {
             let name = self.working.face(face)?.name;
@@ -53,7 +56,7 @@ impl Transaction<'_> {
         let body = self.working.shell(shell)?.body;
         self.touch(body);
         self.composes_imported_topology = true;
-        Ok(())
+        Ok(None)
     }
 
     /// Capture every external loop gap before any endpoint changes.

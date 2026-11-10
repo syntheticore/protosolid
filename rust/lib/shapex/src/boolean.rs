@@ -528,14 +528,7 @@ impl<'a> Arrangement<'a> {
                         let projected: Curve2 = if same_surface {
                             source.pcurve.clone()
                         } else {
-                            super::SurfaceProjectionPcurve2::new(
-                                source.curve.clone(),
-                                target.clone(),
-                                source.pcurve.clone(),
-                                source.range,
-                                tolerance,
-                            )?
-                            .into()
+                            coincident_pcurve(&source.curve, &source.pcurve, source.range, target, tolerance)?
                         };
                         let projected = align_pcurve_to_face_chart(
                             &projected,
@@ -662,14 +655,9 @@ impl<'a> Arrangement<'a> {
                         for (curve_index, curve) in self.imprinted[&other_key].iter().enumerate() {
                             let mut curve = curve.clone();
                             if other.surface() != face.surface() {
-                                curve.pcurve = super::SurfaceProjectionPcurve2::new(
-                                    curve.curve.clone(),
-                                    face.surface().clone(),
-                                    curve.pcurve.clone(),
-                                    curve.range,
-                                    tolerance,
-                                )?
-                                .into();
+                                curve.pcurve = coincident_pcurve(
+                                    &curve.curve, &curve.pcurve, curve.range, face.surface(), tolerance,
+                                )?;
                                 curve.pcurve = align_pcurve_to_face_chart(
                                     &curve.pcurve,
                                     Some(curve.range),
@@ -764,6 +752,50 @@ pub(super) fn patch_complexity_key(patch: &BrepPatch) -> (u8, u8) {
         | Surface3::Ruled(_) => 4,
     };
     (boundary_complexity, surface_complexity)
+}
+
+/// The p-curve of `curve` on `target`, a support coincident with the one that
+/// `pcurve` lies on. Their charts usually differ little enough for `pcurve`
+/// to guide the projection. Periodic supports can also be turned or reversed
+/// in themselves, which leaves the guide on a distant branch of the target's
+/// chart; at half a turn the projection has no descent at all. The guide is
+/// then projected into the target's chart instead.
+fn coincident_pcurve(
+    curve: &Curve3,
+    pcurve: &Curve2,
+    range: ParameterRange,
+    target: &Surface3,
+    tolerance: ModelTolerance,
+) -> KernelResult<Curve2> {
+    let sample = |index: usize| range.start + range.span() * index as f64 / 16.0;
+    let domains = target.domains();
+    let charted = |index: usize| -> KernelResult<Point2> {
+        let (u, v) = target.project(curve.evaluate(sample(index))?.point, tolerance)?.parameters;
+        Ok(Point2::new(u, v))
+    };
+    // Charts of one plane are affine images of each other.
+    let mut turned = false;
+    if domains.iter().any(|domain| domain.period.is_some()) {
+        for index in [0, 8, 16] {
+            let guide = pcurve.evaluate(sample(index))?.point;
+            let near = super::nearest_uv(domains, charted(index)?, guide);
+            turned |= (0..2).any(|axis| domains[axis].period
+                .is_some_and(|period| (near[axis] - guide[axis]).abs() > period / 8.0));
+        }
+    }
+    let guide = if turned {
+        let mut points = Vec::with_capacity(17);
+        for index in 0..=16 {
+            points.push(charted(index)?);
+        }
+        // Stay in the turn of the chart that the source p-curve occupies.
+        points[0] = super::nearest_uv(domains, points[0], pcurve.evaluate(range.start)?.point);
+        super::intersection::unwrap_periodic_points(&mut points, domains);
+        super::intersection::smooth_nurbs_guide(&points, range)?.into()
+    } else {
+        pcurve.clone()
+    };
+    Ok(super::SurfaceProjectionPcurve2::new(curve.clone(), target.clone(), guide, range, tolerance)?.into())
 }
 
 fn boundary_curves(compound: &Compound, face: super::FaceId) -> KernelResult<Vec<FaceCurve>> {
@@ -1115,20 +1147,26 @@ fn arrange_face(
                 inward = -inward;
             }
             let speed = (surface_value.du * inward.x + surface_value.dv * inward.y).magnitude();
-            let uv_step = side_probe_step(classification_offset, inward, speed, side_probe_limits);
+            let mut uv_step = side_probe_step(classification_offset, inward, speed, side_probe_limits);
             // Try another boundary when a slow direction still cannot make
             // a resolvable move after applying the chart limits.
             if speed <= tolerance.linear && speed * uv_step <= tolerance.linear {
                 continue;
             }
-            // This point is constructed from the oriented trim itself, so it
-            // is the local interior by definition. Periodic seam-spiked loops
-            // are not necessarily representable as one planar polygon and
-            // therefore must not be rejected by `point_in_trim` here.
-            if let Some(orientation) = classify_orientation_at(boundary_uv + inward * uv_step)? {
-                desired = Some(orientation);
-                break;
+            // A planar trim can be much narrower than its chart bounds.
+            // Keep the probe inside it before classifying the whole face.
+            // Curved charts can have seam spikes outside the sampled loop.
+            for _ in 0..32 {
+                let probe = boundary_uv + inward * uv_step;
+                if !matches!(surface, Surface3::Plane(_))
+                    || point_in_sampled_trim(probe, original_boundary, &original_samples)?
+                {
+                    desired = classify_orientation_at(probe)?;
+                    break;
+                }
+                uv_step *= 0.5;
             }
+            if desired.is_some() { break; }
         }
         return match desired {
             None => Ok(Vec::new()),
@@ -2350,14 +2388,7 @@ fn patch_uses_face(
     let mut original = boundary_curves(parent, face.topology_id())?;
     for curve in &mut original {
         if face.surface() != &patch.surface {
-            curve.pcurve = super::SurfaceProjectionPcurve2::new(
-                curve.curve.clone(),
-                patch.surface.clone(),
-                curve.pcurve.clone(),
-                curve.range,
-                tolerance,
-            )?
-            .into();
+            curve.pcurve = coincident_pcurve(&curve.curve, &curve.pcurve, curve.range, &patch.surface, tolerance)?;
         }
     }
     let bounds = face_parameter_bounds(&boundary, tolerance)?;

@@ -39,11 +39,31 @@ use super::{
 };
 use crate::{topology_error, unsupported};
 
-/// Whether a blend network was built in one transaction, or needs a staged
-/// construction that `Compound::blend_edges` performs from the source.
+/// Whether a local blend was built or needs another construction from the source.
 pub(crate) enum BlendOutcome {
     Built,
     Staged(BlendStaging),
+    Overflow(BlendTrimViolation),
+}
+
+/// Where the contact rail prevents a local rewrite of its support.
+pub(crate) enum BlendTrimViolation {
+    CrossesBoundary,
+    InsideHole,
+    OutsideFace,
+    LeavesHoleOutsideTrim,
+}
+
+impl BlendTrimViolation {
+    pub(crate) fn into_error(self) -> KernelError {
+        let message = match self {
+            Self::CrossesBoundary => "blend contact boundary crosses an existing face boundary",
+            Self::InsideHole => "blend contact boundary enters an existing face hole",
+            Self::OutsideFace => "blend contact boundary leaves its incident face trim",
+            Self::LeavesHoleOutsideTrim => "blend contact boundary leaves an existing hole outside the new face trim",
+        };
+        crate::geometry_error(message)
+    }
 }
 
 /// A corner that one network cannot round, and the sequence that can.
@@ -731,14 +751,18 @@ impl Transaction<'_> {
                     }
                     self.restore(prepared);
                 }
-                self.certify_blend_contact_trims(&patches)?;
-                self.rewrite_blend_network(
+                if let Some(violation) = self.blend_contact_trim_violation(&patches)? {
+                    return Ok(BlendOutcome::Overflow(violation));
+                }
+                if let Some(violation) = self.rewrite_blend_network(
                     &patches,
                     &junctions,
                     &junction_surfaces,
                     &closed_seams,
                     kind,
-                )?;
+                )? {
+                    return Ok(BlendOutcome::Overflow(violation));
+                }
                 if junctions.values().any(|junction| {
                     matches!(junction.kind, BlendJunctionKind::Miter { wall_faces, .. }
                         if junction.contact_points[&wall_faces[0]].distance(junction.contact_points[&wall_faces[1]]) > self.kernel.tolerance.linear)

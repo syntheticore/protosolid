@@ -295,13 +295,38 @@ impl<'a> BrepClassifier<'a> {
                 // normal from topology, rather than hoping independent face
                 // projections converge to numerically identical minima.
                 let edge = self.topology.edge(self.topology.coedge(boundary.provenance)?.edge())?;
-                let normal = edge.coedges().iter().try_fold(Vec3::zero(), |sum, id| {
+                let sheet = |id: &super::CoedgeId| {
                     let coedge = self.topology.coedge(*id)?;
                     let face = self.topology.face(self.topology.loop_(coedge.loop_id())?.face())?;
                     let uv = coedge.pcurve().evaluate(projection.parameter)?.point;
                     let sign = if face.orientation() == FaceOrientation::Forward { orientation } else { -orientation };
-                    Ok::<_, super::KernelError>(sum + face.surface().normal(uv.x, uv.y)? * sign)
-                })?;
+                    Ok::<_, super::KernelError>((face.surface().normal(uv.x, uv.y)? * sign, face, uv, coedge))
+                };
+                let mut normal = edge.coedges().iter()
+                    .try_fold(Vec3::zero(), |sum, id| Ok::<_, super::KernelError>(sum + sheet(id)?.0))?;
+                if edge.coedges().len() == 2 && normal.magnitude() <= self.tolerance.angular.max(f64::EPSILON.sqrt()) {
+                    // At a cusp both faces leave the edge to the same side
+                    // and their normals cancel. The order of the two sheets
+                    // tells a blade of material from a slit: next to the
+                    // edge itself, all of space is outside the one and
+                    // inside the other.
+                    let sheets = [sheet(&edge.coedges()[0])?, sheet(&edge.coedges()[1])?];
+                    let (first, _, _, coedge) = sheets[0];
+                    let tangent = edge.curve().evaluate(projection.parameter)?.first_derivative.normalize();
+                    let inward = (first * orientation).cross(tangent * coedge.range().span().signum()).normalize();
+                    let bending = |index: usize| -> KernelResult<f64> {
+                        let (_, face, uv, _) = sheets[index];
+                        let sample = face.surface().evaluate(uv.x, uv.y)?;
+                        let across = sample.du.cross(sample.dv);
+                        let du = inward.cross(sample.dv).dot(across) / across.magnitude2();
+                        let dv = sample.du.cross(inward).dot(across) / across.magnitude2();
+                        Ok(first.dot(sample.duu * du.powi(2) + sample.duv * (2.0 * du * dv) + sample.dvv * dv.powi(2)))
+                    };
+                    let (upper, lower) = (bending(0)?, bending(1)?);
+                    if upper != lower {
+                        normal = (point - projection.point) * if upper > lower { 1.0 } else { -1.0 };
+                    }
+                }
                 minimum.consider(projection.point, normal, point, linear);
                 let uv = refine_face_projection(surface, point, uv, face.parameters, self.tolerance)?;
                 if self.in_trim(face, (uv.x, uv.y))? {

@@ -956,19 +956,14 @@ fn second_shell_rim_fillet_document_23() {
 fn oversized_shell_rim_fillet_document_23() {
     let (body, edge) = shell_rim_document_23();
     let original_volume = body.volume();
+    // The rim is 6 mm wide. Larger blends overflow it onto the inner wall.
+    let mut volume = original_volume;
     for radius in [1.0, 4.0, 5.99, 6.0, 6.01, 7.0, 11.0, 12.0] {
-        let result = body.fillet(&[edge.clone()], radius);
-        if radius < 6.0 {
-            mesh(&result.unwrap());
-        } else {
-            let error =
-                result.expect_err(&format!("radius {radius} published invalid geometry"));
-            assert!(error
-                .diagnostics()
-                .iter()
-                .any(|diagnostic| diagnostic.kind
-                    == super::super::DiagnosticKind::GeometryInvariant));
-        }
+        let result = body.fillet(&[edge.clone()], radius)
+            .unwrap_or_else(|error| panic!("radius {radius}: {error}"));
+        assert!(result.volume() < volume, "radius {radius} must remove more material");
+        volume = result.volume();
+        mesh(&result);
         assert_eq!(body.volume(), original_volume);
     }
 }

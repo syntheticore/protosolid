@@ -738,10 +738,11 @@ impl Transaction<'_> {
         })
     }
 
-    /// Certify that each new contact curve remains in the trimmed domain of
-    /// its parent face. Crossing another loop would make the local
-    /// Euler rewrite publish a self-overlapping shell instead of a blend.
-    pub(super) fn certify_blend_contact_trims(&self, patches: &[BlendPatch]) -> KernelResult<()> {
+    /// Find the first contact rail that leaves the trim of its support.
+    pub(super) fn blend_contact_trim_violation(
+        &self,
+        patches: &[BlendPatch],
+    ) -> KernelResult<Option<BlendTrimViolation>> {
         let tolerance = self.kernel.tolerance;
         for patch in patches {
             for parent_index in 0..2 {
@@ -820,44 +821,64 @@ impl Transaction<'_> {
                         for pcurve in &contacts {
                             let contact = TrimmedCurve2::new(pcurve.clone(), boundary.range)?;
                             let intersection = curve_pair_intersection(&contact, segment, tolerance)?;
-                            if locally_rewritten_uses.contains(coedge_id)
-                                && (intersection.coincident || !intersection.hits.is_empty())
+                            if intersection.coincident || intersection.hits.iter()
+                                .any(|hit| closed || !at_contact_endpoint(hit.first_parameter))
                             {
+                                if !locally_rewritten_uses.contains(coedge_id) {
+                                    return Ok(Some(BlendTrimViolation::CrossesBoundary));
+                                }
                                 crosses_locally_rewritten_boundary = true;
                             }
-                            if !locally_rewritten_uses.contains(coedge_id)
-                                && (intersection.coincident
-                                    || intersection
-                                        .hits
-                                        .iter()
-                                        .any(|hit| closed || !at_contact_endpoint(hit.first_parameter)))
-                            {
-                                return Err(geometry_error("blend contact boundary crosses an existing face boundary"));
-                            }
                         }
                     }
-                    if closed {
-                        let segments = identified_segments
-                            .into_iter()
-                            .map(|(_, segment)| segment)
-                            .collect::<Vec<_>>();
-                        let contains = curve_loop_contains_point(&segments, middle, tolerance)?;
-                        match self.working.loop_(loop_id)?.kind {
-                            super::super::LoopKind::Outer => outer_contains_middle |= contains,
-                            super::super::LoopKind::Inner if contains => inside_existing_hole = true,
-                            super::super::LoopKind::Inner => {}
-                        }
+                    let segments = identified_segments
+                        .into_iter()
+                        .map(|(_, segment)| segment)
+                        .collect::<Vec<_>>();
+                    let contains = curve_loop_contains_point(&segments, middle, tolerance)?;
+                    match self.working.loop_(loop_id)?.kind {
+                        super::super::LoopKind::Outer => outer_contains_middle |= contains,
+                        super::super::LoopKind::Inner if contains => inside_existing_hole = true,
+                        super::super::LoopKind::Inner => {}
                     }
                 }
-                if closed && inside_existing_hole && !crosses_locally_rewritten_boundary {
-                    return Err(geometry_error("blend contact boundary enters an existing face hole"));
-                }
-                if closed && !outer_contains_middle && !crosses_locally_rewritten_boundary {
-                    return Err(geometry_error("blend contact boundary leaves its incident face trim"));
+                if !crosses_locally_rewritten_boundary {
+                    if inside_existing_hole {
+                        return Ok(Some(BlendTrimViolation::InsideHole));
+                    }
+                    if !outer_contains_middle {
+                        return Ok(Some(BlendTrimViolation::OutsideFace));
+                    }
                 }
             }
         }
-        Ok(())
+        Ok(None)
+    }
+
+    /// A contact rail can pass beyond an entire hole without intersecting
+    /// its boundary. Check those holes against the rewritten planar trim.
+    pub(super) fn blend_leaves_hole_outside_trim(
+        &self,
+        faces: &BTreeSet<FaceId>,
+    ) -> KernelResult<bool> {
+        use super::super::trim::{point_in_sampled_trim, trim_samples};
+        for &face_id in faces {
+            let face = self.working.face(face_id)?;
+            if !matches!(face.surface(), Surface3::Plane(_)) || face.loops().len() < 2 {
+                continue;
+            }
+            let (outer, holes): (Vec<_>, Vec<_>) =
+                face_boundary_curves(&self.working, face_id, self.kernel.tolerance)?
+                    .into_iter().partition(|curve| curve.loop_kind == super::super::LoopKind::Outer);
+            let samples = trim_samples(&outer)?;
+            for hole in holes {
+                let point = hole.pcurve.evaluate(hole.range.middle())?.point;
+                if !point_in_sampled_trim(point, &outer, &samples)? {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 }
 

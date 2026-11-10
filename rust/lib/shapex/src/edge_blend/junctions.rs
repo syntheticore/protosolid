@@ -347,6 +347,7 @@ impl Transaction<'_> {
                 match transaction.blend_network(selected, radius, follow, EdgeBlendKind::Fillet, None)? {
                     BlendOutcome::Built => Ok(()),
                     BlendOutcome::Staged(_) => Err(unsupported("a bridged blend transition needs a staged corner")),
+                    BlendOutcome::Overflow(violation) => Err(violation.into_error()),
                 }
             });
             if attempt.is_ok() {

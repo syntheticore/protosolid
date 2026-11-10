@@ -9,6 +9,7 @@ use super::{
     ShellJoin, SplitKeep, Surface3, TessellationOptions, TrimmedCurve2, Wire2,
 };
 
+mod blend_overflow;
 mod blends;
 mod booleans;
 mod features;

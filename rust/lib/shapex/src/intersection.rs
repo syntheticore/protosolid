@@ -1367,8 +1367,9 @@ fn cylinder_torus(
         return Ok(IntersectionSet::Empty);
     }
     let angle = radial_cosine.clamp(-1.0, 1.0).acos();
-    let minor_parameters = if angle.sin().abs() <= tolerance.angular {
-        vec![angle]
+    // Within tolerance of tangency the two sections bound no resolvable strip.
+    let minor_parameters = if torus.minor_radius() * (1.0 - radial_cosine.abs()) <= linear {
+        vec![if radial_cosine > 0.0 { 0.0 } else { std::f64::consts::PI }]
     } else {
         vec![angle, -angle]
     };
@@ -1759,10 +1760,10 @@ pub(crate) fn parallel_plane_torus_section(
     let sine = (height / torus.minor_radius()).clamp(-1.0, 1.0);
     let first = sine.asin();
     let second = std::f64::consts::PI - first;
-    let minor_parameters = if (first - second).abs() <= tolerance.parameter
-        || (first - second).abs() >= std::f64::consts::TAU - tolerance.parameter
-    {
-        vec![first]
+    // Within tolerance of the tangent height the two sections lie apart by
+    // the root of that distance, yet bound no resolvable strip between them.
+    let minor_parameters = if torus.minor_radius() - height.abs() <= linear {
+        vec![std::f64::consts::FRAC_PI_2.copysign(height)]
     } else {
         vec![first, second]
     };

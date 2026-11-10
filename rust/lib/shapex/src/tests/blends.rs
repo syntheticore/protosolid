@@ -999,12 +999,29 @@ fn rolling_ball_fillet_supports_closed_hole_rims() {
         })
         .expect("top circular hole rim")
         .clone();
+    // A blend reaching past the plate's side is trimmed by it, as if the
+    // plate had been cut to size after filleting. Chamfers do not overflow.
+    let overflowing = solid.fillet(&[rim.clone()], 8.0).expect("overflowing circular rim fillet");
+    let wide = Wire2::polygon(
+        [Point2::new(-20.0, 0.0), Point2::new(60.0, 0.0), Point2::new(60.0, 30.0), Point2::new(-20.0, 30.0)],
+        tolerance,
+    ).unwrap();
+    let hole = Wire2::new([TrimmedCurve2::circle(Point2::new(10.0, 15.0), 6.0).unwrap()], tolerance).unwrap();
+    let wide = Profile::new(wide, [hole], tolerance).unwrap()
+        .extrude(Plane3::xy(), Vec3::new(0.0, 0.0, 20.0)).unwrap();
+    let wide_rim = wide.edges().find(|edge| matches!(edge.curve(), Curve3::Circle(_))
+        && edge.endpoints().unwrap().iter().all(|point| point.z > 19.9)).unwrap().clone();
+    let side = Plane3::new(Point3::origin(), Vec3::unit_y(), Vec3::unit_z(), tolerance).unwrap();
+    let expected = wide.fillet(&[wide_rim], 8.0).unwrap().split(side, SplitKeep::Right).unwrap();
+    assert!((overflowing.volume() - expected.volume()).abs() < 1.0e-4,
+        "{} vs {}", overflowing.volume(), expected.volume());
+    overflowing.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap()).unwrap();
     let oversized = solid
-        .check_edge_blends(&[rim.clone()], 8.0)
-        .expect_err("a circular-rim fillet must not overlap the body's outer boundary");
+        .chamfer(&[rim.clone()], 8.0)
+        .expect_err("a circular-rim chamfer must not overlap the body's outer boundary");
     assert!(
-        oversized.to_string().contains("blend contact boundary"),
-        "unexpected oversized-fillet diagnostic: {oversized}",
+        oversized.to_string().contains("blend"),
+        "unexpected oversized-chamfer diagnostic: {oversized}",
     );
     let filleted = solid
         .check_edge_blends(&[rim], 0.25)
@@ -2201,8 +2218,8 @@ fn rounded_partial_torus_rim_blends() {
 }
 
 #[test]
-fn cylinder_end_fillet_stops_at_chamfered_transverse_hole() {
-    // invalid-geom.cad: the end blend must not cross the chamfered bore.
+fn cylinder_end_fillet_meets_chamfered_transverse_hole() {
+    // An end blend reaching the chamfered bore must be trimmed by it or rejected.
     let tolerance = ModelTolerance::default();
     let circle = |radius| {
         Profile::new(
@@ -2254,10 +2271,22 @@ fn cylinder_end_fillet_stops_at_chamfered_transverse_hole() {
             body.fillet(std::slice::from_ref(&rim), radius)
                 .unwrap_or_else(|error| panic!("{label}, valid radius {radius}: {error}"));
         }
+        // Larger blends reach the chamfered bore. It trims them on the
+        // cylinder; on the cone they are still rejected.
+        let mut volume = body.fillet(std::slice::from_ref(&rim), 20.0).unwrap().volume();
         for radius in [25.0, 35.0] {
-            let error = body.fillet(std::slice::from_ref(&rim), radius).err()
-                .unwrap_or_else(|| panic!("{label}, radius {radius} must stop before the chamfered hole"));
-            assert!(error.to_string().contains("blend contact boundary"), "{label}, radius {radius}: {error}");
+            let result = body.fillet(std::slice::from_ref(&rim), radius);
+            if label == "cone" {
+                let error = result.err()
+                    .unwrap_or_else(|| panic!("{label}, radius {radius} must stop before the chamfered hole"));
+                assert!(error.to_string().contains("blend contact boundary"), "{label}, radius {radius}: {error}");
+                continue;
+            }
+            let result = result.unwrap_or_else(|error| panic!("{label}, radius {radius}: {error}"));
+            assert!(result.volume() < volume, "{label}, radius {radius} must remove more material");
+            volume = result.volume();
+            result.tessellate(TessellationOptions::new(0.1, 0.1, 24).unwrap())
+                .unwrap_or_else(|error| panic!("{label}, radius {radius} mesh: {error}"));
         }
     }
 }

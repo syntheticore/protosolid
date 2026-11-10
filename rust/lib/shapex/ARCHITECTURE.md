@@ -175,6 +175,10 @@ The current publisher certifies:
 - local fillet/chamfer edge networks sharing propagation, contact trimming,
   endpoint handling, topology rewriting, history, and validation; chamfers use
   planes, cones, or exact ruled contact-rail surfaces instead of Boolean cutters;
+- fillets whose contact rails leave a support face, across a face narrower than
+  the blend or through a hole in its band, along straight and circular edges;
+  the material between edge and rolling ball is united or subtracted as a solid
+  wedge, so the body's other faces trim the blend (`features/blend_overflow.rs`);
 - neutral plane drafts of planar, pull-aligned cylindrical/conical faces, and
   ruled spline faces with sections parallel to the neutral plane; spline drafts
   use an affine normal-offset law on the neutral section's pull extrusion;

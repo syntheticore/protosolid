@@ -16,6 +16,7 @@ use super::{
 use crate::topology_error;
 
 mod blend_offset;
+mod blend_overflow;
 mod dissolve;
 mod draft;
 mod move_faces;
@@ -31,6 +32,7 @@ use offset_edge::*;
 use shell::*;
 use support::*;
 
+pub(crate) use blend_overflow::fillet_overflow;
 pub(crate) use dissolve::{dissolve_faces, split};
 pub(crate) use draft::draft;
 pub(crate) use move_faces::move_faces;

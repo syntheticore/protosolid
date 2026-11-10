@@ -297,6 +297,9 @@ impl EdgeHandle {
     pub fn persistent_id(&self) -> PersistentId {
         self.name
     }
+    pub(crate) fn topology_id(&self) -> EdgeId {
+        self.edge
+    }
     pub fn curve(&self) -> &super::Curve3 {
         self.state.topology().edge(self.edge).expect("handle references its own immutable snapshot").curve()
     }
@@ -1095,6 +1098,23 @@ impl Compound {
         })
     }
 
+    /// Report `outputs` as generated from the paired source entities.
+    pub(crate) fn with_generated(
+        self,
+        outputs: impl IntoIterator<Item = (PersistentId, PersistentId)>,
+        role: DerivationRole,
+    ) -> Self {
+        let mut sources_by_output = BTreeMap::<_, BTreeSet<_>>::new();
+        for (output, source) in outputs {
+            sources_by_output.entry(output).or_default().insert(source);
+        }
+        self.edit_history(|history| {
+            for (output, sources) in sources_by_output {
+                history.derived(output, sources, role);
+            }
+        })
+    }
+
     pub(crate) fn with_patch_roles(self, tokens: &BTreeMap<PersistentId, super::CreationRole>) -> Self {
         self.edit_history(|history| history.record_patch_roles(tokens))
     }
@@ -1261,6 +1281,17 @@ impl Compound {
             .collect::<KernelResult<Vec<_>>>()?;
         match transaction.blend_edges(&imported_edges, size, follow_tangent_edges, kind, chamfer)? {
             BlendOutcome::Built => {}
+            BlendOutcome::Overflow(violation) => {
+                let local = violation.into_error();
+                if kind != super::edge_blend::EdgeBlendKind::Fillet {
+                    return Err(local);
+                }
+                return super::features::fillet_overflow(self, edges, size, follow_tangent_edges)
+                    .map_err(|overflow| {
+                        KernelError::from_diagnostics(local.diagnostics().iter()
+                            .chain(overflow.diagnostics()).cloned().collect())
+                    });
+            }
             BlendOutcome::Staged(BlendStaging::MixedTrihedral { concave_edges }) => {
                 return self.blend_setback_network(edges, size, &concave_edges, kind, chamfer);
             }

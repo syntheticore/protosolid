@@ -831,8 +831,9 @@ export class Compound extends Volumetric {
 }
 
 // Builds a body from a closed chain of 2D curves, naming its faces after the
-// curves. `build` turns the profile into geometry, like an extrusion.
-export function namedBody(componentId, curves, names, build, owner) {
+// curves. `build` turns the profile into geometry, like an extrusion. Lofts
+// name the curves of their further sections too.
+export function namedBody(componentId, curves, names, build, owner, sectionNames = []) {
   let wire = sx.Wire2.new(curves, modelTolerance)
   if(wire.signedArea() < 0) {
     curves = curves.map(curve => curve.reversed()).reverse()
@@ -840,8 +841,8 @@ export function namedBody(componentId, curves, names, build, owner) {
     wire = sx.Wire2.new(curves, modelTolerance)
   }
   const geometry = build(sx.Profile.new(wire, [], modelTolerance))
-  const generator = { rings: [{ segments: names }], getBaseId: name => name }
-  return new Compound(componentId, geometry).seedProfileTopology([generator], owner)
+  const generators = [names, ...sectionNames].map(names => ({ rings: [{ segments: names }], getBaseId: name => name }))
+  return new Compound(componentId, geometry).seedProfileTopology(generators, owner)
 }
 
 // Curves of a closed polygon, with names for `namedBody`

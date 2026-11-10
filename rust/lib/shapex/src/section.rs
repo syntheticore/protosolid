@@ -144,19 +144,19 @@ pub(super) fn split(source: &Compound, plane: Plane3, keep: SplitKeep) -> Kernel
             let orientation = source.topology().face(face.topology_id())?.orientation();
             let surface = face.surface();
             let inside = |point: Point3| signed(point) * if *side == SplitKeep::Left { 1.0 } else { -1.0 } < 0.0;
-            let limit = parameters[0].span().abs().min(parameters[1].span().abs()) * 0.05;
             let mut clipped = if *coincident {
                 let outward = surface.normal(parameters[0].middle(), parameters[1].middle())? * orientation.sign();
                 let retain = (outward.dot(plane.normal()) > 0.0) == (*side == SplitKeep::Left);
                 if retain { vec![unchanged_face_patch(surface, boundary, orientation, orientation, tolerance)?] }
                 else { Vec::new() }
             } else if let Some(samples) = samples {
-                arrange_section_regions(surface, curves, limit, tolerance, plane, *side, orientation, |uv| {
+                arrange_section_regions(surface, curves, *parameters, tolerance, plane, *side, orientation, |uv| {
                     Ok(point_in_sampled_trim(uv, boundary, samples)?.then_some(orientation))
                 }).map_err(|error| super::KernelError::from_diagnostics(error.diagnostics().iter().cloned()
                     .map(|diagnostic| diagnostic.with_entity(face.persistent_id())
                         .with_operation(format!("section arrangement on {}", surface.kind_name()))).collect()))?
             } else {
+                let limit = parameters[0].span().abs().min(parameters[1].span().abs()) * 0.05;
                 let mut retained = false;
                 for edge in boundary.iter().filter(|edge| !edge.parameter_seam) {
                     let (uv, tangent) = edge.pcurve.first_order(edge.range.middle())?;

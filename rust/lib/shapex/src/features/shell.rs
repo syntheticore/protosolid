@@ -901,7 +901,6 @@ pub(super) fn offset_regions_with_joins(
         let surface = &supports[index];
         let bounds = chart_bounds[index];
         let samples = trim_samples(&boundaries[index])?;
-        let uv_probe_limit = bounds[0].span().abs().min(bounds[1].span().abs()) * 0.05;
         let intact_corner = if index >= join_end && curves[index].len() == boundaries[index].len()
             && point_in_sampled_trim(Point2::new(0.0, 0.0), &boundaries[index], &samples)?
         {
@@ -916,7 +915,7 @@ pub(super) fn offset_regions_with_joins(
             None
         };
         let mut regions = crate::boolean::arrange_surface_regions(surface, &curves[index],
-            radius * 1.0e-3, uv_probe_limit, tolerance, |uv| {
+            radius * 1.0e-3, bounds, tolerance, |uv| {
                 if index >= base_count && !point_in_sampled_trim(uv, &boundaries[index], &samples)? { return Ok(None); }
                 if let Some(retained) = intact_corner {
                     return Ok(retained.then_some(FaceOrientation::Forward));

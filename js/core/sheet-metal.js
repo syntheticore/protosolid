@@ -315,8 +315,33 @@ export class ContourFlangeFeature extends SolidFeature {
 Serialize.register(ContourFlangeFeature, 'ContourFlangeFeature')
 
 
-// Where a straight sheet edge is, and which way its faces point. The narrow
-// face at the edge gives the sheet's thickness.
+// Distance across the face to the next crossing of the selected edge's loop.
+// Separate loops such as holes do not contribute to the rim width.
+function faceCrossing(face, edge, origin, direction) {
+  const side = direction.clone().cross(normalFromMatrix(face.getPlane()))
+  const edges = new Map(face.boundaryEdges().map(edge => [edge.kernelId, edge]))
+  const loop = []
+  let current = edge
+  do {
+    loop.push(current)
+    const [, , next] = (current.cachedBoundaryUses ||= current.geom().boundaryUses())
+      .find(([faceId]) => faceId == face.kernelId)
+    current = edges.get(next)
+  } while(current.kernelId != edge.kernelId)
+  const hits = loop.flatMap(edge => {
+    const points = edge.tesselate().map(point => point.clone().sub(origin))
+    return points.slice(1).flatMap((point, i) => {
+      const [a, b] = [points[i].dot(side), point.dot(side)]
+      if(Math.sign(a) == Math.sign(b) || a == b) return []
+      return [points[i].dot(direction) + (point.dot(direction) - points[i].dot(direction)) * a / (a - b)]
+    })
+  })
+  return Math.min(...hits.filter(distance => distance > tolerance()))
+}
+
+// Where a straight sheet edge is, and which way its faces point. Of the two
+// faces at the edge, the rim is narrower right across from it. Its width
+// gives the sheet's thickness.
 function flangeFrame(edge) {
   if(!edge.getAxis()) fail('Flanges need straight edges')
   const [start, end] = edge.vertices()
@@ -327,15 +352,15 @@ function flangeFrame(edge) {
   const faces = edge.connectedFaces()
   const planes = faces.map(face => face.getPlane())
   if(faces.length != 2 || planes.some(plane => !plane)) fail('Flanges need an edge between two planar faces')
-  const [rim, sheet] = faces.map((face, i) => {
-    const normal = normalFromMatrix(planes[i])
-    const across = normal.clone().cross(along)
-    const extent = Math.max(...face.boundaryEdges().flatMap(other => other.vertices())
-      .map(vertex => Math.abs(vertex.clone().sub(start).dot(across))))
-    return { face, normal, extent }
-  }).sort((a, b) => a.extent - b.extent)
-  if(Math.abs(rim.normal.dot(sheet.normal)) > 1e-6) fail('Flanges need a square sheet edge')
-  return { edge, sheetFace: sheet.face, start, end, along, span, out: rim.normal, normal: sheet.normal, thickness: rim.extent }
+  const normals = planes.map(normalFromMatrix)
+  if(Math.abs(normals[0].dot(normals[1])) > 1e-6) fail('Flanges need a square sheet edge')
+  const middle = start.clone().add(end).multiplyScalar(0.5)
+  // At a square, convex edge, each face runs away from the other's normal
+  const [rim, sheet] = faces.map((face, i) => ({ face, normal: normals[i],
+    width: faceCrossing(face, edge, middle, normals[1 - i].clone().negate()) }))
+    .sort((a, b) => a.width - b.width)
+  if(!Number.isFinite(rim.width)) fail('Flanges need an edge of a sheet')
+  return { edge, sheetFace: sheet.face, start, end, along, span, out: rim.normal, normal: sheet.normal, thickness: rim.width }
 }
 
 // Point of a flange's cross section at a distance along its edge
@@ -439,6 +464,13 @@ function edgeEnds(frames, sections, index, corners, gap) {
     // concave corners the sheet continues past the side face. A relief keeps
     // the tool from fusing with it.
     if(neighbor == -1) {
+      // Edges of walls meeting at a mitered corner end close to each other
+      // across its gap. Their tools end flush on the miter faces, so they
+      // meet like the walls do.
+      const across = corners == 'miter' && convex && frames.some((other, i) => i != index &&
+        [other.start, other.end].some(point => point.distanceTo(vertex) <= 2 * (frame.thickness + other.thickness) + gap &&
+          point.clone().sub(vertex).dot(rim.normal) < -tolerance()))
+      if(across) return { cut: rim, body: rim, relief: null }
       const end = square(rim)
       return { cut: end, body: end, relief: convex ? null : rim }
     }
@@ -933,10 +965,23 @@ function findBends(solid) {
       const direction = radialOffset(edge.vertices()[0], group).normalize()
       if(!directions.some(other => other.dot(direction) > 1 - 1e-9)) directions.push(direction)
     }
-    if(directions.length != 2) fail('Bends must be bounded by straight tangent lines')
+    if(directions.length < 2) fail('Bends must be bounded by straight tangent lines')
+    let [w0, w1] = directions
+    if(directions.length > 2) {
+      // Cuts ending within a bend add lines between its tangent lines. The
+      // actual tangent lines bound the largest gap, outside the bend.
+      const around = w => {
+        const angle = Math.atan2(w.dot(group.e.clone().cross(directions[0])), w.dot(directions[0]))
+        return angle < 0 ? angle + 2 * Math.PI : angle
+      }
+      const sorted = [...directions].sort((a, b) => around(a) - around(b))
+      const gaps = sorted.map((w, i) => (i + 1 < sorted.length ? around(sorted[i + 1]) : 2 * Math.PI) - around(w))
+      const gap = gaps.indexOf(Math.max(...gaps))
+      w0 = sorted[(gap + 1) % sorted.length]
+      w1 = sorted[gap]
+    }
 
     // Signed angle from the first to the second tangent line, through the bend
-    const [w0, w1] = directions
     const angleOf = w => Math.atan2(w.dot(group.e.clone().cross(w0)), w.dot(w0))
     const middle = angleOf(radialOffset(group.faces[0].face.center(), group))
     let sweep = angleOf(w1)
@@ -947,6 +992,7 @@ function findBends(solid) {
 
     // Planar faces closing the bend meet its faces along arcs. Corners can
     // cut them at an angle, so they bound the bend better than its height range.
+    // Walls of cuts within the bend have it on both sides
     const center = vertices.reduce((sum, vertex) => sum.add(vertex), new THREE.Vector3()).divideScalar(vertices.length)
     const bendFaces = new Set(group.faces.map(({ face }) => face.kernelId))
     const ends = []
@@ -958,6 +1004,7 @@ function findBends(solid) {
         const point = new THREE.Vector3().setFromMatrixPosition(plane)
         const normal = normalFromMatrix(plane)
         normal.multiplyScalar(Math.sign(center.clone().sub(point).dot(normal)))
+        if(vertices.some(vertex => vertex.clone().sub(point).dot(normal) < -tolerance())) continue
         if(!ends.some(end => end.normal.dot(normal) > 1 - 1e-9 && Math.abs(end.point.clone().sub(point).dot(normal)) < tolerance())) {
           ends.push({ point, normal })
         }
@@ -969,6 +1016,8 @@ function findBends(solid) {
       radius: radii[0], thickness: radii[1] - radii[0],
       range: [Math.min(...heights), Math.max(...heights)],
       ends,
+      inner: group.faces.filter(face => face.radius - radii[0] < tolerance()).map(({ face }) => face),
+      faces: bendFaces,
     }]
   })
 }
@@ -1019,13 +1068,6 @@ function chainCurves(curves) {
   return chain
 }
 
-// Cross section of a bend where it meets the flat on the given side
-function bendSection(face, bend, side) {
-  const plane = sx.Plane3.new(point3(bend.a), vector3(bend.w[side]), vector3(bend.e), modelTolerance)
-  const curves = chainCurves(face.boundaryEdges().map(edge => plane.expressCurve(edge.geom().trimmedCurve(), modelTolerance)))
-  return { plane, curves, names: curves.map((_, i) => i) }
-}
-
 // Trims a body to the end faces of a bend, where flats continue past them
 function clipToBend(body, bend) {
   const vertices = body.solids().flatMap(solid => solid.edges()).flatMap(edge => edge.vertices())
@@ -1034,12 +1076,134 @@ function clipToBend(body, bend) {
       body.split(planeMatrix(end.point, end.normal), 'right') : body, body)
 }
 
-// Flat strip replacing a bend, extruding the flat's cross section by the bend allowance
-function bendStrip(componentId, face, bend, side, allowance, tag, owner) {
-  const { plane, curves, names } = bendSection(face, bend, side)
+// Maps points on a bend to its flat strip: s runs along the strip from the
+// tangent line on the given side, z along the bend axis
+function stripCoordinates(bend, side, allowance) {
+  const w = bend.w[side]
+  const across = bend.e.clone().cross(w)
+  const direction = Math.sign(bend.sweep) * (side ? -1 : 1)
+  const neutral = allowance / Math.abs(bend.sweep)
+  return point => {
+    const offset = point.clone().sub(bend.a)
+    let angle = direction * Math.atan2(offset.dot(across), offset.dot(w))
+    if(angle < Math.abs(bend.sweep) / 2 - Math.PI) angle += 2 * Math.PI
+    return v2(angle * neutral, offset.dot(bend.e))
+  }
+}
+
+// Keeps the points of a polyline that deviate from straight lines between
+// their neighbors by more than the given distance
+function simplifyChain(points, distance) {
+  const [start, end] = [points[0], points.at(-1)]
+  const chord = end.clone().sub(start)
+  const deviation = point => Math.abs(chord.cross(point.clone().sub(start))) / chord.length()
+  const deviations = points.slice(1, -1).map(deviation)
+  const farthest = deviations.indexOf(Math.max(...deviations)) + 1
+  if(!(deviations[farthest - 1] > distance)) return [start, end]
+  return [...simplifyChain(points.slice(0, farthest + 1), distance).slice(0, -1), ...simplifyChain(points.slice(farthest), distance)]
+}
+
+// Outlines of the cuts in a bend, mapped onto its flat strip from the bend's
+// inner face. Cuts reaching the strip's tangent lines or ends continue past them.
+function bendCuts(bend, side, allowance) {
+  const map = stripCoordinates(bend, side, allowance)
+  const onEnd = face => {
+    const plane = face.getPlane()
+    if(!plane) return false
+    const [point, normal] = [new THREE.Vector3().setFromMatrixPosition(plane), normalFromMatrix(plane)]
+    return bend.ends.some(end => Math.abs(end.normal.dot(normal)) > 1 - 1e-9 && Math.abs(end.point.clone().sub(point).dot(end.normal)) < tolerance())
+  }
+  const onTangentLine = points => points.every(point => Math.abs(point.x) < tolerance() || Math.abs(point.x - allowance) < tolerance())
+  const pieces = bend.inner.flatMap(face => face.boundaryEdges()
+    .filter(edge => !edge.connectedFaces().some(other => other.kernelId != face.kernelId && (bend.faces.has(other.kernelId) || onEnd(other))))
+    .map(edge => edge.tesselate().map(map))
+    .filter(points => !onTangentLine(points)))
+
+  // Join the edges of each cut into chains
+  const close = (p, q) => p.distanceTo(q) < tolerance()
+  const grow = chain => {
+    for(let index; (index = pieces.findIndex(piece => close(piece[0], chain.at(-1)) || close(piece.at(-1), chain.at(-1)))) != -1;) {
+      const [piece] = pieces.splice(index, 1)
+      chain.push(...(close(piece[0], chain.at(-1)) ? piece : piece.reverse()).slice(1))
+    }
+    return chain
+  }
+  const chains = []
+  while(pieces.length) chains.push(grow(grow(pieces.pop()).reverse()))
+  // Bends mapped from flats need not be exact, so cuts that are straight in
+  // the flats should be straight again, continuing their walls
+  const simplify = chain => simplifyChain(chain, 0.01 * bend.thickness)
+
+  // Open chains end on the strip's boundary: its tangent lines at s = 0 and
+  // the allowance, or its low and high end
+  const margin = bend.thickness
+  const [low, high] = bend.range
+  const boundary = point => Math.abs(point.x) < tolerance() ? 0 : Math.abs(point.x - allowance) < tolerance() ? 1 : point.y < (low + high) / 2 ? 2 : 3
+  const outside = [-margin, allowance + margin, low - margin, high + margin]
+  const beyond = (point, side) => side < 2 ? v2(outside[side], point.y) : v2(point.x, outside[side])
+  const polygons = []
+  const across = [[], []]
+  for(let chain of chains) {
+    if(close(chain[0], chain.at(-1))) {
+      const farthest = chain.reduce((best, point, i) => point.distanceTo(chain[0]) > chain[best].distanceTo(chain[0]) ? i : best, 0)
+      polygons.push([...simplify(chain.slice(0, farthest + 1)).slice(0, -1), ...simplify(chain.slice(farthest)).slice(0, -1)])
+      continue
+    }
+    chain = simplify(chain)
+    const [start, end] = [boundary(chain[0]), boundary(chain.at(-1))]
+    if(start == end) polygons.push([...chain, beyond(chain.at(-1), end), beyond(chain[0], start)])
+    else if((start < 2) != (end < 2)) {
+      const [s, z] = start < 2 ? [start, end] : [end, start]
+      polygons.push([...chain, beyond(chain.at(-1), end), v2(outside[s], outside[z]), beyond(chain[0], start)])
+    } else across[start < 2 ? 0 : 1].push(start % 2 ? chain.reverse() : chain)
+  }
+  // Chains across the whole strip bound cuts in pairs, starting from material at its low z or s
+  across.forEach((chains, axis) => {
+    const along = point => axis ? point.x : point.y
+    const mean = chain => chain.reduce((sum, point) => sum + along(point), 0) / chain.length
+    chains.sort((a, b) => mean(a) - mean(b))
+    for(let i = 0; i + 1 < chains.length; i += 2) {
+      const [first, second] = [chains[i], chains[i + 1]]
+      const [from, to] = axis ? [2, 3] : [0, 1]
+      polygons.push([...first, beyond(first.at(-1), to), beyond(second.at(-1), to),
+        ...[...second].reverse(), beyond(second[0], from), beyond(first[0], from)])
+    }
+  })
+  return polygons
+}
+
+// Use the original section and its generator order when it fills the strip.
+function stripSection(bend, side, plane, faces, tag) {
+  const [low, high] = bend.range
+  const [inner, outer] = [bend.radius, bend.radius + bend.thickness]
+  const points = [v2(inner, low), v2(outer, low), v2(outer, high), v2(inner, high)]
+  if(faces.length == 1) {
+    const edges = faces[0].boundaryEdges()
+    const corners = points.map(({ x, y }) => bend.a.clone().addScaledVector(bend.w[side], x).addScaledVector(bend.e, y))
+    if(edges.length == 4 && edges.every(edge => edge.getAxis() &&
+      edge.vertices().every(point => corners.some(corner => point.distanceTo(corner) < tolerance())))) {
+      const curves = chainCurves(edges.map(edge => plane.expressCurve(edge.geom().trimmedCurve(), modelTolerance)))
+      return { curves, names: curves.map((_, i) => `${tag}/0/${i}`) }
+    }
+  }
+  return polygon(points, tag)
+}
+
+// Flat strip replacing a bend, as long as the bend allowance, without the cuts in the bend
+function bendStrip(componentId, bend, side, faces, allowance, tag, owner) {
+  const plane = sx.Plane3.new(point3(bend.a), vector3(bend.w[side]), vector3(bend.e), modelTolerance)
+  const { curves, names } = stripSection(bend, side, plane, faces, tag)
   const vector = vector3(bendTangent(bend, side).multiplyScalar(allowance))
-  return clipToBend(namedBody(componentId, curves, names.map(name => `${tag}/${name}`),
-    profile => profile.extrude(plane, vector), owner), bend)
+  const strip = clipToBend(namedBody(componentId, curves, names, profile => profile.extrude(plane, vector), owner), bend)
+  // Cuts reach through the sheet
+  const margin = 0.1 * bend.thickness
+  const origin = bend.a.clone().addScaledVector(bend.w[side], bend.radius - margin)
+  const cutPlane = sx.Plane3.new(point3(origin), vector3(bendTangent(bend, side)), vector3(bend.e), modelTolerance)
+  const depth = vector3(bend.w[side].clone().multiplyScalar(bend.thickness + 2 * margin))
+  return bendCuts(bend, side, allowance).reduce((strip, points, i) => {
+    const { curves, names } = polygon(points, `${tag}/cut/${i}`)
+    return strip.boolean(namedBody(componentId, curves, names, profile => profile.extrude(cutPlane, depth), owner), 'cut')
+  }, strip)
 }
 
 // Moves the flat on the other side of a bend into the plane of the flat on
@@ -1048,6 +1212,13 @@ function unbendTransform(bend, side, allowance) {
   const shift = bendTangent(bend, side).multiplyScalar(allowance)
   return new THREE.Matrix4().makeTranslation(shift.x, shift.y, shift.z)
     .multiply(rotationAbout(bend.a, bend.e, side ? bend.sweep : -bend.sweep))
+}
+
+// Whether two rigid placements agree within the model tolerance
+function samePlacement(a, b) {
+  const [ta, tb] = [a, b].map(matrix => new THREE.Vector3().setFromMatrixPosition(matrix))
+  const [ra, rb] = [a, b].map(matrix => new THREE.Matrix3().setFromMatrix4(matrix).elements)
+  return ta.distanceTo(tb) < tolerance() && ra.every((value, i) => Math.abs(value - rb[i]) < 1e-6)
 }
 
 // Cuts every bend out of a sheet body, then lays out the remaining flats in
@@ -1063,7 +1234,9 @@ function unfoldBody(body, fixedFace, kFactor, owner) {
   const wedges = bends.map((bend, index) => bendWedge(componentId, bend, `unfold/${index}/wedge`, owner))
   // Wedges of bends meeting at a corner overlap, which their union does not support
   const cut = wedges.reduce((flats, wedge) => flats.boolean(wedge, 'cut'), body)
-  const solids = cut.solids()
+  // Wedges ending on mitered faces can leave slivers far below any sheet's size
+  const sliver = Math.min(...bends.map(bend => bend.thickness)) ** 3 * 1e-3
+  const solids = cut.solids().filter(solid => solid.volume() > sliver)
   const center = fixedFace.center()
   const fixed = solids.find(solid => solid.faces().some(face => face.center().distanceTo(center) < tolerance()))
   if(!fixed) fail('The fixed face must not lie on a bend')
@@ -1077,18 +1250,25 @@ function unfoldBody(body, fixedFace, kFactor, owner) {
     const placement = placements.get(solid)
     bends.forEach((bend, index) => {
       if(unfolded.has(bend)) return
-      const side = [0, 1].find(side => bendSideFaces(solid, bend, side).length)
-      if(side === undefined) return
+      const firstSideFaces = bendSideFaces(solid, bend, 0)
+      const side = firstSideFaces.length ? 0 : 1
+      const faces = side == 0 ? firstSideFaces : bendSideFaces(solid, bend, side)
+      if(!faces.length) return
       unfolded.add(bend)
       const allowance = Math.abs(bend.sweep) * (bend.radius + kFactor * bend.thickness)
-      bendSideFaces(solid, bend, side).forEach((face, faceIndex) => strips.push({
-        bend, side, face, allowance, placement,
-        body: bendStrip(componentId, face, bend, side, allowance, `unfold/${index}/strip/${faceIndex}`, owner).transform(placement),
-      }))
+      strips.push({
+        bend, side, faces, allowance, placement,
+        body: bendStrip(componentId, bend, side, faces, allowance, `unfold/${index}/strip`, owner).transform(placement),
+      })
       const unbend = placement.clone().multiply(unbendTransform(bend, side, allowance))
       solids
-        .filter(other => !placements.has(other) && bendSideFaces(other, bend, 1 - side).length)
+        .filter(other => bendSideFaces(other, bend, 1 - side).length)
         .forEach(other => {
+          // Flats reached around a closed loop of bends must land where they already are
+          if(placements.has(other)) {
+            if(!samePlacement(placements.get(other), unbend)) fail('The sheet forms a closed loop of bends, which cannot be unfolded')
+            return
+          }
           placements.set(other, unbend)
           queue.push(other)
         })
@@ -1114,8 +1294,8 @@ function unfoldBody(body, fixedFace, kFactor, owner) {
 
 // Centerlines of the flattened bends
 function bendLines(record) {
-  return record.strips.map(({ bend, side, face, allowance, placement }) => {
-    const heights = face.boundaryEdges().flatMap(edge => edge.vertices()).map(vertex => vertex.clone().sub(bend.a).dot(bend.e))
+  return record.strips.map(({ bend, side, faces, allowance, placement }) => {
+    const heights = faces.flatMap(face => face.boundaryEdges()).flatMap(edge => edge.vertices()).map(vertex => vertex.clone().sub(bend.a).dot(bend.e))
     const middle = bend.a.clone().addScaledVector(bendTangent(bend, side), allowance / 2)
     return [Math.min(...heights), Math.max(...heights)]
       .map(height => middle.clone().addScaledVector(bend.e, height).applyMatrix4(placement))
@@ -1141,28 +1321,117 @@ export function flatPattern(compound, kFactor) {
   }
 }
 
+// Outline of material removed from a flat strip, as segments in strip
+// coordinates: s runs along the strip from the bend's tangent line, z along
+// the bend axis. Cuts run through the sheet, so its faces on the strip's
+// surfaces show the outline. Also returns the outline's corners.
+function stripOutline(strip, solid) {
+  const { bend, side } = strip
+  const tangent = bendTangent(bend, side)
+  const local = point => { const offset = point.clone().sub(bend.a); return v2(offset.dot(tangent), offset.dot(bend.e)) }
+  const face = solid.faces().filter(face => face.getPlane() &&
+    Math.abs(normalFromMatrix(face.getPlane()).dot(bend.w[side])) > 1 - 1e-6).sort((a, b) => b.area() - a.area())[0]
+  const edges = face ? face.boundaryEdges() : solid.edges()
+  return {
+    segments: edges.flatMap(edge => {
+      const points = edge.tesselate().map(local)
+      return points.slice(1).map((point, i) => [points[i], point])
+    }),
+    corners: edges.flatMap(edge => edge.vertices().map(local)),
+    area: face?.area(),
+  }
+}
+
+// Ranges of z where an outline crosses the line at s
+function outlineIntervals(segments, s) {
+  const crossings = segments.flatMap(([p, q]) => {
+    if((p.x > s) == (q.x > s)) return []
+    return [p.y + (q.y - p.y) * (s - p.x) / (q.x - p.x)]
+  }).sort((a, b) => a - b)
+  return crossings.length % 2 ? [] : Array.from({ length: crossings.length / 2 }, (_, i) => [crossings[2 * i], crossings[2 * i + 1]])
+}
+
 // Region of a bend that corresponds to material removed from its flat strip.
-// Cuts map to the bend by their extent across and along the strip.
+// Cuts that are rectangles along the strip map to a revolved wedge exactly.
+// Others are lofted through sections every few degrees, each a radial
+// rectangle as long as the cut is where the strip maps to its angle.
 function removedWedge(componentId, strip, solid, tag, owner) {
   const { bend, side, allowance } = strip
-  const tangent = bendTangent(bend, side)
   const margin = 0.1 * Math.min(bend.radius, bend.thickness)
-  const points = solid.edges().flatMap(edge => edge.tesselate()).map(point => point.clone().sub(bend.a))
+  const { segments, corners, area } = stripOutline(strip, solid)
+  const xs = segments.flatMap(segment => segment.map(point => point.x))
+  const ys = segments.flatMap(segment => segment.map(point => point.y))
   // Cuts reaching the strip's boundaries continue past the bend's
-  const range = (values, low, high) => [
-    Math.min(...values) < low + tolerance() ? low - margin : Math.min(...values),
-    Math.max(...values) > high - tolerance() ? high + margin : Math.max(...values),
+  const extend = ([low, high], [min, max]) => [
+    low < min + tolerance() ? min - margin : low,
+    high > max - tolerance() ? max + margin : high,
   ]
-  const [s0, s1] = range(points.map(point => point.dot(tangent)), 0, allowance)
-  const [z0, z1] = range(points.map(point => point.dot(bend.e)), ...bend.range)
+  const [s0, s1] = extend([Math.min(...xs), Math.max(...xs)], [0, allowance])
+  const [z0, z1] = extend([Math.min(...ys), Math.max(...ys)], bend.range)
   const neutral = allowance / Math.abs(bend.sweep)
   const direction = Math.sign(bend.sweep) * (side ? -1 : 1)
   const [inner, outer] = [bend.radius - margin, bend.radius + bend.thickness + margin]
-  const { curves, names } = polygon([v2(inner, z0), v2(outer, z0), v2(outer, z1), v2(inner, z1)], tag)
-  const plane = sx.Plane3.new(point3(bend.a), vector3(bend.w[side]), vector3(bend.e), modelTolerance)
-  const axis = sx.Axis3.new(point3(bend.a), vector3(bend.e))
-  return namedBody(componentId, curves, names, profile => profile.revolve(plane, axis, direction * (s1 - s0) / neutral), owner)
-    .transform(rotationAbout(bend.a, bend.e, direction * s0 / neutral))
+  const box = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys))
+  const radialPlane = s => {
+    const radial = bend.w[side].clone().applyAxisAngle(bend.e, direction * s / neutral)
+    return sx.Plane3.new(point3(bend.a), vector3(radial), vector3(bend.e), modelTolerance)
+  }
+  const section = ([low, high]) => polygon([v2(inner, low), v2(outer, low), v2(outer, high), v2(inner, high)], tag)
+  if(!(area < box * (1 - 1e-6))) {
+    const { curves, names } = section([z0, z1])
+    const axis = sx.Axis3.new(point3(bend.a), vector3(bend.e))
+    return namedBody(componentId, curves, names, profile => profile.revolve(radialPlane(0), axis, direction * (s1 - s0) / neutral), owner)
+      .transform(rotationAbout(bend.a, bend.e, direction * s0 / neutral))
+  }
+
+  // Sections at the outline's corners and where it turns back along s,
+  // and in between at least every few degrees. Its tips along s close to
+  // nothing, so the end sections lie just inside them. Where it reaches the
+  // strip's ends, they lie on them to meet the walls of the cut in the flats.
+  const [first, last] = [Math.min(...xs), Math.max(...xs)]
+  const inset = (last - first) * 1e-3
+  const [begin, finish] = [first < tolerance() ? first : first + inset, last > allowance - tolerance() ? last : last - inset]
+  const turns = segments.flatMap(([p, q], i) => {
+    const next = segments[i + 1]
+    return next && next[0].distanceTo(q) < tolerance() && (q.x - p.x) * (next[1].x - q.x) < 0 ? [q.x] : []
+  })
+  const breaks = [...new Set([begin, finish, ...corners.map(point => point.x), ...turns]
+    .filter(s => s >= begin && s <= finish).sort((a, b) => a - b)
+    .map(s => Math.round(s / tolerance()) * tolerance()))]
+  breaks.splice(0, 1, begin)
+  breaks.splice(-1, 1, finish)
+  // On the strip's ends, the outline's points there bound the cut exactly
+  const onEnd = s => (s == begin && first < tolerance()) || (s == finish && last > allowance - tolerance())
+  const endIntervals = s => {
+    const heights = segments.flat().filter(point => Math.abs(point.x - s) < tolerance()).map(point => point.y).sort((a, b) => a - b)
+      .filter((height, i, all) => !i || height - all[i - 1] > tolerance())
+    return Array.from({ length: Math.floor(heights.length / 2) }, (_, i) => [heights[2 * i], heights[2 * i + 1]])
+  }
+  const step = neutral * rad(3)
+  const stations = breaks.flatMap((s, i) => {
+    if(i == breaks.length - 1) return [s]
+    const count = Math.max(1, Math.ceil((breaks[i + 1] - s) / step))
+    return Array.from({ length: count }, (_, k) => s + (breaks[i + 1] - s) * k / count)
+  })
+  // Shift stations off the corners, where crossings are ambiguous
+  const samples = stations.map(s => {
+    if(onEnd(s)) return { s, intervals: endIntervals(s) }
+    const shifted = Math.min(Math.max(s, begin), finish)
+    return { s, intervals: outlineIntervals(segments, shifted + (shifted < (first + last) / 2 ? 1 : -1) * tolerance()) }
+  })
+  if(samples.some(sample => sample.intervals.length != 1)) fail('Cuts across bends must be convex to refold')
+  // Where the cut reaches past the strip, its sections continue beyond the bend
+  if(first < tolerance()) samples.unshift({ s: -margin, intervals: samples[0].intervals })
+  if(last > allowance - tolerance()) samples.push({ s: allowance + margin, intervals: samples.at(-1).intervals })
+  const sections = samples.map(({ s, intervals }) => ({
+    plane: radialPlane(s),
+    ...section(extend(intervals[0], bend.range)),
+  }))
+  const profile = ({ curves }) => sx.Profile.new(sx.Wire2.new(curves, modelTolerance), [], modelTolerance)
+  const [start, ...rest] = sections
+  return namedBody(componentId, start.curves, start.names, built =>
+    built.loft(start.plane, rest.map(other => ({ profile: profile(other), plane: other.plane }))), owner,
+    rest.map(other => other.names))
 }
 
 // Moves the flats of an unfolded body back into place and restores their

@@ -351,8 +351,7 @@ pub(super) fn regularize_coincident_offset_faces(
         let curves = boundaries.iter().flatten().cloned().collect::<Vec<_>>();
         let bounds = crate::trim::face_parameter_bounds(&curves, tolerance)?;
         let mut regions = crate::boolean::arrange_surface_regions(&patch.surface, &curves,
-            distance.abs() * 1.0e-3, bounds[0].span().abs().min(bounds[1].span().abs()) * 0.05,
-            tolerance, |uv| {
+            distance.abs() * 1.0e-3, bounds, tolerance, |uv| {
                 let mut winding = 0;
                 for (orientation, boundary) in orientations.iter().zip(&boundaries) {
                     if crate::trim::point_in_trim(uv, boundary)? {

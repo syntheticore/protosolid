@@ -971,10 +971,6 @@ fn arrange_face(
             uv_bounds[1].y = uv_bounds[1].y.max(point.y);
         }
     }
-    let uv_probe_limit = (uv_bounds[1].x - uv_bounds[0].x)
-        .abs()
-        .min((uv_bounds[1].y - uv_bounds[0].y).abs())
-        * 5.0e-2;
     let domains = surface.domains();
     let stepped_chart = domains.iter().enumerate().any(|(axis, domain)| {
         domain.period.is_some_and(|period| {
@@ -982,6 +978,7 @@ fn arrange_face(
         })
     });
     let chart_bounds = face_parameter_bounds(original_boundary, tolerance)?;
+    let side_probe_limits = chart_bounds.map(|range| range.span().abs() * 0.05);
     let original_samples = trim_samples(original_boundary)?;
     let classify_orientation_at = |uv: Point2| -> KernelResult<Option<FaceOrientation>> {
         let value = surface.evaluate(uv.x, uv.y)?;
@@ -1020,9 +1017,11 @@ fn arrange_face(
             let step = classification_offset / 8.0;
             let mut beside = Vec::new();
             for (direction, offset) in [(value.du, Vec2::unit_x()), (value.dv, Vec2::unit_y())] {
-                if direction.magnitude() <= tolerance.linear { continue; }
+                let speed = direction.magnitude();
+                if speed <= tolerance.linear { continue; }
+                let uv_step = side_probe_step(step, offset, speed, side_probe_limits);
                 for sign in [1.0, -1.0] {
-                    let probe = uv + offset * (sign * (step / direction.magnitude()).min(uv_probe_limit));
+                    let probe = uv + offset * (sign * uv_step);
                     if domains.iter().enumerate().any(|(axis, domain)| {
                         domain.period.is_none() && !domain.contains(probe[axis], 0.0)
                     }) || !point_in_sampled_trim(probe, original_boundary, &original_samples)? {
@@ -1110,16 +1109,18 @@ fn arrange_face(
             if tangent.magnitude2() <= tolerance.parameter.powi(2) {
                 continue;
             }
-            let mut inward = Vec2::new(-tangent.y, tangent.x).normalize();
+            let surface_value = surface.evaluate(boundary_uv.x, boundary_uv.y)?;
+            let mut inward = surface_left(surface_value.du, surface_value.dv, tangent);
             if source_orientation == FaceOrientation::Reversed {
                 inward = -inward;
             }
-            let surface_value = surface.evaluate(boundary_uv.x, boundary_uv.y)?;
-            let world_inward = surface_value.du * inward.x + surface_value.dv * inward.y;
-            if world_inward.magnitude2() <= tolerance.linear.powi(2) {
+            let speed = (surface_value.du * inward.x + surface_value.dv * inward.y).magnitude();
+            let uv_step = side_probe_step(classification_offset, inward, speed, side_probe_limits);
+            // Try another boundary when a slow direction still cannot make
+            // a resolvable move after applying the chart limits.
+            if speed <= tolerance.linear && speed * uv_step <= tolerance.linear {
                 continue;
             }
-            let uv_step = (classification_offset / world_inward.magnitude()).min(uv_probe_limit);
             // This point is constructed from the oriented trim itself, so it
             // is the local interior by definition. Periodic seam-spiked loops
             // are not necessarily representable as one planar polygon and
@@ -1142,7 +1143,7 @@ fn arrange_face(
     }
 
     arrange_surface_regions(
-        surface, curves, classification_offset, uv_probe_limit, tolerance, orientation_at,
+        surface, curves, classification_offset, chart_bounds, tolerance, orientation_at,
     )
 }
 }
@@ -1154,11 +1155,11 @@ pub(super) fn arrange_surface_regions(
     surface: &Surface3,
     curves: &[FaceCurve],
     classification_offset: f64,
-    uv_probe_limit: f64,
+    chart_bounds: [ParameterRange; 2],
     tolerance: ModelTolerance,
     orientation_at: impl Fn(Point2) -> KernelResult<Option<FaceOrientation>>,
 ) -> KernelResult<Vec<BrepPatch>> {
-    arrange_regions(surface, curves, classification_offset, uv_probe_limit, tolerance,
+    arrange_regions(surface, curves, classification_offset, chart_bounds, tolerance,
         // Probe clearance is not a geometric equality tolerance. Distinct arcs
         // bounding a thin lens can share endpoints and parallel mid-tangents.
         tolerance.linear * 16.0, None, orientation_at)
@@ -1328,14 +1329,14 @@ fn pinched_trim_contact(
 pub(super) fn arrange_section_regions(
     surface: &Surface3,
     curves: &[FaceCurve],
-    uv_probe_limit: f64,
+    chart_bounds: [ParameterRange; 2],
     tolerance: ModelTolerance,
     plane: super::Plane3,
     keep: super::SplitKeep,
     orientation: FaceOrientation,
     orientation_at: impl Fn(Point2) -> KernelResult<Option<FaceOrientation>>,
 ) -> KernelResult<Vec<BrepPatch>> {
-    arrange_regions(surface, curves, 0.0, uv_probe_limit, tolerance,
+    arrange_regions(surface, curves, 0.0, chart_bounds, tolerance,
         tolerance.linear * 2.0, Some((plane, keep, orientation)), orientation_at)
 }
 
@@ -1343,7 +1344,7 @@ fn arrange_regions(
     surface: &Surface3,
     curves: &[FaceCurve],
     classification_offset: f64,
-    uv_probe_limit: f64,
+    chart_bounds: [ParameterRange; 2],
     tolerance: ModelTolerance,
     duplicate_distance: f64,
     section: Option<(super::Plane3, super::SplitKeep, FaceOrientation)>,
@@ -1468,6 +1469,7 @@ fn arrange_regions(
         }
     }
 
+    let side_probe_limits = chart_bounds.map(|range| range.span().abs() * 0.05);
     let mut selected = [Vec::<DirectedPiece>::new(), Vec::<DirectedPiece>::new()];
     for piece in &pieces {
         let parameter = piece.range.start + piece.range.span() * 0.5;
@@ -1483,8 +1485,9 @@ fn arrange_regions(
                 let uncertainty = (distance - signed(point)).abs().max(tolerance.linear);
                 let retain = if distance.abs() > uncertainty { distance < 0.0 } else {
                     let tangent = tangent * piece.range.span().signum() * orientation.sign();
-                    let inward = Vec2::new(-tangent.y, tangent.x).normalize();
-                    let step = (tolerance.linear * 128.0 / (du * inward.x + dv * inward.y).magnitude()).min(uv_probe_limit);
+                    let inward = surface_left(du, dv, tangent);
+                    let speed = (du * inward.x + dv * inward.y).magnitude();
+                    let step = side_probe_step(tolerance.linear * 128.0, inward, speed, side_probe_limits);
                     let probe = uv + inward * step;
                     signed(surface.first_order(probe.x, probe.y)?.0) < 0.0
                 };
@@ -1517,10 +1520,10 @@ fn arrange_regions(
         if tangent.magnitude2() <= tolerance.parameter.powi(2) {
             continue;
         }
-        let left = Vec2::new(-tangent.y, tangent.x).normalize();
         let surface_value = surface.evaluate(uv.x, uv.y)?;
-        let world_left = surface_value.du * left.x + surface_value.dv * left.y;
-        if world_left.magnitude2() <= tolerance.linear.powi(2) {
+        let left = surface_left(surface_value.du, surface_value.dv, tangent);
+        let speed = (surface_value.du * left.x + surface_value.dv * left.y).magnitude();
+        if speed == 0.0 {
             continue;
         }
         let mut probe = classification_offset;
@@ -1551,7 +1554,7 @@ fn arrange_regions(
                 probe = probe.min(projection.distance * 0.25);
             }
         }
-        let uv_step = (probe / world_left.magnitude()).min(uv_probe_limit);
+        let uv_step = side_probe_step(probe, left, speed, side_probe_limits);
         let left_orientation = orientation_at(uv + left * uv_step)?;
         let right_orientation = orientation_at(uv - left * uv_step)?;
         for (slot, orientation) in [FaceOrientation::Forward, FaceOrientation::Reversed]
@@ -2019,6 +2022,35 @@ pub(super) fn unchanged_face_patch(
         orientation: output_orientation,
         loops: patch_loops,
     })
+}
+
+/// Parameter direction to the left of a p-curve tangent that is perpendicular
+/// to the curve on the surface. A plain rotation in the chart drifts along the
+/// curve where the parametrization is anisotropic, as on planes whose axes
+/// differ in length, and side probes can then land on the same side of a
+/// curved trim.
+fn surface_left(du: crate::Vec3, dv: crate::Vec3, tangent: Vec2) -> Vec2 {
+    let chart_left = Vec2::new(-tangent.y, tangent.x).normalize();
+    let (e, f, g) = (du.dot(du), du.dot(dv), dv.dot(dv));
+    let determinant = e * g - f * f;
+    if !(determinant > e * g * 1.0e-12) {
+        return chart_left;
+    }
+    // Rotating the metric-weighted tangent gives the spatial perpendicular
+    // when lifted through the chart.
+    let direction = Vec2::new(-f * tangent.x - g * tangent.y, e * tangent.x + f * tangent.y);
+    if direction.magnitude2() > 0.0 && direction.dot(chart_left) > 0.0 {
+        direction.normalize()
+    } else {
+        chart_left
+    }
+}
+
+fn side_probe_step(distance: f64, direction: Vec2, speed: f64, limits: [f64; 2]) -> f64 {
+    // Each chart axis limits its own displacement. A zero component imposes no limit.
+    (distance / speed)
+        .min(limits[0] / direction.x.abs())
+        .min(limits[1] / direction.y.abs())
 }
 
 fn connect_loops(

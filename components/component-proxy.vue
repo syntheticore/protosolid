@@ -59,7 +59,7 @@
       :helper="helper"
       :parent-transform="transform"
       :parent-highlighted="highlighted"
-      :parent-selected="selected"
+      :parent-selected="selected || referencedItemIds.has(helper.id)"
     )
 
   //- Canvases

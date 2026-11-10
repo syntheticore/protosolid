@@ -659,7 +659,7 @@
               const { references } = this.activeFeature.resolveInputReferences(key, tree)
               references.forEach(ref => {
                 ref.getItems().forEach(item =>
-                  this.bus.emit('show-picker', pickerPos, this.getCenter(item, ref), color, ref)
+                  this.bus.emit('show-picker', pickerPos, this.getCenter(item, ref), color)
                 )
               })
             }

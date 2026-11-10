@@ -346,7 +346,7 @@
     provide() {
       const pickerSelection = computed(() => {
         const selection = new Map()
-        for(let ref of this.pickerReferences) {
+        for(let ref of [...this.pickerReferences, ...this.paths.map(path => path.reference).filter(Boolean)]) {
           while(ref.item instanceof Reference) ref = ref.item
           if(!selection.has(ref.componentId)) selection.set(ref.componentId, new Set())
           for(const item of ref.getItems()) selection.get(ref.componentId).add(item.id)
@@ -1199,11 +1199,12 @@
         this.$emit('update:active-tool', tool)
       },
 
-      addPath: function(pickerCoords, center, color) {
+      addPath: function(pickerCoords, center, color, reference) {
         const path = {
           target: center,
           origin: pickerCoords,
           color,
+          reference,
         }
         this.updatePath(path)
         this.paths.push(path)

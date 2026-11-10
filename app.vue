@@ -212,10 +212,30 @@
       setModifier('isAltPressed', 'alt-pressed', false)
     }
 
+    // The native menu is hidden outside of macOS, so its shortcuts don't reach the app
+    const fileShortcuts = window.desktop && window.platform != 'darwin' && {
+      'n': createDocument,
+      'o': () => loadDocument(),
+      's': () => activeDocument.value.canSave && saveDocument(),
+      'shift+s': saveDocumentAs,
+      'i': importFile,
+      'e': exportFile,
+      'w': () => closeDocument(activeDocument.value),
+    }
+
+    // Only keys whose press reached the app get released, so shortcuts don't trigger hot keys on keyup
+    const pressedKeys = new Set()
+
     window.addEventListener('keydown', (e) => {
       // console.log(e.keyCode, e.key)
       syncModifiers(e)
       const key = e.key.toLowerCase()
+      const fileShortcut = fileShortcuts && e.ctrlKey && !e.altKey && fileShortcuts[(e.shiftKey ? 'shift+' : '') + key]
+      if(fileShortcut) {
+        e.preventDefault()
+        if(!e.repeat && !switchingDocument.value && !documentBusy.value) fileShortcut()
+        return
+      }
       const editingText = e.target.closest?.('input, textarea, [contenteditable="true"]')
       if(!editingText && !switchingDocument.value && !documentBusy.value &&
         activeDocument.value?.activeSketch && !e.altKey && (e.ctrlKey || e.metaKey) &&
@@ -237,6 +257,7 @@
       if(!isModifierKey && (e.ctrlKey || e.metaKey || e.altKey)) return
 
       if(switchingDocument.value || (documentBusy.value && e.key !== 'Enter')) return
+      pressedKeys.add(e.code)
 
       if(e.key === 'Escape') {
         bus.emit('escape')
@@ -256,12 +277,15 @@
     })
 
     window.addEventListener('keyup', (e) => {
-      bus.emit('keyup', e.key)
+      if(pressedKeys.delete(e.code)) bus.emit('keyup', e.key)
       syncModifiers(e)
     })
 
     // Native dialogs and application switches can swallow modifier keyup events.
-    window.addEventListener('blur', releaseModifiers)
+    window.addEventListener('blur', () => {
+      releaseModifiers()
+      pressedKeys.clear()
+    })
     window.addEventListener('pointerdown', syncModifiers, true)
 
     if(!window.desktop) return

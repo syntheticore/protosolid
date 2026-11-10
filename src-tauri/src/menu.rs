@@ -37,10 +37,15 @@ pub struct AppMenu {
 #[derive(Default)]
 pub struct RecentFiles(Mutex<Vec<String>>);
 
+// The hidden menu of other platforms doesn't receive shortcuts while the web view has focus,
+// so the document window handles the ones for its own items
 fn item(app: &AppHandle, id: &str, label: &str, accelerator: &str) -> tauri::Result<MenuItem<Wry>> {
-    MenuItemBuilder::with_id(id, label)
-        .accelerator(accelerator)
-        .build(app)
+    let item = MenuItemBuilder::with_id(id, label);
+    if cfg!(target_os = "macos") || !FORWARDED.contains(&id) {
+        item.accelerator(accelerator).build(app)
+    } else {
+        item.build(app)
+    }
 }
 
 pub fn build(app: &AppHandle) -> tauri::Result<AppMenu> {

@@ -829,3 +829,25 @@ export class Compound extends Volumetric {
     return tessellateMesh(this.geom())
   }
 }
+
+// Builds a body from a closed chain of 2D curves, naming its faces after the
+// curves. `build` turns the profile into geometry, like an extrusion.
+export function namedBody(componentId, curves, names, build, owner) {
+  let wire = sx.Wire2.new(curves, modelTolerance)
+  if(wire.signedArea() < 0) {
+    curves = curves.map(curve => curve.reversed()).reverse()
+    names = [...names].reverse()
+    wire = sx.Wire2.new(curves, modelTolerance)
+  }
+  const geometry = build(sx.Profile.new(wire, [], modelTolerance))
+  const generator = { rings: [{ segments: names }], getBaseId: name => name }
+  return new Compound(componentId, geometry).seedProfileTopology([generator], owner)
+}
+
+// Curves of a closed polygon, with names for `namedBody`
+export function polygon(points, tag) {
+  return {
+    curves: points.map((point, i) => sx.TrimmedCurve2.line(point2(point), point2(points[(i + 1) % points.length]))),
+    names: points.map((_, i) => `${tag}/${i}`),
+  }
+}

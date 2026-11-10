@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { markRaw } from 'vue'
 
 import { SolidFeature } from './features.js'
-import { Compound } from './geom3d.js'
+import { Compound, namedBody, polygon } from './geom3d.js'
 import { Line } from './geom2d.js'
 import { shapex as sx, modelTolerance, point2, point3, vector3, threeVector, planeFromMatrix } from './shapex.js'
 import { normalFromMatrix, rad } from './utils.js'
@@ -45,27 +45,6 @@ const v2 = (x, y) => new THREE.Vector2(x, y)
 
 const featureComponent = feature => feature.document.top().findChild(feature.componentOccurrenceId) ||
   feature.document.top().findChild(feature.componentId)
-
-// Builds a body from a closed chain of 2D curves, naming its faces after the
-// curves. `build` turns the profile into geometry, like an extrusion.
-function namedBody(componentId, curves, names, build, owner) {
-  let wire = sx.Wire2.new(curves, modelTolerance)
-  if(wire.signedArea() < 0) {
-    curves = curves.map(curve => curve.reversed()).reverse()
-    names = [...names].reverse()
-    wire = sx.Wire2.new(curves, modelTolerance)
-  }
-  const geometry = build(sx.Profile.new(wire, [], modelTolerance))
-  const generator = { rings: [{ segments: names }], getBaseId: name => name }
-  return new Compound(componentId, geometry).seedProfileTopology([generator], owner)
-}
-
-function polygon(points, tag) {
-  return {
-    curves: points.map((point, i) => sx.TrimmedCurve2.line(point2(point), point2(points[(i + 1) % points.length]))),
-    names: points.map((_, i) => `${tag}/${i}`),
-  }
-}
 
 const bodyFrom = (bodies, componentId) =>
   bodies.reduce((tool, body) => tool.boolean(body, 'join'), new Compound(componentId))

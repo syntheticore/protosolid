@@ -4,6 +4,7 @@ import { markRaw, toRaw } from 'vue'
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
 import { Compound, chamferReferenceFaces, importedCompound } from './geom3d.js'
+import { cylinderFrame, standardPitch, threadGroove } from './thread.js'
 import { shapex, modelTolerance, matrixFromTransform } from './shapex.js'
 import { PatternInputReference } from './references.js'
 import { PlaneHelper } from './helpers.js'
@@ -2992,6 +2993,125 @@ export class CoilFeature extends SolidFeature {
 }
 
 Serialize.register(CoilFeature, 'CoilFeature')
+
+
+// Modelled ISO metric threads on cylindrical faces of shafts and bores
+export class ThreadFeature extends SolidFeature {
+  static icon = 'thread'
+  constructor(document) {
+    super(document, false, 'Thread', {
+      faces: {
+        title: 'Faces',
+        type: 'face',
+        multi: true,
+      },
+      series: {
+        title: 'Pitch',
+        type: 'select',
+        options: {
+          coarse: { title: 'ISO metric coarse', icon: 'pitch-coarse' },
+          fine: { title: 'ISO metric fine', icon: 'pitch-fine' },
+          custom: { title: 'Custom pitch', icon: 'sliders-h' },
+        },
+      },
+      pitch: {
+        title: 'Pitch',
+        type: 'length',
+        when: feature => feature.series == 'custom',
+      },
+      extent: {
+        title: 'Extent',
+        type: 'select',
+        options: {
+          full: { title: 'Full length', icon: 'arrows-alt-v' },
+          custom: { title: 'Custom length', icon: 'ruler-vertical' },
+        },
+      },
+      length: {
+        title: 'Length',
+        type: 'length',
+        when: feature => feature.extent == 'custom',
+      },
+      offset: {
+        title: 'Offset',
+        type: 'length',
+        when: feature => feature.extent == 'custom',
+      },
+      side: {
+        title: 'Side',
+        type: 'bool',
+        icons: ['caret-up', 'caret-down'],
+        when: feature => feature.extent == 'custom',
+      },
+      handedness: {
+        title: 'Handedness',
+        type: 'select',
+        options: {
+          right: { title: 'Right-handed', icon: 'redo' },
+          left: { title: 'Left-handed', icon: 'undo' },
+        },
+      },
+    })
+
+    this.faces = null
+    this.series = 'coarse'
+    this.pitch = 1.0
+    this.extent = 'full'
+    this.length = 10.0
+    this.offset = 0.0
+    this.side = true
+    this.handedness = 'right'
+  }
+
+  acceptsInput(item) {
+    return super.acceptsInput(item) && (item.typename?.() != 'Face' || !!item.getAxis())
+  }
+
+  // Pitch and axial limits of the thread on a cylinder
+  threadSize(frame) {
+    const pitch = this.series == 'custom' ? this.pitch :
+      standardPitch(frame.radius * 2, !frame.external, this.series)
+    if(this.extent == 'full') return { pitch, start: frame.start, end: frame.end }
+    const from = this.side ? frame.start + this.offset : frame.end - this.offset - this.length
+    return { pitch, start: Math.max(frame.start, from), end: Math.min(frame.end, from + this.length) }
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    try {
+      references.faces.forEach((face, index) => {
+        const frame = cylinderFrame(face)
+        const groove = threadGroove(this.componentId, frame,
+          { ...this.threadSize(frame), rightHanded: this.handedness == 'right' }, this.id, `thread/${index}`)
+        comp.compound = comp.compound.boolean(groove, 'cut')
+      })
+    } catch(err) { this.error = featureError(err, 'Thread could not be built') }
+  }
+
+  getGizmo() {
+    if(this.extent != 'custom') return
+    const face = this.inputItems('faces').at(-1)
+    if(!face) return
+    const frame = cylinderFrame(face)
+    const direction = frame.direction.clone().multiplyScalar(this.side ? 1 : -1)
+    const center = frame.origin.clone().addScaledVector(frame.direction, this.side ? frame.start : frame.end)
+      .addScaledVector(direction, this.offset)
+    return {
+      distance: {
+        center,
+        direction,
+        distance: this.length,
+        side: true,
+        cb: length => {
+          this.setExpression('length', null)
+          this.length = length
+        },
+      },
+    }
+  }
+}
+
+Serialize.register(ThreadFeature, 'ThreadFeature')
 
 
 function edgePropagationSetting() {

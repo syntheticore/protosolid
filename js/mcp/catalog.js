@@ -7,6 +7,7 @@ import {
   LoftFeature,
   SweepFeature,
   CoilFeature,
+  ThreadFeature,
   PatternFeature,
   MirrorFeature,
   ShellFeature,
@@ -43,6 +44,7 @@ export const featureTypes = {
   loft: LoftFeature,
   sweep: SweepFeature,
   coil: CoilFeature,
+  thread: ThreadFeature,
   pattern: PatternFeature,
   mirror: MirrorFeature,
   shell: ShellFeature,
@@ -90,6 +92,11 @@ export const settingNotes = {
   },
   mirror: {
     inputs: 'Bodies are copied, features are replayed. Components cannot be mirrored.',
+  },
+  thread: {
+    faces: 'Cylindrical faces. A shaft keeps its diameter as the major diameter, a bore as the minor diameter.',
+    series: 'Standard pitches follow from each face diameter',
+    offset: 'Distance of the thread from the face end chosen by side',
   },
 }
 

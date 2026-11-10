@@ -408,7 +408,8 @@ impl Kernel {
         // on curved faces. This depends on the trim's shape, not its support
         // type; cylinders and tori benefit just like swept and blended faces.
         if holes.is_empty() && !matches!(tessellation_surface, super::Surface3::Plane(_)) {
-            if let Some(indices) = triangulate_boundary_strip(&uvs) {
+            let helical = matches!(tessellation_surface, super::Surface3::Swept(sweep) if sweep.helix_rate().is_some());
+            if let Some(indices) = triangulate_boundary_strip(&uvs, usize::from(helical)) {
                 let seed = SurfaceTriangulationSeed {
                     uvs,
                     positions,
@@ -928,14 +929,17 @@ fn rectangular_surface_seed(
     })
 }
 
-/// Zip two boundary chains along the chart's u direction.
+/// Zip two boundary chains along the chart direction `along`: u for most
+/// faces, v for helicoids, whose turns lie side by side along v. Zipping a
+/// helicoid across would pair samples whole turns apart.
 /// Accept only a complete triangulation with consistent winding. Keep every BREP
 /// boundary vertex, including projected seams, instead of creating a fan of
 /// long diagonals. Unsupported trims fall back to the general triangulator.
-fn triangulate_boundary_strip(points: &[Point2]) -> Option<Vec<usize>> {
+fn triangulate_boundary_strip(points: &[Point2], along: usize) -> Option<Vec<usize>> {
     if points.len() < 4 {
         return None;
     }
+    let across = 1 - along;
     let origin = points[0];
     let area = points
         .iter()
@@ -949,10 +953,9 @@ fn triangulate_boundary_strip(points: &[Point2]) -> Option<Vec<usize>> {
         .sum::<f64>();
     let orientation = area.signum();
     let compare = |a: &usize, b: &usize| {
-        points[*a]
-            .x
-            .total_cmp(&points[*b].x)
-            .then(points[*a].y.total_cmp(&points[*b].y))
+        points[*a][along]
+            .total_cmp(&points[*b][along])
+            .then(points[*a][across].total_cmp(&points[*b][across]))
     };
     let start = (0..points.len()).min_by(compare)?;
     let end = (0..points.len()).max_by(compare)?;
@@ -994,7 +997,7 @@ fn triangulate_boundary_strip(points: &[Point2]) -> Option<Vec<usize>> {
                 } else if j + 2 == b.len() {
                     true
                 } else {
-                    points[a[i + 1]].x <= points[b[j + 1]].x
+                    points[a[i + 1]][along] <= points[b[j + 1]][along]
                 }
             }
             (true, false) => true,
@@ -1587,6 +1590,10 @@ fn triangle_edges(triangle: [usize; 3]) -> [(usize, usize); 3] {
     ]
 }
 
+/// An irrational fraction of an interval, probed besides its quarters so that
+/// periodic geometry cannot hide between dyadic samples.
+const OFF_GRID_FRACTION: f64 = 0.618_033_988_749_894_8;
+
 #[allow(clippy::too_many_arguments)]
 fn surface_edge_error(
     surface: &super::Surface3,
@@ -1612,11 +1619,13 @@ fn surface_edge_error(
     let first = evaluate(0.25)?;
     let middle = evaluate(0.5)?;
     let last = evaluate(0.75)?;
+    let off_grid = evaluate(OFF_GRID_FRACTION)?;
     let mut chord_error = first
         .0
         .distance(first.1)
         .max(middle.0.distance(middle.1))
-        .max(last.0.distance(last.1));
+        .max(last.0.distance(last.1))
+        .max(off_grid.0.distance(off_grid.1));
     // A thin triangle next to a protected edge can evaluate near either end
     // of that chord. Include those positions for nonuniform blend charts.
     if matches!(surface, super::Surface3::Ruled(_)) {
@@ -1731,11 +1740,19 @@ fn sample_interval(
     let chord_middle = start.point + (end.point - start.point) * 0.5;
     let chord_first_quarter = start.point + (end.point - start.point) * 0.25;
     let chord_third_quarter = start.point + (end.point - start.point) * 0.75;
+    // Dyadic samples alone alias with periodic curves: on a helix spanning a
+    // multiple of four turns, every quarter lies on the chord.
+    let off_grid = curve_sample(
+        edge.curve(),
+        start_parameter + (end_parameter - start_parameter) * OFF_GRID_FRACTION,
+    )?;
+    let chord_off_grid = start.point + (end.point - start.point) * OFF_GRID_FRACTION;
     let deviation = middle
         .point
         .distance(chord_middle)
         .max(first_quarter.point.distance(chord_first_quarter))
-        .max(third_quarter.point.distance(chord_third_quarter));
+        .max(third_quarter.point.distance(chord_third_quarter))
+        .max(off_grid.point.distance(chord_off_grid));
     // Implicit support intersections can have no unique two-sided tangent at a
     // trim endpoint even though the retained one-sided edge is regular. Use
     // interior tangent samples for the angular error test; the three chord
@@ -1936,7 +1953,7 @@ mod tests {
                 }
                 for _ in 0..points.len() {
                     points.rotate_left(1);
-                    let indices = triangulate_boundary_strip(&points).expect("trimmed band");
+                    let indices = triangulate_boundary_strip(&points, 0).expect("trimmed band");
                     assert_eq!(indices.len(), (points.len() - 2) * 3);
                     let polygon_area = points
                         .iter()

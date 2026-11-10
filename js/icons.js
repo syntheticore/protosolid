@@ -332,6 +332,13 @@ function curvatureComb() {
     curve(t => fit(tip(t)), THIN)
 }
 
+// Thread section: `teeth` triangles of the given crest height on a base
+function threadSection(teeth, crest, root = 304) {
+  const step = 512 / (2 * teeth)
+  const profile = Array.from({ length: 2 * teeth + 1 }, (_, i) => [i * step, i % 2 ? crest : root])
+  return roundPoly([[0, 512], ...profile, [512, 512]], 0, 16)
+}
+
 function coil() {
   const turns = 3
   const fn = u => {
@@ -420,6 +427,14 @@ const definitions = {
     arrow(256, 296, 90, 140, 192),
   ],
   'coil': [coil()],
+  // Threaded rod: slanted crests across a core
+  'thread': [
+    rect(176, 0, 160, 512),
+    ...[72, 184, 296, 408].map(y => seg(68, y + 40, 444, y - 40, 64)),
+  ],
+  // Thread profiles of coarse and fine pitch
+  'pitch-coarse': [threadSection(2, 32)],
+  'pitch-fine': [threadSection(4, 168)],
   'rib': [
     rect(0, 0, 128, 512),
     rect(0, 384, 512, 128),

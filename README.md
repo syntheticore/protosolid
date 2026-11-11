@@ -7,6 +7,8 @@ Cross-platform parametric CAD. Built with Rust & Tauri + Nuxt.
 
   Install Rust, Node.js and the [Tauri prerequisites](https://tauri.app/start/prerequisites/)
 
+  ![ProtoSolid UI](docs/img/hero.png)
+
   ```sh
   npm install
   ```

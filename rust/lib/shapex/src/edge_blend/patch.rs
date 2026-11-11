@@ -5,6 +5,84 @@ use super::*;
 use crate::{geometry_error, topology_error};
 
 impl Transaction<'_> {
+    pub(super) fn align_curvature_sections(
+        &self,
+        patches: &mut [BlendPatch],
+        junctions: &BTreeMap<VertexId, BlendJunction>,
+    ) -> KernelResult<()> {
+        let tolerance = self.kernel.tolerance;
+        let mut by_vertex = BTreeMap::<_, Vec<_>>::new();
+        for (index, patch) in patches.iter().enumerate() {
+            for (end, value) in patch.ends.iter().enumerate() {
+                if let BlendPatchEnd::Junction(vertex) = value {
+                    if matches!(junctions[vertex].kind, BlendJunctionKind::Smooth { .. }) {
+                        by_vertex.entry(*vertex).or_default().push((index, end));
+                    }
+                }
+            }
+        }
+        for (vertex, incident) in by_vertex {
+            let junction = &junctions[&vertex];
+            let BlendJunctionKind::Smooth { seam_edge, tangent_faces, second_seam } = junction.kind else { unreachable!() };
+            let &[(first_index, first_end), (second_index, second_end)] = incident.as_slice() else {
+                return Err(topology_error("a smooth blend junction requires two patches"));
+            };
+            let (before, after) = patches.split_at_mut(second_index);
+            let first = &mut before[first_index];
+            let second = &mut after[0];
+            let a = &first.end_boundaries[first_end];
+            let b = &second.end_boundaries[second_end];
+            let first_contact = first.contact_points[first_end][0];
+            let second_contacts = second.contact_points[second_end];
+            let reverse = first_contact.distance2(second_contacts[1]) < first_contact.distance2(second_contacts[0]);
+            let mut matching = true;
+            for fraction in [1.0 / 3.0, 2.0 / 3.0] {
+                let first_point = a.curve.first_order(a.range.start + a.range.span() * fraction)?.0;
+                let fraction = if reverse { 1.0 - fraction } else { fraction };
+                let second_point = b.curve.first_order(b.range.start + b.range.span() * fraction)?.0;
+                matching &= first_point.distance(second_point) <= tolerance.linear;
+            }
+            if matching {
+                continue;
+            }
+            // The two supports agree in position and normal along the old
+            // seam, but their transverse curvatures can differ. Take the
+            // section's end tangent along that seam so both normal curvature
+            // constraints yield the same section at the junction.
+            let seams = [(seam_edge, tangent_faces)].into_iter().chain(second_seam);
+            let directions = seams.map(|(id, faces)| {
+                let edge = self.working.edge(id)?;
+                let point = junction.contact_points[&faces[0]];
+                let parameter = edge.curve.project_on_trim(point, edge.range, tolerance)?.parameter;
+                Ok((faces, edge.curve.first_order(parameter)?.1.normalize()))
+            }).collect::<KernelResult<Vec<_>>>()?;
+            for (patch, end) in [(first, first_end), (second, second_end)] {
+                let Surface3::Blend(blend) = &patch.blend_surface else { unreachable!() };
+                let mut tangents = blend.section_tangents.clone();
+                for &(faces, direction) in &directions {
+                    let side = patch.spine.faces.iter().position(|face| faces.contains(face)).unwrap();
+                    let station = patch.contact_parameters[end][side];
+                    let transverse = patch.blend_surface.first_order(station, side as f64)?.2.normalize();
+                    let rail = if side == 0 { blend.first_pcurve() } else { blend.second_pcurve() };
+                    let uv = rail.first_order(station)?.0;
+                    let normal = patch.spine.parent_surfaces[side].normal(uv.x, uv.y)?;
+                    let direction = direction * transverse.dot(direction).signum();
+                    let angle = normal.dot(transverse.cross(direction)).atan2(transverse.dot(direction));
+                    let falloff = (patch.contact_parameters[1 - end][side] - station).abs() * 0.5;
+                    tangents.push(crate::geometry::SectionTangent {
+                        side, station, falloff, angle,
+                    });
+                }
+                patch.blend_surface = blend.clone().with_section_tangents(tangents).into();
+                let boundary = &mut patch.end_boundaries[end];
+                boundary.curve = patch.blend_surface.boundary_curve(
+                    boundary.blend_pcurve.clone(), boundary.range, tolerance,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     fn chamfer_surface(
         &self,
         spine: &BlendSpine,

@@ -1,6 +1,8 @@
 //! Blend spines: the offset-surface intersection carrying each selected edge's
 //! rolling center, and how each spine ends or continues at its vertices.
 
+use std::collections::VecDeque;
+
 use super::*;
 use crate::{geometry_error, invalid, topology_error, unsupported, ConstructionBranch, ConstructionTag, CurveEvaluation};
 
@@ -1107,6 +1109,7 @@ impl Transaction<'_> {
             }
         }
         let source = self.working.edge(self.working.coedge(uses[0])?.edge)?;
+        let closed = source.vertices[0] == source.vertices[1];
         // Retain an angular chart through rounded supports. A least-norm
         // correction can slide across the section and choose another inverse
         // branch, especially where a cylindrical corner meets a torus.
@@ -1118,7 +1121,7 @@ impl Transaction<'_> {
             let axis = match surface {
                 Surface3::Cylinder(cylinder)
                     if cylindrical_chart
-                        && source.vertices[0] != source.vertices[1]
+                        && !closed
                         && (boundary_parameters[side][16].x - boundary_parameters[side][0].x)
                             .abs()
                             < std::f64::consts::PI
@@ -1156,9 +1159,7 @@ impl Transaction<'_> {
         // fraction of the source edge can end before a larger blend's contact
         // reaches its terminating support. Use each endpoint's spatial step
         // to keep the continuation local to the requested treatment.
-        let extension = if source.vertices[0] == source.vertices[1]
-            || matches!(source.curve, Curve3::Line(_))
-        {
+        let extension = if closed || matches!(source.curve, Curve3::Line(_)) {
             [16; 2]
         } else {
             let parent_loop = self.working.coedge(uses[0])?.loop_id;
@@ -1174,7 +1175,23 @@ impl Transaction<'_> {
             };
             [padding(0, 1)?, padding(16, 15)?]
         };
-        let closed = source.vertices[0] == source.vertices[1];
+        let continue_implicit_offsets = !closed
+            && offsets.iter().all(|surface| matches!(surface, Surface3::Offset(_)));
+        let interpolate_guides = interpolate_guides || continue_implicit_offsets;
+        let offset_domains = offsets.each_ref().map(Surface3::domains);
+        let ranges_near = |side: usize, seed: [f64; 4]| {
+            std::array::from_fn(|axis| {
+                let domain = offset_domains[side][axis];
+                if let Some(period) = domain.period {
+                    let value = seed[side * 2 + axis];
+                    return ParameterRange { start: value - period, end: value + period };
+                }
+                match domain.bounds {
+                    DomainBounds::Bounded(range) => range,
+                    _ => ParameterRange { start: -f64::MAX / 4.0, end: f64::MAX / 4.0 },
+                }
+            })
+        };
         let extrapolated = |side: usize, index: i32| -> Point2 {
             if closed {
                 // A closed spatial edge can have a bounded, nonperiodic UV
@@ -1203,7 +1220,7 @@ impl Transaction<'_> {
             for side in 0..2 {
                 let uv = extrapolated(side, index);
                 for axis in 0..2 {
-                    if !offsets[side].domains()[axis].contains(uv[axis], tolerance.parameter) {
+                    if !offset_domains[side][axis].contains(uv[axis], tolerance.parameter) {
                         return false;
                     }
                 }
@@ -1225,29 +1242,13 @@ impl Transaction<'_> {
                 let guide = [first.x, first.y, second.x, second.y];
                 let mut gauge = [0.0; 4];
                 gauge[side * 2 + axis] = 1.0;
-                let domains = |side: usize| {
-                    std::array::from_fn(|axis| {
-                        let domain = offsets[side].domains()[axis];
-                        if let Some(period) = domain.period {
-                            return ParameterRange::new(
-                                guide[side * 2 + axis] - period,
-                                guide[side * 2 + axis] + period,
-                            )
-                            .unwrap();
-                        }
-                        match domain.bounds {
-                            DomainBounds::Bounded(range) => range,
-                            _ => ParameterRange::new(-f64::MAX / 4.0, f64::MAX / 4.0).unwrap(),
-                        }
-                    })
-                };
                 super::super::intersection::correct_surface_pair_with_gauge(
                     &offsets[0],
                     &offsets[1],
                     guide,
                     gauge,
-                    domains(0),
-                    domains(1),
+                    ranges_near(0, guide),
+                    ranges_near(1, guide),
                     tolerance,
                 )
             } else {
@@ -1263,27 +1264,56 @@ impl Transaction<'_> {
         // continuation may stop when a corrected branch ends.
         let mut first_sample = if closed { first_index - 1 } else { 0 };
         let mut last_sample = if closed { last_index + 1 } else { 16 };
-        let mut samples = Vec::new();
+        let mut samples = VecDeque::with_capacity((last_sample - first_sample + 1) as usize);
         for index in first_sample..=last_sample {
             let corrected = correct(index)?;
             if corrected.is_none() && matches!(angular_coordinate, Some((_, 0))) {
                 return self.local_offset_intersection(uses, offsets, size, tolerance, false, interpolate_guides);
             }
-            samples.push(corrected.ok_or_else(|| KernelError::new(
+            samples.push_back(corrected.ok_or_else(|| KernelError::new(
                 DiagnosticKind::NumericalFailure, "fixed angular offset correction failed",
             ))?);
         }
         // Continue from the retained sector, stopping when this branch ends.
         // A failed distant sample must not select another chart for the spine.
         if !closed {
+            let continue_branch = |previous: [f64; 4], before: [f64; 4]| -> KernelResult<Option<[f64; 4]>> {
+                // Extrapolating the source p-curves past their trims can
+                // seed unrelated roots on folded offset supports. Predict
+                // from the last two corrected samples of the offset spine.
+                let step: [f64; 4] = std::array::from_fn(|i| {
+                    previous[i] - offset_domains[i / 2][i % 2].nearest(before[i], previous[i])
+                });
+                let length = step.iter().map(|value| value * value).sum::<f64>().sqrt();
+                if length <= tolerance.parameter { return Ok(None); }
+                let gauge = step.map(|value| value / length);
+                for scale in [1.0, 0.5, 0.25] {
+                    let seed = std::array::from_fn(|i| previous[i] + scale * step[i]);
+                    let candidate = super::super::intersection::correct_surface_pair_with_gauge(
+                        &offsets[0], &offsets[1], seed, gauge,
+                        ranges_near(0, previous), ranges_near(1, previous), tolerance,
+                    )?;
+                    if let Some(candidate) = candidate {
+                        let moved = (0..4).map(|i| (candidate[i] - previous[i]).powi(2)).sum::<f64>();
+                        if moved <= (scale * length * 2.0).powi(2) { return Ok(Some(candidate)); }
+                    }
+                }
+                Ok(None)
+            };
             for index in (first_index..0).rev() {
-                let Ok(Some(sample)) = correct(index) else { break; };
-                samples.insert(0, sample);
+                let sample = if continue_implicit_offsets {
+                    continue_branch(samples[0], samples[1])
+                } else { correct(index) };
+                let Ok(Some(sample)) = sample else { break; };
+                samples.push_front(sample);
                 first_sample = index;
             }
             for index in 17..=last_index {
-                let Ok(Some(sample)) = correct(index) else { break; };
-                samples.push(sample);
+                let sample = if continue_implicit_offsets {
+                    continue_branch(samples[samples.len() - 1], samples[samples.len() - 2])
+                } else { correct(index) };
+                let Ok(Some(sample)) = sample else { break; };
+                samples.push_back(sample);
                 last_sample = index;
             }
         }
@@ -1298,7 +1328,7 @@ impl Transaction<'_> {
             for side in 0..2 {
                 let seed = extrapolated(side, index);
                 parameters[side].push(nearest_uv(
-                    offsets[side].domains(),
+                    offset_domains[side],
                     Point2::new(corrected[side * 2], corrected[side * 2 + 1]),
                     seed,
                 ));

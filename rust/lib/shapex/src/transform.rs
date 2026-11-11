@@ -456,6 +456,7 @@ pub(crate) fn transform_surface(
                 surface.is_ruled(),
             )?.with_curvature_continuity(surface.is_curvature_continuous())?
             .with_center_period(surface.center_period())
+            .with_section_tangents(surface.section_tangents.clone())
             .into()
         }
     })

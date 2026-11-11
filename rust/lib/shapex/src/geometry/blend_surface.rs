@@ -24,9 +24,18 @@ pub struct EdgeBlendSurface3 {
     pub(super) center_period: Option<f64>,
     pub(super) radius: f64,
     pub(super) tolerance: ModelTolerance,
+    pub(crate) section_tangents: Vec<SectionTangent>,
     pub(super) sections: ParameterEvaluationCache<BlendSection>,
     curvature_tangents: ParameterEvaluationCache<[Vec3; 6]>,
     curvature_accelerations: ParameterEvaluationCache<[Vec3; 6]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SectionTangent {
+    pub side: usize,
+    pub station: f64,
+    pub falloff: f64,
+    pub angle: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -138,6 +147,7 @@ impl EdgeBlendSurface3 {
             center_range,
             radius,
             tolerance,
+            section_tangents: Vec::new(),
             sections: ParameterEvaluationCache::default(),
             curvature_tangents: ParameterEvaluationCache::default(),
             curvature_accelerations: ParameterEvaluationCache::default(),
@@ -178,6 +188,15 @@ impl EdgeBlendSurface3 {
         Ok(self)
     }
 
+    pub(crate) fn with_section_tangents(mut self, tangents: Vec<SectionTangent>) -> Self {
+        if self.section_tangents == tangents { return self; }
+        self.section_tangents = tangents;
+        self.sections = ParameterEvaluationCache::default();
+        self.curvature_tangents = ParameterEvaluationCache::default();
+        self.curvature_accelerations = ParameterEvaluationCache::default();
+        self
+    }
+
     /// Continue the blend along its spine by `padding` at both ends, without
     /// changing it inside its current range. Closed spines are returned as is.
     pub(crate) fn extended(&self, padding: f64) -> KernelResult<Self> {
@@ -210,7 +229,8 @@ impl EdgeBlendSurface3 {
             self.radius,
             self.tolerance,
             self.ruled,
-        )?.with_curvature_continuity(self.curvature_continuous)?;
+        )?.with_curvature_continuity(self.curvature_continuous)?
+            .with_section_tangents(self.section_tangents.clone());
         // Construction certifies only the ends and middle. A continued spine
         // can leave its supports' intersection in between.
         let (start, end) = (self.center_range.start.min(self.center_range.end),
@@ -281,7 +301,7 @@ impl EdgeBlendSurface3 {
     /// section that translates rigidly along the spine.
     pub(crate) fn translating_quintic(&self, parameter: f64) -> KernelResult<Option<([Point3; 6], Vec3)>> {
         let Curve3::Line(spine) = self.center_curve.as_ref() else { return Ok(None); };
-        if !self.curvature_continuous || self.variable_radius
+        if !self.curvature_continuous || self.variable_radius || !self.section_tangents.is_empty()
             || !matches!((self.first_surface(), self.second_surface()), (Surface3::Plane(_), Surface3::Plane(_)))
         {
             return Ok(None);
@@ -301,7 +321,7 @@ impl EdgeBlendSurface3 {
     /// quintic section rigidly, including its endpoint curvature constraints.
     pub(crate) fn rotating_quintic(&self, parameter: f64) -> KernelResult<Option<([Point3; 6], Axis3)>> {
         let Curve3::Circle(spine) = self.center_curve() else { return Ok(None); };
-        if !self.curvature_continuous { return Ok(None); }
+        if !self.curvature_continuous || !self.section_tangents.is_empty() { return Ok(None); }
         let (plane, plane_rail, cylinder, cylinder_rail) = match (self.first_surface(), self.second_surface()) {
             (Surface3::Plane(plane), Surface3::Cylinder(cylinder)) =>
                 (plane, self.first_pcurve(), cylinder, self.second_pcurve()),
@@ -470,7 +490,7 @@ impl EdgeBlendSurface3 {
         section: CircularBlendSection) -> KernelResult<[Point3; 6]> {
         let scale = if section.angle <= self.tolerance.angular { section.radius }
             else { section.radius * section.angle / section.sine };
-        let tangents = [
+        let mut tangents = [
             (section.second_unit - section.first_unit * section.angle_cosine) * scale,
             (section.second_unit * section.angle_cosine - section.first_unit) * scale,
         ];
@@ -479,14 +499,30 @@ impl EdgeBlendSurface3 {
             (&self.second_surface, &self.second_pcurve)].into_iter().enumerate() {
             let uv = pcurve.evaluate(parameter)?.point;
             let value = surface.evaluate(uv.x, uv.y)?;
-            let tangent = tangents[side];
+            let normal = value.du.cross(value.dv).normalize();
+            let mut angle = 0.0;
+            for constraint in self.section_tangents.iter().filter(|constraint| constraint.side == side) {
+                let distance = self.center_period.map_or(parameter - constraint.station, |period| {
+                    (parameter - constraint.station + period * 0.5).rem_euclid(period) - period * 0.5
+                });
+                let fraction = (1.0 - distance.abs() / constraint.falloff).max(0.0);
+                // The rotation and its first two derivatives vanish at the
+                // edge of the neighborhood, and are stationary at the seam.
+                angle += constraint.angle * fraction.powi(3)
+                    * (10.0 - 15.0 * fraction + 6.0 * fraction.powi(2));
+            }
+            let mut tangent = tangents[side];
+            if angle != 0.0 {
+                let (sin, cos) = angle.sin_cos();
+                tangent = tangent * cos + normal.cross(tangent) * sin;
+            }
+            tangents[side] = tangent;
             let e = value.du.magnitude2();
             let f = value.du.dot(value.dv);
             let g = value.dv.magnitude2();
             let determinant = e * g - f * f;
             let a = (g * value.du.dot(tangent) - f * value.dv.dot(tangent)) / determinant;
             let b = (e * value.dv.dot(tangent) - f * value.du.dot(tangent)) / determinant;
-            let normal = value.du.cross(value.dv).normalize();
             let bending = value.duu * a.powi(2) + value.duv * (2.0 * a * b) + value.dvv * b.powi(2);
             accelerations[side] = normal * normal.dot(bending);
         }

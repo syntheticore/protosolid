@@ -1585,6 +1585,14 @@ fn section_plane_torus(plane: Plane3, torus: super::Torus3, domains: [super::Par
             for v in [domains[1].start, domains[1].end] {
                 let q = -(minor * c * v.sin() + d) / (major + minor * v.cos());
                 if q.abs() > h { continue; }
+                // A trim crossing at a branch turn is already sampled there.
+                // Inverting a rounded cosine near the turn can insert two
+                // nearly coincident samples with an undefined guide tangent.
+                if !full && [low, high].iter().any(|root| {
+                    (q - root).abs() <= f64::EPSILON * q.abs().max(root.abs()) * 32.0
+                }) {
+                    continue;
+                }
                 let angle = (q / h).acos();
                 for u in [phase - angle, phase + angle] {
                     let u = (u - start).rem_euclid(tau) + start;

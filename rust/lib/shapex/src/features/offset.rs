@@ -203,6 +203,33 @@ pub(super) fn offset_body(
                 .filter(|face| supports.contains_key(face))
                 .copied()
                 .collect::<Vec<_>>();
+            // A strip can disappear beside a blend that has already
+            // collapsed. Rebuild their common replacement rail against
+            // both sides of the collapsed region.
+            let mut collapsed_strip = BTreeSet::new();
+            if surviving.len() == 1 {
+                let mut pending = neighbors.iter().filter(|neighbor| {
+                    matches!(previous_collapsed.get(neighbor), Some(CollapsedSupport::Curve(_)))
+                }).copied().collect::<Vec<_>>();
+                let mut boundary = BTreeSet::from([surviving[0]]);
+                while let Some(id) = pending.pop() {
+                    if !collapsed_strip.insert(id) { continue; }
+                    for edge in topology.face_edges(id)? {
+                        for neighbor in topology.edge_faces(edge)? {
+                            if supports.contains_key(&neighbor) {
+                                boundary.insert(neighbor);
+                            } else if matches!(previous_collapsed.get(&neighbor), Some(CollapsedSupport::Curve(_))) {
+                                pending.push(neighbor);
+                            }
+                        }
+                    }
+                }
+                if !collapsed_strip.is_empty() && boundary.len() == 2 {
+                    surviving = boundary.into_iter().collect();
+                } else {
+                    collapsed_strip.clear();
+                }
+            }
             if surviving.len() > 2 && matches!(topology.face(face_id)?.surface(), Surface3::Cone(_)) {
                 // A chamfer's end faces clip its angular sector; its two
                 // constant-height rails identify the supports that replace
@@ -229,6 +256,9 @@ pub(super) fn offset_body(
                         .find(|edge| {
                             topology.edge_faces(**edge).is_ok_and(|faces| faces.contains(first))
                         })
+                        .or_else(|| edges.iter().find(|edge| {
+                            topology.edge_faces(**edge).is_ok_and(|faces| faces.contains(second))
+                        }))
                         .unwrap();
                     let edge = topology.edge(*edge_id)?;
                     CollapsedSupport::Curve(intersect_collapsed_blend(
@@ -272,6 +302,9 @@ pub(super) fn offset_body(
                     ));
                 }
             };
+            for id in collapsed_strip {
+                collapsed.insert(id, support.clone());
+            }
             collapsed.insert(face_id, support);
         }
     };

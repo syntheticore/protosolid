@@ -690,6 +690,9 @@ impl Transaction<'_> {
                         )
                     })
                     .collect::<KernelResult<Vec<_>>>()?;
+                if kind.curvature_continuous() {
+                    self.align_curvature_sections(&mut patches, &junctions)?;
+                }
                 // At a non-tangent two-edge corner the rolling patches meet
                 // along their exact intersection, not a constant-angle arc.
                 for (vertex, junction) in &junctions {

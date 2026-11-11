@@ -11,7 +11,7 @@
 
         AppLogo.logo
         h1 ProtoSolid
-        .version Version 0.11
+        .version Version {{ $config.public.version }}
 
       ul.actions(@click="bus.emit('close-widgets')")
 

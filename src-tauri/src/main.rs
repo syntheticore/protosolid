@@ -155,6 +155,7 @@ fn show_splash(app: &AppHandle) -> tauri::Result<()> {
         .shadow(false)
         .always_on_top(true)
         .visible(false)
+        .initialization_script(format!("window.appVersion = '{}'", app.package_info().version))
         .build()?;
 
     let app = app.clone();

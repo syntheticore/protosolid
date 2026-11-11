@@ -1,6 +1,5 @@
 [package]
 name = "protosolid"
-version = "0.1.0"
 description = "Parametric CAD"
 authors = ["Björn Breitgoff <syntheticore@gmail.com>"]
 edition = "2021"

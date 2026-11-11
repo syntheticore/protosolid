@@ -2,8 +2,16 @@
 
 // import wasm from 'vite-plugin-wasm';
 
+import pkg from './package.json'
+
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-30',
+
+  runtimeConfig: {
+    public: {
+      version: pkg.version,
+    },
+  },
 
   ignore: ['dist', 'dist/**', 'rust/**', 'src-tauri/**', 'js/shapexJS/rust/**'],
 

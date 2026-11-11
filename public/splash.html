@@ -53,8 +53,12 @@
     <div class="splash-box">
       <img class="logo" src="logo.png" alt="" draggable="false">
       <h1>ProtoSolid</h1>
-      <span class="version">Version 0.11</span>
+      <span class="version"></span>
     </div>
+    <script>
+      // Injected by the desktop shell before the page loads
+      document.querySelector('.version').textContent = 'Version ' + window.appVersion
+    </script>
   </body>
 </html>
 

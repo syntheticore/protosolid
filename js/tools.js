@@ -63,6 +63,7 @@ import materials, { DRAFT_DIRECTIONS } from './materials.js'
 import { supportsOffset, connectedOffsetChain, profileOffsetGroups, nearestOffsetFrame, buildOffsetCurves } from './core/sketch-offset.js'
 
 const dragThreshold = 2
+const longPressDelay = 500
 const tangentSnapAngle = THREE.MathUtils.degToRad(7.5)
 
 class Tool {
@@ -571,27 +572,31 @@ class HighlightTool extends Tool {
     return object
   }
 
+  objectsAt(coords) {
+    let items = this.viewport.renderer
+      .objectsAtScreen(coords, this.realSelectors, this.includeInactive, this.visibleEdgesOnly)
+      .flatMap(obj => {
+        if(!obj.alcTypes.some(type => type == 'face')) return obj.alcObject
+        const mapped = []
+        if(this.selectors.includes('solid')) mapped.push(obj.alcObject.solid)
+        if(this.selectors.includes('component')) mapped.push(obj.alcObject.solid.component)
+        if(mapped.length) return mapped
+        return obj.alcObject
+      })
+    items = Array.from(new Set(items)).filter(item => !item.topology || item.topology.origin.feature)
+    const handle = this.viewport.hoveredHandle
+    if(handle && this.realSelectors.includes('point') && !this.preferPointObjects) {
+      items.unshift(new ElemRef(handle.elem, handle.index))
+    }
+    const acceptsInput = this.acceptsInput?.bind(this) ||
+      this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
+    if(acceptsInput) items = items.filter(item => acceptsInput(item))
+    return this.orderItems(items)
+  }
+
   getObject(coords, any) {
     return new Promise(resolve => {
-      let items = this.viewport.renderer
-        .objectsAtScreen(coords, this.realSelectors, this.includeInactive, this.visibleEdgesOnly)
-        .flatMap(obj => {
-          if(!obj.alcTypes.some(type => type == 'face')) return obj.alcObject
-          const mapped = []
-          if(this.selectors.includes('solid')) mapped.push(obj.alcObject.solid)
-          if(this.selectors.includes('component')) mapped.push(obj.alcObject.solid.component)
-          if(mapped.length) return mapped
-          return obj.alcObject
-        })
-      items = Array.from(new Set(items)).filter(item => !item.topology || item.topology.origin.feature)
-      const handle = this.viewport.hoveredHandle
-      if(handle && this.realSelectors.includes('point') && !this.preferPointObjects) {
-        items.unshift(new ElemRef(handle.elem, handle.index))
-      }
-      const acceptsInput = this.acceptsInput?.bind(this) ||
-        this.viewport.document.activeFeature?.acceptsInput?.bind(this.viewport.document.activeFeature)
-      if(acceptsInput) items = items.filter(item => acceptsInput(item))
-      items = this.orderItems(items)
+      const items = this.objectsAt(coords)
       if(items.length > 1 && !any && !this.shouldPickImmediately(items)) {
         // Combat close-widgets event
         setTimeout(() => this.viewport.widgets.push({
@@ -692,11 +697,30 @@ export class ManipulationTool extends HighlightTool {
     }
   }
 
+  // Holding the pointer still offers every item under it, including the
+  // faces and edges a plain click resolves to the closest one.
+  longPress(coords) {
+    const handle = this.viewport.activeHandle
+    if((handle && !handle.curveDrag) || this.viewport.activeDimension) return
+    const items = this.objectsAt(coords)
+    if(items.length < 2) return
+    const additive = this.viewport.bus.isCtrlPressed
+    this.cancelPointer()
+    this.viewport.activeHandle = null
+    this.viewport.widgets.push({
+      items,
+      pos: coords,
+      cb: choice => this.viewport.document.selection.handle(choice, additive),
+    })
+  }
+
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
     this.pointerDown = true
     this.selectionClickPending = false
     this.doubleClickPending = false
+    clearTimeout(this.longPressTimer)
+    this.longPressTimer = setTimeout(() => this.longPress(coords), longPressDelay)
     const picked = await this.getObject(coords, true)
     const object = picked instanceof Face || picked instanceof Edge ? picked.solid : picked
     if(!this.pointerDown) return
@@ -766,6 +790,7 @@ export class ManipulationTool extends HighlightTool {
   }
 
   mouseUp(vec, coords) {
+    clearTimeout(this.longPressTimer)
     this.pointerDown = false
     const boxDrag = this.boxDrag
     const boxSelecting = boxDrag && coords.distanceTo(boxDrag.start) > dragThreshold
@@ -803,6 +828,7 @@ export class ManipulationTool extends HighlightTool {
 
   cancelPointer() {
     super.cancelPointer()
+    clearTimeout(this.longPressTimer)
     this.pointerDown = false
     this.selectionClickPending = false
     this.doubleClickPending = false
@@ -823,6 +849,7 @@ export class ManipulationTool extends HighlightTool {
   mouseMove(vec, coords) {
     const handle = this.viewport.activeHandle
     const dimension = this.viewport.activeDimension
+    if(this.lastCoords && coords.distanceTo(this.lastCoords) > dragThreshold) clearTimeout(this.longPressTimer)
 
     // Drag a line or spline by its body, or change a circle/arc radius from the curve.
     // Updates are absolute from mouse-down, so solver adjustments between
@@ -1402,12 +1429,50 @@ class PickTool extends HighlightTool {
 
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
+    const items = this.objectsAt(coords)
+    // With several candidates, holding the pointer offers all of them.
+    // Otherwise the closest one is picked on release.
+    if(items.length > 1 && !this.chooseAmongItems) {
+      this.pendingPick = items[0]
+      clearTimeout(this.longPressTimer)
+      this.longPressTimer = setTimeout(() => {
+        this.pendingPick = null
+        this.viewport.widgets.push({
+          items,
+          pos: coords,
+          cb: choice => this.disposed || this.callback(choice),
+        })
+      }, longPressDelay)
+      return
+    }
     const object = await this.getObject(coords, !this.chooseAmongItems)
     if(!object || this.disposed) return
     this.callback(object)
   }
 
-  dispose() { this.disposed = true }
+  mouseMove(vec, coords) {
+    if(this.lastCoords && coords.distanceTo(this.lastCoords) > dragThreshold) clearTimeout(this.longPressTimer)
+    return super.mouseMove(vec, coords)
+  }
+
+  mouseUp(vec, coords) {
+    super.mouseUp(vec, coords)
+    clearTimeout(this.longPressTimer)
+    const object = this.pendingPick
+    this.pendingPick = null
+    if(object && !this.disposed) this.callback(object)
+  }
+
+  cancelPointer() {
+    super.cancelPointer()
+    clearTimeout(this.longPressTimer)
+    this.pendingPick = null
+  }
+
+  dispose() {
+    this.disposed = true
+    this.cancelPointer()
+  }
 }
 
 

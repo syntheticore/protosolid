@@ -2978,7 +2978,12 @@ export class DimensionTool extends HighlightTool {
     // constrain a native element
     if(first && isFixedDimensionItem(first) && isFixedDimensionItem(item)) return false
     if(first instanceof ElemRef) {
-      return isPoint || item instanceof Circle || (item instanceof Line && item != first.curve())
+      // The same point, or one coincident with it, would measure nothing
+      if(isPoint) {
+        const position = ref => ref.curve().handles()[ref.index]
+        return position(item).distanceTo(position(first)) > EPSILON
+      }
+      return item instanceof Circle || (item instanceof Line && item != first.curve())
     }
     if(first instanceof Line) return item instanceof Line || (isPoint && item.curve() != first)
     if(first instanceof Circle) {
@@ -2997,6 +3002,13 @@ export class DimensionTool extends HighlightTool {
 
   async mouseDown(vec, coords) {
     super.mouseDown(vec, coords)
+
+    // Grabbing an existing dimension label drags it instead of starting a new one
+    if(this.viewport.activeDimension && !this.items.length) {
+      this.draggingDimension = true
+      this.cursor = 'grabbing'
+      return
+    }
 
     if(!this.canPlaceDimension()) {
       const curve = await this.getObject(coords)
@@ -3020,7 +3032,23 @@ export class DimensionTool extends HighlightTool {
     }
   }
 
+  mouseUp(vec, coords) {
+    super.mouseUp(vec, coords)
+    this.draggingDimension = false
+    this.cursor = 'crosshair'
+  }
+
+  cancelPointer() {
+    super.cancelPointer()
+    this.draggingDimension = false
+    this.cursor = 'crosshair'
+  }
+
   async mouseMove(vec, coords) {
+    if(this.draggingDimension) {
+      this.viewport.activeDimension.position = vec.clone().applyMatrix4(this.sketch.workplane.clone().invert())
+      return this.viewport.updateSketch()
+    }
     if(!this.canPlaceDimension()) return super.mouseMove(vec, coords)
     if(this.items.length == 1 &&
       (this.items[0] instanceof Line || this.items[0] instanceof Circle || this.items[0] instanceof Arc)) {

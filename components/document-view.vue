@@ -132,12 +132,12 @@
 
         .display-row(v-if="document.activeSketch")
           label.display-toggle(title="Section the model at the active sketch plane")
-            input(type="checkbox" v-model="sketchSection")
+            ToggleSwitch(v-model="sketchSection")
             span Section
 
         .display-row(v-if="document.activeSketch")
           label.display-toggle(title="Show sketch constraint markers")
-            input(type="checkbox" v-model="showConstraintMarkers")
+            ToggleSwitch(v-model="showConstraintMarkers")
             span Constraints
 
       .pose(:class="{ hidden: !document.top().hasPoseChange() || document.activeMerge }")
@@ -280,8 +280,9 @@
             padding: 4px
 
         .display-toggle
+          align-items: center
           display: flex
-          gap: 0.35rem
+          gap: 0.5rem
           grid-column: 2
 
           span
@@ -416,7 +417,7 @@
         previewDisplayMode: null,
         colorMode: 'material',
         previewColorMode: null,
-        sketchSection: true,
+        sketchSection: false,
         showConstraintMarkers: true,
         previewOnHover: preferences.previewOnHover,
         alwaysShowSideLabels: preferences.alwaysShowSideLabels,

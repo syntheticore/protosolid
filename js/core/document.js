@@ -1029,7 +1029,7 @@ export default class Document extends Emitter {
       throw error
     }
     this.filePath = file.path
-    if(window.desktop) window.desktop.send('add-recent-file', file.path)
+    if(window.desktop && file.path) window.desktop.send('add-recent-file', file.path)
     this.repository = repository && markRaw(repository)
     this.repositoryVersion++
     this.hasRepositoryChanges = false

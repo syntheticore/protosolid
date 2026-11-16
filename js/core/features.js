@@ -1955,7 +1955,7 @@ async function readNewerRevision(feature, filetype, normalize = data => data) {
 }
 
 export const stepFiletype = '.step,.stp'
-const placeFiletype = `.cad,${stepFiletype}`
+export const placeFiletype = `.cad,${stepFiletype}`
 
 // STEP files open with their exchange structure keyword. Only documents
 // are normalized to their checked-out state.

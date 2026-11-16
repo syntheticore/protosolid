@@ -88,8 +88,10 @@
   import { currentTheme, onThemeChange } from './js/theme.js'
   import materials from './js/materials.js'
   import Document from './js/core/document.js'
-  import { stepFiletype } from './js/core/features.js'
+  import { stepFiletype, placeFiletype } from './js/core/features.js'
+  import { decodeFile } from './js/core/document-format.js'
   import { loadFile, loadFiles } from './js/utils.js'
+  import { showDialog } from './js/dialogs.js'
   import Emitter from './js/emitter.js'
   import { ManipulationTool } from './js/tools.js'
   import { startMcpBridge } from './js/mcp/bridge.js'
@@ -288,6 +290,19 @@
     })
     window.addEventListener('pointerdown', syncModifiers, true)
 
+    // Files can be dropped anywhere, in-page drags of features carry no files
+    const carriesFiles = e => e.dataTransfer.types.includes('Files')
+    window.addEventListener('dragover', (e) => {
+      if(!carriesFiles(e)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'link'
+    })
+    window.addEventListener('drop', (e) => {
+      if(!carriesFiles(e)) return
+      e.preventDefault()
+      dropFiles([...e.dataTransfer.files])
+    })
+
     if(!window.desktop) return
     setTimeout(() => window.desktop.send('vue-ready'), 200)
   })
@@ -329,7 +344,7 @@
   }
 
   async function openDocument(path, file) {
-    const openedDocument = documents.value.find(doc => doc.filePath == path)
+    const openedDocument = path && documents.value.find(doc => doc.filePath == path)
     if(openedDocument) return activateDocument(openedDocument)
     const doc = new Document(bus)
     // Load failures are reported by the document, remaining files still open
@@ -368,6 +383,45 @@
       if(error == 'canceled') return
       console.error(error)
       alert('The file could not be imported.')
+    }
+  }
+
+  // Dropped documents are either opened or placed, other supported formats are
+  // placed directly. Web views don't reveal where dropped files live, so the
+  // desktop app saves opened documents to a newly chosen location.
+  async function dropFiles(files) {
+    if(documentBusy.value) return
+    for(const file of files) {
+      const extension = '.' + file.name.split('.').pop().toLowerCase()
+      if(!placeFiletype.split(',').includes(extension)) continue
+      const data = new Uint8Array(await file.arrayBuffer())
+      if(extension == '.cad') {
+        const choice = await showDialog({
+          title: 'Dropped Document',
+          icon: 'file-import',
+          message: `Open ${file.name} or place it in the active component?`,
+          actions: [
+            { label: 'Place', value: 'place' },
+            { label: 'Open', value: 'open', primary: true },
+          ],
+        })
+        if(!choice) continue
+        if(choice.action == 'open') {
+          await openDocument(null, { data, path: window.desktop ? null : file.name })
+          continue
+        }
+      }
+      await placeDroppedFile({ data: await decodeFile(data), path: file.name })
+    }
+  }
+
+  async function placeDroppedFile(file) {
+    if(activeDocument.value.activeMerge) return
+    try {
+      await activeDocument.value.placeFile(file)
+    } catch(error) {
+      console.error(error)
+      alert(`${file.path} could not be placed.`)
     }
   }
 

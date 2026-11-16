@@ -317,7 +317,9 @@
         this.removeGhost()
       },
 
+      // Dropped files are handled by the app
       dragenter(e) {
+        if(e.dataTransfer.types.includes('Files')) return
         const dragged = this.getDragged(e)
         this.isDragTarget = (this.feature != dragged)
         if(this.isDragTarget) e.dataTransfer.dropEffect = 'move'
@@ -333,6 +335,7 @@
       },
 
       drop(e) {
+        if(e.dataTransfer.types.includes('Files')) return
         if(e.dataTransfer.getData('text/plain') == 'marker') {
           const i = this.document.timeline.features.indexOf(this.feature) + (this.targetLeft ? 0 : 1)
           this.document.moveMarker(i)

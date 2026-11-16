@@ -8,6 +8,7 @@
   import { Feature } from '../js/core/features.js'
   import { topologyIncludesFeature } from '../js/core/topological-naming.js'
   import { stressColor } from '../js/core/static.js'
+  import { clippedMaterial } from '../js/three/section-caps.js'
 
   const props = defineProps(['document', 'component', 'face', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
@@ -15,6 +16,7 @@
   const highlight = inject('highlight')
   const pickerSelection = inject('picker-selection')
   const renderNeeded = inject('render-needed')
+  const sectionPlanes = inject('section-planes', shallowRef(null))
 
   const highlightedFeature = computed(() => props.face.topology &&
     [highlight.value, props.document.activeFeature || props.document.creatingFeature, ...props.document.selection.items]
@@ -74,12 +76,11 @@
     renderNeeded.value = true
   }, { immediate: true })
 
-  watch(() => [props.face, props.parentActive, selected.value, props.displayMode, props.colorMode, props.component.getMaterial(), props.document.activeSimulation?.revision, props.document.activeSimulationPicker], () => {
+  watch(() => [props.face, props.parentActive, selected.value, props.displayMode, props.colorMode, props.component.getMaterial(), props.document.activeSimulation?.revision, props.document.activeSimulationPicker, sectionPlanes.value], () => {
     updateAnalysisGeometry()
     faceMesh.visible = props.displayMode != 'exportPreview'
     faceMesh.alcPathTracingMaterial = getSurfaceMaterial()
-    const material = getMaterial()
-    faceMesh.material = material
+    faceMesh.material = clippedMaterial(getMaterial(), sectionPlanes.value)
     renderNeeded.value = true
   }, { immediate: true })
 

@@ -385,7 +385,7 @@ const definitions = {
   'sweep': [
     bezier([116, 400], [116, 196], [400, 332], [400, 128]),
     ellipse(116, 440, 116, 72),
-    ellipseArc(400, 92, 92, 44, 0, 360, THIN),
+    closed([[340, 52], [460, 52], [492, 132], [308, 132]], THIN),
   ],
   'fillet': [edgeTreatment(true)],
   'chamfer': [edgeTreatment(false)],

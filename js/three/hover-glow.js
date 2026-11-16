@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import materials from '../materials.js'
+import { clippedMaterial } from './section-caps.js'
 
 const vertexShader = `
   varying vec2 vUv;
@@ -110,9 +111,9 @@ export default class HoverGlow {
         this.maskScene.add(mesh)
       }
       mesh.geometry = source.geometry
-      mesh.material = source.alcHovered
+      mesh.material = clippedMaterial(source.alcHovered
         ? source.alcCutHovered ? this.cutMaskMaterial : this.maskMaterial
-        : this.occluderMaterial
+        : this.occluderMaterial, source.material.clippingPlanes)
       mesh.matrix.copy(source.matrixWorld)
     })
     this.maskScene.remove(...this.maskScene.children.slice(count))

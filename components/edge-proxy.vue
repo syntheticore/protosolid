@@ -9,6 +9,7 @@
   import { topologyIncludesFeature } from '../js/core/topological-naming.js'
   import materials from '../js/materials.js'
   import HiddenLine from '../js/three/hidden-line.js'
+  import { clippedMaterial } from '../js/three/section-caps.js'
 
   const props = defineProps(['document', 'component', 'edge', 'displayMode', 'colorMode', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform'])
   const emit = defineEmits([])
@@ -16,6 +17,7 @@
   const highlight = inject('highlight')
   const pickerSelection = inject('picker-selection')
   const renderNeeded = inject('render-needed')
+  const sectionPlanes = inject('section-planes', shallowRef(null))
   const selected = computed(() => props.document.selection.has(props.edge) ||
     pickerSelection.value.get(props.component.id)?.has(props.edge.id))
   const directlyHighlighted = computed(() => toRaw(props.edge) == toRaw(highlight.value))
@@ -51,9 +53,9 @@
   window.alcRenderer.add(edgeMesh, props.parentActive)
   renderNeeded.value = true
 
-  watch(() => [props.edge, highlighted.value, highlightedFeature.value?.operation, directlyHighlighted.value, selected.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode], () => {
+  watch(() => [props.edge, highlighted.value, highlightedFeature.value?.operation, directlyHighlighted.value, selected.value, props.parentActive, props.parentHighlighted, props.parentSelected, props.displayMode, props.colorMode, sectionPlanes.value], () => {
     edgeMesh.visible = props.displayMode != 'exportPreview' && props.colorMode != 'interference'
-    edgeMesh.material = getMaterial()
+    edgeMesh.material = clippedMaterial(getMaterial(), sectionPlanes.value)
     hiddenMesh.visible = props.displayMode == 'hiddenLines'
     nextTick().then(() => renderNeeded.value = true )
   }, { immediate: true })

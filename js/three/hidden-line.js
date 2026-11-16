@@ -18,6 +18,7 @@ export default class HiddenLine extends Line2 {
     const material = this.material
     material.color.copy(this.line.material.color)
     material.toneMapped = this.line.material.toneMapped
+    material.clippingPlanes = this.line.material.clippingPlanes
     // Keep dashes in screen pixels through zoom and projection changes.
     const center = this.geometry.boundingSphere.center
     this.dashPosition.set(center.x, center.y, center.z, 1)

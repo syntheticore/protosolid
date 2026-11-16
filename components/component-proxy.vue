@@ -129,12 +129,15 @@
   import { PointHelper } from '../js/core/helpers.js'
   import { ProjectionTool, ProjectTool } from '../js/tools.js'
   import { sectionBounds, sectionPlaneRelation } from '../js/core/section-bounds.js'
+  import SectionCaps from '../js/three/section-caps.js'
+  import materials from '../js/materials.js'
 
   const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform', 'sectionPlane', 'sectionSide'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 
   const highlight = inject('highlight')
+  const renderNeeded = inject('render-needed')
 
   const active = computed(() => props.parentActive || props.component.id == props.document.activeComponent?.id || props.document.activeFeature instanceof JointFeature )
   const highlighted = computed(() => props.parentHighlighted || props.component == highlight.value )
@@ -157,23 +160,27 @@
 
   const bounds = computed(() => sectionBounds(model.value))
 
-  const compound = computed(() => {
-    // Slice model using all visible saved sections and, while sketching,
-    // the active sketch plane expressed in this component's local space.
-    // Tools picking model topology reference the real model, so they see it unsectioned.
-    if(props.activeTool?.showsUnsectioned) return model.value
+  // All visible saved sections and, while sketching, the active sketch plane,
+  // as world space planes. Tools picking model topology reference the real
+  // model, so they see it unsectioned.
+  const sections = computed(() => {
+    if(props.activeTool?.showsUnsectioned) return []
     const sections = getSections(props.component).filter(sec => !sec.hidden )
-    if(props.sectionPlane) {
-      sections.push({
-        getTransform: () => transform.value.clone().invert().multiply(props.sectionPlane),
-        side: props.sectionSide,
-      })
-    }
-    if(!sections.length) return model.value
+      .map(section => ({ matrix: transform.value.clone().multiply(section.getTransform()), side: section.side }))
+    if(props.sectionPlane) sections.push({ matrix: props.sectionPlane, side: props.sectionSide })
+    return sections
+  })
+
+  // Sections are clipped on the GPU, only the path tracer needs the model cut
+  const cutsModel = computed(() => props.displayMode == 'pathTraced')
+
+  const compound = computed(() => {
+    if(!cutsModel.value || !sections.value.length) return model.value
     try {
       const originalFaces = model.value.solids().flatMap(solid => solid.faces())
-      const planes = sections.map(section => section.getTransform())
-      const cut = sections.reduce((shape, section, index) => {
+      const inverse = transform.value.clone().invert()
+      const planes = sections.value.map(section => inverse.clone().multiply(section.matrix))
+      const cut = sections.value.reduce((shape, section, index) => {
         if(!shape) return null
         // Every subsequent cut is a subset of the original compound. Its cached
         // enclosure remains safe, without meshing intermediate Boolean results.
@@ -192,6 +199,53 @@
       return model.value
     }
   })
+
+  // Clipping planes of the component's faces and edges
+  const sectionPlanes = shallowRef(null)
+  provide('section-planes', sectionPlanes)
+  let sectionCaps = null
+
+  const sectionFaces = computed(() => (model.value?.solids() || [])
+    .filter(solid => !props.component.isItemHidden(solid.id))
+    .flatMap(solid => solid.faces()))
+
+  // The cut's outline looks like the component's other edges
+  const outlineMaterial = computed(() => {
+    if(['shaded', 'pathTraced', 'exportPreview'].includes(props.displayMode) || props.colorMode == 'interference') return null
+    if(!active.value && !['wireframe', 'hiddenLines'].includes(props.displayMode)) return null
+    if(highlighted.value || selected.value) return materials.selectionLine
+    if(!active.value) return materials.ghostWire
+    return props.colorMode == 'component' ? props.component.creator.compLineMaterial : materials.wire
+  })
+
+  watch(() => [
+    cutsModel.value || props.displayMode == 'exportPreview' ? [] : sections.value,
+    sectionFaces.value,
+    outlineMaterial.value,
+    props.displayMode,
+    transform.value,
+  ], ([sections, faces, outlineMaterial]) => {
+    if(sections.length) {
+      sectionCaps ||= new SectionCaps()
+      sectionCaps.update({
+        sections,
+        transform: transform.value,
+        faces,
+        color: props.component.creator.compSectionMaterial.color,
+        outlineMaterial,
+        hiddenLines: props.displayMode == 'hiddenLines',
+      })
+      sectionPlanes.value = sectionCaps.planes
+    } else {
+      sectionCaps?.dispose()
+      sectionCaps = null
+      sectionPlanes.value = null
+    }
+    window.alcRenderer.invalidateShadows()
+    renderNeeded.value = true
+  }, { immediate: true })
+
+  onUnmounted(() => sectionCaps?.dispose())
 
   function markSectionFaces(compound, planes, originalFaces) {
     const unchangedFaces = compound.preservedFaces(originalFaces)

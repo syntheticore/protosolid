@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
+import { clippedMaterial } from './section-caps.js'
 
 const RESOLUTION = 512
 // Space around the model's footprint, relative to its size, for the blur to fade out
@@ -101,6 +102,7 @@ export default class GroundShadow {
         this.maskScene.add(mesh)
       }
       mesh.geometry = source.geometry
+      mesh.material = clippedMaterial(this.maskMaterial, source.material.clippingPlanes)
       mesh.matrix.copy(source.matrixWorld)
       bounds.expandByObject(source)
     })

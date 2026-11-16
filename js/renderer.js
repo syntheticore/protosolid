@@ -17,6 +17,7 @@ import SketchPlane from './three/sketch-plane.js'
 import { PlaneHelperObject, AxisHelperObject } from './three/helper-objects.js'
 import DimensionControls from './three/dimension-controls.js'
 import GroundShadow from './three/ground-shadow.js'
+import { isClipped } from './three/section-caps.js'
 // import ArrowControls from './arrow-controls.js'
 import { default as preferences, emitter as prefEmitter } from './preferences.js'
 
@@ -38,8 +39,11 @@ export default class Renderer {
       canvas,
       antialias: preferences.antiAlias,
       alpha: true,
+      // Section caps are found by counting surfaces
+      stencil: true,
       // logarithmicDepthBuffer: true,
     })
+    this.renderer.localClippingEnabled = true
 
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -603,10 +607,37 @@ export default class Renderer {
   hitTest(coords, includeInactive) {
     coords = this.getCanvasCoords(coords)
     this.dualCamera.setRaycaster(this.raycaster, coords)
+    return this.intersect(includeInactive)
+  }
+
+  // Intersections with the raycaster's ray, without geometry removed by section views
+  intersect(includeInactive) {
     return this.raycaster.intersectObjects(
       includeInactive ? this.scene.children : this.traceables.children,
       true,
-    )
+    ).filter(hit => !isClipped(hit))
+  }
+
+  // Distance along the raycaster's ray to the nearest section cap. A body
+  // whose first remaining surface is seen from inside was entered through a cap.
+  sectionCapDistance(hits) {
+    const ray = this.raycaster.ray
+    const seen = new Set()
+    let distance = Infinity
+    hits.forEach(hit => {
+      const planes = hit.object.material?.clippingPlanes
+      if(!planes?.length || !hit.face || seen.has(planes)) return
+      seen.add(planes)
+      const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+      if(normal.dot(ray.direction) <= 0) return
+      let entry = 0
+      planes.forEach(plane => {
+        const rate = plane.normal.dot(ray.direction)
+        if(rate > 0) entry = Math.max(entry, -plane.distanceToPoint(ray.origin) / rate)
+      })
+      distance = Math.min(distance, entry)
+    })
+    return distance
   }
 
   intersectScreenPlane(coords, plane) {
@@ -649,8 +680,9 @@ export default class Renderer {
       const point = hit.pointOnLine
       this.dualCamera.setRaycaster(this.raycaster, point.clone().project(this.activeCamera))
       const distance = this.raycaster.ray.origin.distanceTo(point) - Math.max(1, point.length()) * 1e-6
-      return !this.raycaster.intersectObjects(includeInactive ? this.scene.children : this.traceables.children, true)
-        .some(hit => hit.object.visible && hit.object.alcTypes?.includes('face') && hit.distance < distance)
+      const faceHits = this.intersect(includeInactive)
+        .filter(hit => hit.object.visible && hit.object.alcTypes?.includes('face'))
+      return !faceHits.some(hit => hit.distance < distance) && this.sectionCapDistance(faceHits) >= distance
     })
     const objects = Array.from(new Set(intersects.map(obj => obj.object )))
     return objects.filter(obj => !types || types.some(t =>

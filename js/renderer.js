@@ -14,6 +14,7 @@ import DualCamera from './three/dual-camera.js'
 import PathTracingViewport from './three/path-tracing-viewport.js'
 import HoverGlow from './three/hover-glow.js'
 import SketchPlane from './three/sketch-plane.js'
+import { PlaneHelperObject, AxisHelperObject } from './three/helper-objects.js'
 import DimensionControls from './three/dimension-controls.js'
 import GroundShadow from './three/ground-shadow.js'
 // import ArrowControls from './arrow-controls.js'
@@ -301,6 +302,11 @@ export default class Renderer {
     const fitPadding = 1.25
     objects ||= [this.world]
     const box = new THREE.Box3()
+    // Measure screen-sized helpers at a fixed nominal size, so the fit doesn't
+    // depend on the current zoom. The next render restores their scale.
+    objects.forEach(obj => obj.traverse(child => {
+      if(child instanceof PlaneHelperObject || child instanceof AxisHelperObject) child.scale.setScalar(child.constructor.NOMINAL_SIZE)
+    }))
     objects.forEach(obj => box.expandByObject(obj) )
     const target = box.getCenter(new THREE.Vector3())
     const size = box.getSize(new THREE.Vector3())
@@ -430,6 +436,7 @@ export default class Renderer {
     this.activeCamera.updateMatrixWorld()
     this.scene.traverse(object => {
       if(object instanceof DimensionControls) object.updateLayout()
+      else if(object instanceof PlaneHelperObject || object instanceof AxisHelperObject) object.updateScreenSize(this.activeCamera, this.renderer)
     })
     this.sketchPlane.update(this.activeCamera, this.viewControls.target)
     this.updateDashScale()

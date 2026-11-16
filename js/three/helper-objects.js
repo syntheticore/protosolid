@@ -7,10 +7,12 @@ const screenPosition = new THREE.Vector3()
 const screenQuaternion = new THREE.Quaternion()
 const parentQuaternion = new THREE.Quaternion()
 
-function setScreenDiameter(object, camera, renderer, pixelDiameter) {
-  const viewportHeight = renderer.domElement.clientHeight
-  if(!viewportHeight) return
+const PLANE_SIZE_PX = 80
+const AXIS_LENGTH_PX = 40
 
+// World length of one screen pixel at the object's position
+function unitsPerPixel(object, camera, renderer) {
+  const viewportHeight = renderer.domElement.clientHeight
   let visibleWorldHeight
   if(camera.isOrthographicCamera) {
     visibleWorldHeight = (camera.top - camera.bottom) / camera.zoom
@@ -20,8 +22,19 @@ function setScreenDiameter(object, camera, renderer, pixelDiameter) {
     const fov = THREE.MathUtils.degToRad(camera.getEffectiveFOV())
     visibleWorldHeight = 2.0 * depth * Math.tan(fov / 2.0)
   }
+  return visibleWorldHeight / viewportHeight
+}
 
-  const size = pixelDiameter * visibleWorldHeight / viewportHeight
+// Keep construction helpers at a constant on-screen size regardless of zoom
+function setScreenSize(object, camera, renderer, pixelSize) {
+  const size = pixelSize * unitsPerPixel(object, camera, renderer)
+  if(!Number.isFinite(size)) return
+  object.scale.setScalar(size)
+  object.updateMatrixWorld(true)
+}
+
+function setScreenDiameter(object, camera, renderer, pixelDiameter) {
+  const size = pixelDiameter * unitsPerPixel(object, camera, renderer)
   if(Number.isFinite(size)) {
     camera.getWorldQuaternion(screenQuaternion)
     if(object.parent) {
@@ -54,8 +67,10 @@ export class ScreenPointObject extends THREE.Mesh {
 
 
 export class PlaneHelperObject extends THREE.Mesh {
+  static NOMINAL_SIZE = 20
+
   constructor(alcObject) {
-    var geo = new THREE.PlaneGeometry(20, 20)
+    var geo = new THREE.PlaneGeometry(1, 1)
 
     super(geo, materials.plane)
 
@@ -69,15 +84,21 @@ export class PlaneHelperObject extends THREE.Mesh {
     this.applyMatrix4(alcObject.transform)
   }
 
+  updateScreenSize(camera, renderer) {
+    setScreenSize(this, camera, renderer, PLANE_SIZE_PX)
+  }
+
   setMaterial(highlighted, selected) {
     this.material = (highlighted || selected) ? materials.highlightPlane : materials.plane
   }
 }
 
 export class AxisHelperObject extends Line2 {
+  static NOMINAL_SIZE = 10
+
   constructor(alcObject) {
     const geometry = new LineGeometry()
-    const positions = [[0, 0, 0], [0, 0, 10]].flat()
+    const positions = [[0, 0, 0], [0, 0, 1]].flat()
     geometry.setPositions(positions)
     geometry.setColors(Array(positions.length).fill(1))
     super(geometry, materials.uiWire)
@@ -87,6 +108,10 @@ export class AxisHelperObject extends Line2 {
     this.alcObject = alcObject
 
     this.applyMatrix4(alcObject.transform)
+  }
+
+  updateScreenSize(camera, renderer) {
+    setScreenSize(this, camera, renderer, AXIS_LENGTH_PX)
   }
 
   setMaterial(highlighted, selected) {

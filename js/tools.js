@@ -735,6 +735,7 @@ export class ManipulationTool extends HighlightTool {
       const cameraDirection = this.viewport.renderer.activeCamera.getWorldDirection(new THREE.Vector3())
       this.dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(cameraDirection, dragOrigin)
       this.dragStart = this.viewport.renderer.intersectScreenPlane(coords, this.dragPlane)
+      this.previousDragEnd = this.dragStart
       this.dragPoint = hit
         ? hit.point.clone().applyMatrix4(this.startWorld.clone().invert())
         : new THREE.Vector3()
@@ -802,6 +803,7 @@ export class ManipulationTool extends HighlightTool {
     delete this.dragPoint
     delete this.dragPlane
     delete this.dragStart
+    delete this.previousDragEnd
     const sketch = this.viewport.document.activeSketch
     const handle = this.viewport.activeHandle
     if(sketch && handle && !handle.curveDrag) {
@@ -839,6 +841,7 @@ export class ManipulationTool extends HighlightTool {
     delete this.dragPoint
     delete this.dragPlane
     delete this.dragStart
+    delete this.previousDragEnd
     delete this.curveDrag
     delete this.boxDrag
     this.viewport.selectionBox = null
@@ -893,7 +896,9 @@ export class ManipulationTool extends HighlightTool {
       if(coords.distanceTo(this.startCoords) <= dragThreshold) return
       const dragEnd = this.viewport.renderer.intersectScreenPlane(coords, this.dragPlane)
       if(!dragEnd || !this.dragStart) return
-      const translation = dragEnd.sub(this.dragStart)
+      const pointerTravel = dragEnd.distanceTo(this.previousDragEnd)
+      this.previousDragEnd = dragEnd
+      const translation = dragEnd.clone().sub(this.dragStart)
       const desiredWorld = new THREE.Matrix4().makeTranslation(translation).multiply(this.startWorld)
 
       const comp = this.object.component
@@ -901,7 +906,7 @@ export class ManipulationTool extends HighlightTool {
       // The target is absolute relative to mouse-down, but the solve should be
       // continuous. Keeping the previous solution as the next initial pose
       // prevents multi-joint chains from jumping to another valid branch.
-      solveAssembly(tree, comp, desiredWorld, 64, this.dragPoint)
+      solveAssembly(tree, comp, desiredWorld, 64, this.dragPoint, pointerTravel)
 
     // Drag Empty Sketch Area
     } else if(this.boxDrag) {

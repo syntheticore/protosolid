@@ -159,6 +159,82 @@ test('fixed joints reject manipulation', () => {
   assert.ok(point(fixed).length() < 1e-8)
 })
 
+test('a closed four-bar tracks its coupler and keeps both ground pivots fixed', () => {
+  const root = new TestComponent('root')
+  const base = new TestComponent('base', root)
+  const crank = new TestComponent('crank', root)
+  const coupler = new TestComponent('coupler', root, new THREE.Vector3(2, 0, 0))
+  const rocker = new TestComponent('rocker', root, new THREE.Vector3(0, 3, 0))
+  const hinge = (a, b, frameA, frameB) => ({
+    componentA: a.id, componentB: b.id, frameA, frameB, type: 'axis', lockSlide: true,
+  })
+  root.assemblyJoints = [
+    { type: 'fix', componentA: base.id, fixedWorld: at(0) },
+    hinge(base, crank, at(0), at(0)),
+    hinge(crank, coupler, at(2), at(0)),
+    hinge(rocker, coupler, at(2), at(0, 3)),
+    hinge(rocker, base, at(0), at(0, 3)),
+  ]
+  const grip = new THREE.Vector3(0, 1.5, 0)
+  for(const angle of [0.2, 0.45, 0.8, 0.4, -0.1]) {
+    const target = at(2 * Math.cos(angle), 2 * Math.sin(angle))
+    solveAssembly(root, coupler, target, 64, grip)
+    assert.ok(point(coupler).distanceTo(new THREE.Vector3().setFromMatrixPosition(target)) < 1e-5)
+    for(const j of root.assemblyJoints.slice(1)) {
+      assert.ok(point(root.findChild(j.componentA), j.frameA).distanceTo(point(root.findChild(j.componentB), j.frameB)) < 1e-7)
+    }
+  }
+  solveAssembly(root, rocker, at(40, 60, 15), 64, new THREE.Vector3(2, 0, 0))
+  assert.ok(point(rocker).distanceTo(new THREE.Vector3(0, 3, 0)) < 1e-7)
+  assert.ok(point(coupler, at(0, 3)).distanceTo(point(rocker, at(2))) < 1e-7)
+})
+
+test('linked rotation and slides share a travel stop across grounded branches', () => {
+  const root = new TestComponent('root')
+  const [base, shaft, sleeve, rail, carriage] = ['base', 'shaft', 'sleeve', 'rail', 'carriage'].map(id => new TestComponent(id, root))
+  const joint = (id, type, a, b, settings) => ({
+    id, type, componentA: a.id, componentB: b.id, frameA: at(0), frameB: at(0), zero: at(0), ...settings,
+  })
+  const rotation = joint('bearing', 'axis', base, shaft, { lockSlide: true })
+  const slide = joint('sleeve', 'axis', shaft, sleeve, { limits: { slideZ: [-0.6, 1.2] } })
+  const plane = joint('rail', 'coplanar', rail, carriage)
+  root.assemblyJoints = [
+    { type: 'fix', componentA: base.id, fixedWorld: at(0) },
+    { type: 'fix', componentA: rail.id, fixedWorld: at(0) },
+    rotation, slide, plane,
+  ]
+  root.motionLinks = [
+    { jointA: rotation.id, motionA: 'rotateZ', travelA: 1, jointB: slide.id, motionB: 'slideZ', travelB: 3 },
+    { jointA: slide.id, motionA: 'slideZ', travelA: 1, jointB: plane.id, motionB: 'slideX', travelB: 2, reverse: true },
+  ]
+  for(const [component, desired, angle] of [
+    [shaft, new THREE.Matrix4().makeRotationZ(0.7), 0.4],
+    [carriage, at(0.9), -0.15],
+    [carriage, at(2), -0.2],
+  ]) {
+    solveAssembly(root, component, desired)
+    assert.ok(Math.abs(jointMotionValue(root, rotation, 'rotateZ') - angle) < 1e-6)
+    assert.ok(Math.abs(jointMotionValue(root, slide, 'slideZ') - 3 * angle) < 1e-6)
+    assert.ok(Math.abs(jointMotionValue(root, plane, 'slideX') + 6 * angle) < 1e-6)
+  }
+})
+
+test('a ball joint slides along its tilt stop and can return inside it', () => {
+  const root = new TestComponent('root')
+  const base = new TestComponent('base', root), ball = new TestComponent('ball', root)
+  root.assemblyJoints = [
+    { type: 'fix', componentA: base.id, fixedWorld: at(0) },
+    { type: 'ball', componentA: base.id, componentB: ball.id, frameA: at(0), frameB: at(0),
+      zero: at(0), limits: { tilt: [0, 0.4] } },
+  ]
+  const grip = new THREE.Vector3(0, 0, 2)
+  for(const theta of [0.8, -0.7, 0.15]) {
+    solveAssembly(root, ball, new THREE.Matrix4().makeRotationX(theta), 64, grip)
+    const expected = grip.clone().applyAxisAngle(new THREE.Vector3(1, 0, 0), THREE.MathUtils.clamp(theta, -0.4, 0.4))
+    assert.ok(grip.clone().applyMatrix4(worldTransform(ball)).distanceTo(expected) < 1e-6)
+  }
+})
+
 test('motion links map reversed rotational travel in either joint coordinate', () => {
   const { root, movingA } = linkedAxes()
   solveAssembly(root, movingA, new THREE.Matrix4().makeRotationZ(Math.PI / 2))
@@ -176,6 +252,81 @@ test('motion links map rotational travel onto linear travel', () => {
   solveAssembly(root, movingA, new THREE.Matrix4().makeRotationZ(Math.PI / 2))
 
   assert.ok(Math.abs(jointMotionValue(root, root.assemblyJoints[1], 'slideZ') - 2.5) < 1e-8)
+})
+
+test('a linked ball rotation remains continuous through both Euler poles', () => {
+  const { root, movingA, movingB } = linkedAxes('rotateY', 2 * Math.PI, false)
+  const follower = root.assemblyJoints[1]
+  follower.type = 'ball'
+  root.assemblyJoints.push(...root.assemblyJoints.map(j => ({
+    type: 'fix', componentA: j.componentA, fixedWorld: at(0),
+  })))
+  for(let i = 1; i <= 140; i++) {
+    const angle = 0.04 * i
+    solveAssembly(root, movingA, new THREE.Matrix4().makeRotationZ(angle))
+    const expected = new THREE.Matrix4().makeRotationY(angle)
+    assert.ok(worldTransform(movingB).elements.every((v, k) => Math.abs(v - expected.elements[k]) < 1e-6))
+    assert.ok(Math.abs(root.motionLinks[0].state[1].accumulated - angle) < 1e-6)
+  }
+})
+
+test('dragging a linked eccentric shaft, rotor or rigid follower stays on the same orbit', () => {
+  for(const picked of ['rotor', 'gear', 'seal', 'shaft']) {
+    const root = new TestComponent('root')
+    const parts = Object.fromEntries(['base', 'shaft', 'rotor', 'gear', 'seal'].map(id =>
+      [id, new TestComponent(id, root)]
+    ))
+    const axis = (id, componentA, componentB, frame) => ({
+      id, componentA, componentB, frameA: frame, frameB: frame, type: 'axis', lockSlide: true,
+    })
+    const eccentric = new THREE.Vector3(4.9018, 7.548, 0)
+    const bearing = axis('main', 'base', 'shaft', at(0, 0, -19))
+    const journal = axis('eccentric', 'shaft', 'rotor', at(eccentric.x, eccentric.y, 0.3))
+    root.assemblyJoints = [
+      { type: 'fix', componentA: 'base', fixedWorld: at(0) }, bearing, journal,
+      ...['gear', 'seal'].map(id => ({
+        type: 'group', componentA: 'rotor', componentB: id, frameA: at(0), frameB: at(0),
+      })),
+    ]
+    root.motionLinks = [{
+      id: 'timing', jointA: 'main', jointB: 'eccentric', motionA: 'rotateZ', motionB: 'rotateZ',
+      travelA: 2 * Math.PI, travelB: 4 * Math.PI / 3, reverse: true,
+    }]
+    const grip = new THREE.Vector3({ rotor: 46, gear: 24, seal: 62, shaft: 8 }[picked], 3, 27)
+    const z = new THREE.Vector3(0, 0, 1)
+    const previousTarget = grip.clone()
+    const identity = new THREE.Matrix4()
+    for(let step = 1; step <= 150; step++) {
+      const angle = (step <= 125 ? step : 250 - step) * 0.08
+      const target = picked == 'shaft' ? grip.clone().applyAxisAngle(z, angle) :
+        grip.clone().sub(eccentric).applyAxisAngle(z, angle / 3).add(eccentric.clone().applyAxisAngle(z, angle))
+      const desired = at(...target.clone().sub(grip).toArray())
+      solveAssembly(root, parts[picked], desired, 64, grip, target.distanceTo(previousTarget))
+      previousTarget.copy(target)
+      const label = picked + ' at sample ' + step
+      assert.ok(grip.clone().applyMatrix4(worldTransform(parts[picked])).distanceTo(target) < 0.002, label + ' grip')
+      assert.ok(point(parts.shaft, journal.frameA).distanceTo(point(parts.rotor, journal.frameB)) < 1e-5, label + ' journal')
+      for(const follower of [parts.gear, parts.seal]) {
+        const relative = worldTransform(parts.rotor).invert().multiply(worldTransform(follower))
+        assert.ok(relative.elements.every((v, i) => Math.abs(v - identity.elements[i]) < 1e-6), label + ' rigid group')
+      }
+      const [main, rotor] = root.motionLinks[0].state
+      assert.ok(Math.abs(main.accumulated - angle) < 0.002, label + ' branch')
+      assert.ok(Math.abs(rotor.accumulated + main.accumulated * 2 / 3) < 1e-5, label + ' timing')
+    }
+    if(picked == 'shaft') continue
+    // Trace an unreachable cursor path and then stop sending displacement.
+    const start = previousTarget.clone()
+    for(let i = 0; i <= 150; i++) {
+      const a = Math.min(i, 140) * 0.05
+      const target = start.clone().add(new THREE.Vector3(45 * (Math.cos(a) - 1), 35 * Math.sin(a), 8 * Math.sin(a)))
+      const travel = target.distanceTo(previousTarget)
+      const before = grip.clone().applyMatrix4(worldTransform(parts[picked]))
+      solveAssembly(root, parts[picked], at(...target.clone().sub(grip).toArray()), 64, grip, travel)
+      assert.ok(before.distanceTo(grip.clone().applyMatrix4(worldTransform(parts[picked]))) <= travel + 1e-6)
+      previousTarget.copy(target)
+    }
+  }
 })
 
 test('restored motion-link state makes repeated drag updates absolute', () => {
@@ -336,6 +487,17 @@ test('dragging away from a joint rotates a link whose origin is on the joint', (
 
   assert.ok(dragPoint.clone().applyMatrix4(worldTransform(link)).distanceTo(new THREE.Vector3(0, 1, 0)) < 1e-6)
   assert.ok(point(link).length() < 1e-8)
+})
+
+test('a straight arm bends when the pointer moves directly toward its shoulder', () => {
+  const { root, links } = axialChain(4, true)
+  const end = links.at(-1), grip = new THREE.Vector3(0.5, 0, 0)
+  solveAssembly(root, end, at(2.8), 64, grip)
+  assert.ok(grip.clone().applyMatrix4(worldTransform(end)).distanceTo(new THREE.Vector3(3.3, 0, 0)) < 1e-5)
+  for(const joint of root.assemblyJoints.slice(1)) {
+    assert.ok(point(root.findChild(joint.componentA), joint.frameA).distanceTo(
+      point(root.findChild(joint.componentB), joint.frameB)) < 1e-8)
+  }
 })
 
 test('axial chain joints remain coincident when the drag target is unreachable', () => {

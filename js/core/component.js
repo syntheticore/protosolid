@@ -322,6 +322,7 @@ export class Component {
 
   resetPose() {
     this.transform = null
+    for(const link of this.motionLinks) link.state = undefined
     this.children.forEach(child => child.resetPose() )
   }
 

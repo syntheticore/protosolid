@@ -1,10 +1,9 @@
 import * as THREE from 'three'
+import { solveLinear } from './linear-system.js'
 
 
 const IDENTITY = () => new THREE.Matrix4()
 const EPSILON = 1e-8
-const SOLVER_TOLERANCE = 1e-4
-const RELAXATION = 0.55
 
 export function localTransform(component) {
   return (component.designTransform || IDENTITY()).clone()
@@ -71,7 +70,7 @@ export function alignJointWorld(type, worldA, frameA, worldB, frameB, lockSlide 
   if(type == 'axis' || type == 'coplanar') {
     const directionA = frameDirection(attachmentA)
     const directionB = frameDirection(attachmentB)
-    result = rotateWorldAbout(result, framePosition(attachmentB), directionB, directionA, 1)
+    result = alignDirection(result, framePosition(attachmentB), directionB, directionA)
     attachmentB = result.clone().multiply(frameB)
   }
 
@@ -85,7 +84,7 @@ export function alignJointWorld(type, worldA, frameA, worldB, frameB, lockSlide 
     const normal = frameDirection(attachmentA)
     delta = normal.multiplyScalar(delta.dot(normal))
   }
-  return translateWorld(result, delta)
+  return result.premultiply(new THREE.Matrix4().makeTranslation(delta))
 }
 
 // Joint coordinates are measured from the joint's zero: the relative pose of
@@ -163,149 +162,71 @@ export function limitCorrections(joint, attachmentA, attachmentB) {
   return { corrections, error }
 }
 
-function applyCorrections(components, corrections, sign) {
-  corrections.forEach(correction => {
-    if(correction.translation) {
-      translateWorldGroup(components, correction.translation.clone().multiplyScalar(sign))
-    } else {
-      const rotation = new THREE.Quaternion().setFromAxisAngle(correction.axis, correction.angle * sign)
-      rotateWorldGroup(components, correction.pivot, rotation)
-    }
-  })
-}
-
-export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 64, targetLocal) {
-  const joints = tree.assemblyJoints || []
-  if(!movedComponent || !movedComponent.parent || !joints.length) {
-    if(movedComponent) setWorldTransform(movedComponent, desiredWorld)
+// Represent a drag by joint coordinates. Forward kinematics preserves the tree
+// joints exactly; the remaining edges constrain closed loops and extra anchors.
+export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 64, targetLocal, pointerTravel = Infinity) {
+  if(!movedComponent?.parent) return
+  const model = dragMechanism(tree, movedComponent)
+  if(!model.edges.length) {
+    setWorldTransform(movedComponent, model.fixed.get(movedComponent.id) || desiredWorld)
     return
   }
 
-  // Capture link coordinates before applying the requested drag. Angular
-  // coordinates are unwrapped from this state across successive pointer moves.
-  const motionLinks = tree.motionLinks || []
-  motionLinks.forEach(link => {
-    const linkedJoints = [link.jointA, link.jointB]
-      .map(id => joints.find(joint => joint.id == id))
-    if(linkedJoints.every(Boolean)) ensureMotionLinkState(tree, link, linkedJoints)
-  })
-
-  const fixed = new Set(
-    joints.filter(joint => joint.type == 'fix').map(joint => joint.componentA)
-  )
-
-  const rigidGroup = connectedRigidGroup(tree, movedComponent, joints)
-  const fixedGroupComponent = rigidGroup.find(component => fixed.has(component.id))
-  if(fixedGroupComponent) {
-    const fixedJoint = joints.find(joint =>
-      joint.type == 'fix' && joint.componentA == fixedGroupComponent.id
-    )
-    if(fixedJoint) setWorldTransform(fixedGroupComponent, fixedJoint.fixedWorld)
-    projectRigidGroup(tree, fixedGroupComponent, joints)
-    return
+  const variables = independentCoordinates(model)
+  const origin = targetLocal || new THREE.Vector3()
+  const goal = origin.clone().applyMatrix4(desiredWorld)
+  const start = worldTransform(movedComponent)
+  const grip = origin.clone().applyMatrix4(start)
+  // Pointer drags specify one point. A programmatic rotation also specifies
+  // orientation, including when the component origin lies on the bearing.
+  const turn = !targetLocal && rotationError(start, desiredWorld).lengthSq() > EPSILON ** 2
+  const orientationScale = Math.max(1, ...model.edges.map(e => e.arm))
+  const evaluate = (values, previous) => {
+    const worlds = model.place(values, model.targetOrder)
+    const moved = worlds.get(movedComponent.id)
+    const picked = origin.clone().applyMatrix4(moved)
+    const target = picked.clone().sub(goal).toArray()
+    const orientation = targetLocal ? null : rotationError(desiredWorld, moved, previous?.orientation)
+    const attitude = orientation ? orientation.toArray().map(value => value * orientationScale) : []
+    if(turn) target.push(...attitude)
+    const closure = []
+    for(const edge of model.closures) {
+      const expected = worlds.get(edge.a).clone().multiply(edge.transform(values))
+      const actual = worlds.get(edge.b)
+      closure.push(...framePosition(expected).sub(framePosition(actual)).toArray(),
+        ...rotationError(expected, actual).multiplyScalar(orientationScale).toArray())
+    }
+    const inequalities = []
+    for(const edge of model.tiltLimits) {
+      const tilt = frameDirection(edge.relative(values)).angleTo(edge.zeroDirection)
+      const [min, max] = edge.joint.limits.tilt
+      if(min > 0) inequalities.push((min - tilt) * orientationScale)
+      if(max < Math.PI) inequalities.push((tilt - max) * orientationScale)
+    }
+    return { target, closure, inequalities, picked, orientation, preference: turn ? [] : attitude }
   }
-  if(rigidGroup.length > 1) {
-    const transform = desiredWorld.clone().multiply(worldTransform(movedComponent).invert())
-    transformWorldGroup(rigidGroup, transform)
+  const values = fitDrag(variables, evaluate, grip, pointerTravel, iterations)
+  if(!values) return
+  const worlds = model.place(values)
+  // A floating mechanism can use its remaining rigid-body freedom to follow
+  // the grab. Physically separate followers of a motion link keep their bases.
+  if(model.floating.has(movedComponent.id)) {
+    const moved = worlds.get(movedComponent.id)
+    const carry = turn ? desiredWorld.clone().multiply(moved.clone().invert()) :
+      new THREE.Matrix4().makeTranslation(goal.clone().sub(origin.clone().applyMatrix4(moved)))
+    for(const id of model.floating) worlds.get(id).premultiply(carry)
   }
-
-  if(fixed.has(movedComponent.id)) {
-    const anchor = joints.find(joint => joint.type == 'fix' && joint.componentA == movedComponent.id)
-    if(anchor) setWorldTransform(movedComponent, anchor.fixedWorld)
-    return
-  }
-  let pinned = true
-  const mobility = component => {
-    if(!component || !component.parent || fixed.has(component.id)) return 0
-    return pinned && component.id == movedComponent.id ? 0 : 1
-  }
-
-  const effector = targetLocal || new THREE.Vector3()
-  const pathSolved = solveKinematicPath(
-    tree,
-    movedComponent,
-    effector.clone().applyMatrix4(desiredWorld),
-    effector,
-    joints,
-    fixed,
-    iterations,
-  )
-  if(pathSolved) pinned = false
-  else setWorldTransform(movedComponent, desiredWorld)
-
-  const projectJoints = () => {
-    for(const joint of joints) {
-      if(joint.type == 'fix') {
-        const component = tree.findChild(joint.componentA)
-        if(component) setWorldTransform(component, joint.fixedWorld)
-        continue
-      }
-
-      const a = tree.findChild(joint.componentA)
-      const b = tree.findChild(joint.componentB)
-      if(!a || !b) continue
-      solvePair(joint, a, b, mobility(a), mobility(b))
+  const components = [...worlds.keys()].map(id => tree.findChild(id))
+  components.sort((a, b) => componentDepth(a) - componentDepth(b))
+    .forEach(c => setWorldTransform(c, worlds.get(c.id)))
+  for(const { link, a, b, pair } of model.links) {
+    for(const [i, coord] of [a, b].entries()) {
+      const state = link.state[i]
+      state.accumulated += coord.rate * values[coord.index]
+      state.raw = jointMotionValue(tree, pair[i].joint, coord.motion)
+      if(pair[i].joint.type == 'ball') state.angles = pair[i].angles(values).toArray().slice(0, 3)
     }
   }
-
-  const activeLinks = motionLinks.map(link => {
-    const jointA = joints.find(joint => joint.id == link.jointA)
-    const jointB = joints.find(joint => joint.id == link.jointB)
-    if(!jointA || !jointB) return
-    return {
-      link,
-      joints: [jointA, jointB],
-      // The unconstrained kinematic pass above reveals which linked degree of
-      // freedom the drag actually drove. Lock that choice on first movement.
-      driver: null,
-    }
-  }).filter(Boolean)
-
-  // A joint at its stop pushes whichever side is free to move, so dragging
-  // past a limit carries the other component along.
-  const projectLimits = () => joints.reduce((largest, joint) => {
-    if(!joint.limits) return largest
-    const a = tree.findChild(joint.componentA)
-    const b = tree.findChild(joint.componentB)
-    if(!a || !b) return largest
-    const { corrections, error } = limitCorrections(
-      joint,
-      worldTransform(a).multiply(joint.frameA),
-      worldTransform(b).multiply(joint.frameB),
-    )
-    if(!corrections.length) return largest
-    const movable = component => mobility(component) &&
-      !connectedRigidGroup(tree, component, joints).some(member => fixed.has(member.id))
-    if(movable(b)) applyCorrections(connectedRigidGroup(tree, b, joints), corrections, 1)
-    else if(movable(a)) applyCorrections(connectedRigidGroup(tree, a, joints), corrections, -1)
-    return Math.max(largest, error)
-  }, 0)
-
-  const relax = () => {
-    for(let i = 0; i < iterations; i++) {
-      projectJoints()
-      if(pinned) setWorldTransform(movedComponent, desiredWorld)
-      const limitError = projectLimits()
-      const linkError = activeLinks.reduce((largest, active) =>
-        Math.max(largest, projectMotionLink(tree, active, fixed)), 0
-      )
-      if(
-        assemblyError(tree, joints) < SOLVER_TOLERANCE &&
-        linkError < SOLVER_TOLERANCE &&
-        limitError < SOLVER_TOLERANCE
-      ) return true
-    }
-  }
-  // Without a kinematic path the dragged component follows the pointer
-  // exactly while the rest of the assembly adapts. Where that pose violates
-  // a joint or limit the pointer cannot be followed, so release it and let the
-  // constraints pull it back.
-  if(!relax() && pinned) {
-    pinned = false
-    relax()
-  }
-
-  activeLinks.forEach(active => updateMotionLinkState(tree, active.link, active.joints))
 }
 
 export function jointMotionOptions(joint) {
@@ -365,12 +286,6 @@ function motionAxis(motion) {
   return { X: 0, Y: 1, Z: 2 }[motion.at(-1)]
 }
 
-function motionDelta(current, previous, rotational) {
-  let delta = current - previous
-  if(rotational) delta = THREE.MathUtils.euclideanModulo(delta + Math.PI, Math.PI * 2) - Math.PI
-  return delta
-}
-
 function ensureMotionLinkState(tree, link, joints) {
   if(link.state?.length == 2) return link.state
   link.state = joints.map((joint, index) => {
@@ -380,238 +295,394 @@ function ensureMotionLinkState(tree, link, joints) {
   return link.state
 }
 
-function projectMotionLink(tree, active, fixed) {
-  const { link, joints } = active
-  let { driver } = active
-  const motions = [link.motionA, link.motionB]
-  const state = ensureMotionLinkState(tree, link, joints)
-  if(driver === null) {
-    const fractions = joints.map((joint, index) => {
-      const raw = jointMotionValue(tree, joint, motions[index])
-      const delta = motionDelta(raw, state[index].raw, isRotationalMotion(motions[index]))
-      const travel = index ? link.travelB : link.travelA
-      return Math.abs(delta / travel)
-    })
-    driver = fractions[1] > fractions[0] ? 1 : 0
-    if(Math.max(...fractions) > EPSILON) active.driver = driver
-  }
-  const driven = 1 - driver
-  const driverRaw = jointMotionValue(tree, joints[driver], motions[driver])
-  const driverAccumulated = state[driver].accumulated + motionDelta(
-    driverRaw,
-    state[driver].raw,
-    isRotationalMotion(motions[driver]),
-  )
-  const forwardRatio = link.travelB / link.travelA * (link.reverse ? -1 : 1)
-  const ratio = driver == 0 ? forwardRatio : 1 / forwardRatio
-  if(!Number.isFinite(ratio)) return 0
-  const targetAccumulated = driverAccumulated * ratio
-  const drivenRaw = jointMotionValue(tree, joints[driven], motions[driven])
-  const drivenAccumulated = state[driven].accumulated + motionDelta(
-    drivenRaw,
-    state[driven].raw,
-    isRotationalMotion(motions[driven]),
-  )
-  const error = targetAccumulated - drivenAccumulated
-  applyJointMotionDelta(tree, joints[driven], motions[driven], error, fixed)
-  return Math.abs(error)
+function rotationError(from, to, previous) {
+  const q = new THREE.Quaternion().setFromRotationMatrix(from).invert()
+    .multiply(new THREE.Quaternion().setFromRotationMatrix(to))
+  const v = new THREE.Vector3(q.x, q.y, q.z)
+  const length = v.length()
+  if(length < EPSILON) return v.multiplyScalar(q.w < 0 ? -2 : 2)
+  // Both quaternion signs describe the same half turn. Differentiate on the
+  // same side of that cut for the two nearby samples of the Jacobian.
+  const sign = previous && Math.abs(q.w) < 1e-3 ? Math.sign(v.dot(previous)) || 1 : Math.sign(q.w) || 1
+  return v.multiplyScalar(sign * 2 * Math.atan2(length, sign * q.w) / length)
 }
 
-function updateMotionLinkState(tree, link, joints) {
-  const motions = [link.motionA, link.motionB]
-  const state = ensureMotionLinkState(tree, link, joints)
-  state.forEach((entry, index) => {
-    const raw = jointMotionValue(tree, joints[index], motions[index])
-    entry.accumulated += motionDelta(raw, entry.raw, isRotationalMotion(motions[index]))
-    entry.raw = raw
+function connect(graph, a, b) {
+  if(!graph.has(a)) graph.set(a, [])
+  if(!graph.has(b)) graph.set(b, [])
+  graph.get(a).push(b)
+  graph.get(b).push(a)
+}
+
+function reachable(graph, start) {
+  const seen = new Set([start])
+  for(const id of seen) {
+    for(const neighbor of graph.get(id) || []) seen.add(neighbor)
+  }
+  return seen
+}
+
+// Each edge describes B in A's attachment frame, even if the spanning tree
+// later traverses it backwards. Linked travel and limits use that convention.
+function kinematicEdge(joint, tree, previousAngles) {
+  const { componentA: a, componentB: b, frameA, frameB } = joint
+  const inverseB = frameB.clone().invert()
+  const start = joint.type == 'group' ? IDENTITY() :
+    worldTransform(tree.findChild(a)).multiply(frameA).invert()
+      .multiply(worldTransform(tree.findChild(b))).multiply(frameB)
+  const position = framePosition(start)
+  const rotation = new THREE.Euler().setFromRotationMatrix(start)
+  if(previousAngles) {
+    // At an Euler pole the matrix alone cannot recover the linked X and Z
+    // coordinates. Retain the solved chart while the attachment is still there.
+    const previous = new THREE.Euler(...previousAngles)
+    if(rotationError(new THREE.Matrix4().makeRotationFromEuler(previous), start).lengthSq() < 1e-16) {
+      rotation.copy(previous)
+    }
+  }
+  const coords = new Map()
+  for(const motion of Object.keys(jointMotionOptions(joint))) {
+    coords.set(motion, { motion, neighbors: [], low: -Infinity, high: Infinity })
+  }
+  const arm = Math.max(framePosition(frameA).length(), framePosition(frameB).length())
+  // Components saved after an older drag can carry residual bearing error.
+  // Keep only the position and rotation coordinates this joint allows.
+  for(const [index, name] of ['slideX', 'slideY', 'slideZ'].entries()) {
+    if(!coords.has(name)) position.setComponent(index, 0)
+  }
+  if(joint.type == 'axis' || joint.type == 'coplanar') {
+    rotation.x = frameDirection(joint.zero || start).z < 0 ? Math.PI : 0
+    rotation.y = 0
+  }
+  const aligned = new THREE.Matrix4().makeRotationFromEuler(rotation).setPosition(position)
+  const zero = joint.zero || aligned
+  for(const [motion, coord] of coords) {
+    const limits = joint.limits?.[motion]
+    if(!limits) continue
+    const angle = isRotationalMotion(motion)
+    if(angle && limits[1] - limits[0] >= 2 * Math.PI) continue
+    const sign = angle ? Math.sign(frameDirection(aligned).z) : 1
+    const offset = jointOffset({ zero }, IDENTITY(), aligned)
+    const current = angle ? wrapAngle(twistAngle(offset.rotation), (limits[0] + limits[1]) / 2) :
+      offset.translation.getComponent(motionAxis(motion))
+    const bounds = limits.map(value => (value - current) * sign)
+    coord.low = Math.min(...bounds)
+    coord.high = Math.max(...bounds)
+  }
+  const angles = values => {
+    const r = rotation.clone()
+    for(const [motion, c] of coords) {
+      if(isRotationalMotion(motion)) r[motion.at(-1).toLowerCase()] += values[c.index] * c.rate
+    }
+    return r
+  }
+  const relative = values => {
+    const p = position.clone()
+    for(const [motion, c] of coords) {
+      if(!isRotationalMotion(motion)) p[motion.at(-1).toLowerCase()] += values[c.index] * c.rate
+    }
+    if(joint.type == 'ball' && ![...coords.values()].some(c => c.neighbors.length)) {
+      // Local incremental rotations have three independent axes even when
+      // the absolute XYZ Euler representation is at a pole.
+      const delta = [...coords.values()].map(c => values[c.index] * c.rate)
+      return aligned.clone().multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...delta)))
+    }
+    return new THREE.Matrix4().makeRotationFromEuler(angles(values)).setPosition(p)
+  }
+  const rigid = frameA.clone().multiply(inverseB)
+  const transform = coords.size ? values => frameA.clone().multiply(relative(values)).multiply(inverseB) : () => rigid
+  return { joint, a, b, coords, relative, transform, arm, angles, zeroDirection: frameDirection(zero) }
+}
+
+function dragMechanism(tree, moved) {
+  const joints = tree.assemblyJoints || []
+  const physical = new Map(), connected = new Map()
+  const byId = new Map(joints.map(j => [j.id, j]))
+  for(const j of joints.filter(j => j.type != 'fix')) {
+    connect(physical, j.componentA, j.componentB)
+    connect(connected, j.componentA, j.componentB)
+  }
+  const previousAngles = new Map()
+  for(const link of tree.motionLinks || []) {
+    connect(connected, byId.get(link.jointA).componentA, byId.get(link.jointB).componentA)
+    if(link.state?.[0].angles) previousAngles.set(link.jointA, link.state[0].angles)
+    if(link.state?.[1].angles) previousAngles.set(link.jointB, link.state[1].angles)
+  }
+  const active = reachable(connected, moved.id)
+  const fixed = new Map(joints.filter(j => j.type == 'fix' && active.has(j.componentA))
+    .map(j => [j.componentA, j.fixedWorld]))
+  const edges = joints.filter(j => j.type != 'fix' && active.has(j.componentA))
+    .map(j => kinematicEdge(j, tree, previousAngles.get(j.id)))
+  const byJoint = new Map(edges.map(e => [e.joint.id, e]))
+  const links = (tree.motionLinks || []).filter(link => byJoint.has(link.jointA)).map(link => {
+    const pair = [byJoint.get(link.jointA), byJoint.get(link.jointB)]
+    const joints = pair.map(e => e.joint)
+    ensureMotionLinkState(tree, link, joints)
+    return { link, pair, a: pair[0].coords.get(link.motionA), b: pair[1].coords.get(link.motionB) }
   })
-}
 
-function applyJointMotionDelta(tree, joint, motion, delta, fixed) {
-  if(Math.abs(delta) < EPSILON) return
-  const componentA = tree.findChild(joint.componentA)
-  const componentB = tree.findChild(joint.componentB)
-  if(!componentA || !componentB) return
-  const groupA = connectedRigidGroup(tree, componentA, tree.assemblyJoints || [])
-  const groupB = connectedRigidGroup(tree, componentB, tree.assemblyJoints || [])
-  const moveB = !groupB.some(component => fixed.has(component.id))
-  const components = moveB ? groupB : groupA
-  if(components.some(component => fixed.has(component.id))) return
-  const attachmentA = worldTransform(componentA).multiply(joint.frameA)
-  const pivot = framePosition(attachmentA)
-  const axis = new THREE.Vector3().setFromMatrixColumn(attachmentA, motionAxis(motion)).normalize()
-  const signedDelta = moveB ? delta : -delta
-  if(isRotationalMotion(motion)) {
-    const rotation = new THREE.Quaternion().setFromAxisAngle(axis, signedDelta)
-    rotateWorldGroup(components, pivot, rotation)
-  } else {
-    translateWorldGroup(components, axis.multiplyScalar(signedDelta))
+  // Include rigid edges first so grouped parts share a transform even in a
+  // closed linkage. Multiple fixed parts act as roots of the same forest.
+  const parent = new Map()
+  const rootOf = id => {
+    while(parent.has(id)) id = parent.get(id)
+    return id
   }
-}
-
-function solveKinematicPath(tree, movedComponent, target, effector, joints, fixed, iterations) {
-  const adjacency = new Map()
-  joints.filter(joint => joint.type != 'fix').forEach(joint => {
-    const add = (from, to) => {
-      if(!adjacency.has(from)) adjacency.set(from, [])
-      adjacency.get(from).push({ joint, componentId: to })
-    }
-    add(joint.componentA, joint.componentB)
-    add(joint.componentB, joint.componentA)
-  })
-
-  const queue = [movedComponent.id]
-  const previous = new Map([[movedComponent.id, null]])
-  let anchorId
-  while(queue.length && !anchorId) {
-    const componentId = queue.shift()
-    if(fixed.has(componentId)) {
-      anchorId = componentId
-      break
-    }
-    for(const edge of adjacency.get(componentId) || []) {
-      if(previous.has(edge.componentId)) continue
-      previous.set(edge.componentId, { componentId, joint: edge.joint })
-      queue.push(edge.componentId)
+  const ground = Symbol('ground')
+  for(const id of fixed.keys()) parent.set(id, ground)
+  const branches = new Map([...active].map(id => [id, []]))
+  const closures = []
+  for(const e of [...edges].sort((a, b) => Number(b.joint.type == 'group') - Number(a.joint.type == 'group'))) {
+    const ra = rootOf(e.a), rb = rootOf(e.b)
+    if(ra == rb) closures.push(e)
+    else {
+      parent.set(ra, rb)
+      branches.get(e.a).push(e)
+      branches.get(e.b).push(e)
     }
   }
-  if(!anchorId) return false
-
-  const components = []
-  const pathJoints = []
-  let componentId = anchorId
-  while(componentId != movedComponent.id) {
-    const step = previous.get(componentId)
-    components.unshift(tree.findChild(step.componentId))
-    pathJoints.unshift(step.joint)
-    componentId = step.componentId
-  }
-  if(pathJoints.some(joint => joint.type != 'axis')) return false
-
-  // Rotate every component on the dragged side of each path joint. Limiting
-  // this to the path itself leaves branches and the free end of a chain behind,
-  // breaking their joints and making the later projection fight the IK result.
-  const movingGroups = pathJoints.map((pathJoint, index) => {
-    const ids = new Set([components[index].id])
-    const queue = [components[index].id]
-    while(queue.length) {
-      const id = queue.shift()
-      for(const edge of adjacency.get(id) || []) {
-        if(edge.joint == pathJoint || ids.has(edge.componentId)) continue
-        ids.add(edge.componentId)
-        queue.push(edge.componentId)
+  const roots = new Map(), order = [], seen = new Set()
+  for(const id of [...fixed.keys(), ...edges.map(e => e.a).filter(id => id != moved.id), ...active]) {
+    if(seen.has(id)) continue
+    roots.set(id, fixed.get(id) || worldTransform(tree.findChild(id)))
+    const queue = [id]
+    seen.add(id)
+    for(const from of queue) {
+      for(const edge of branches.get(from)) {
+        const reverse = from == edge.b
+        const to = reverse ? edge.a : edge.b
+        if(seen.has(to)) continue
+        seen.add(to)
+        queue.push(to)
+        order.push({ edge, from, to, reverse })
       }
     }
-    if([...ids].some(id => fixed.has(id))) return
-    return [...ids].map(id => tree.findChild(id)).filter(Boolean)
-  })
-  // A joint in a closed loop does not divide the assembly into a movable side.
-  // Leave those graphs to the general projection solver.
-  if(movingGroups.some(group => !group)) return false
+  }
+  // Only the ancestor paths of the grip and the loop closures affect the fit.
+  // Followers on other branches are placed once when committing the solution.
+  const needed = new Set([moved.id, ...closures.flatMap(e => [e.a, e.b])])
+  for(let i = order.length - 1; i >= 0; i--) {
+    if(needed.has(order[i].to)) needed.add(order[i].from)
+  }
+  const targetOrder = order.filter(step => needed.has(step.to))
+  const tiltLimits = edges.filter(e => e.joint.limits?.tilt)
+  for(const e of [...targetOrder.map(s => s.edge), ...closures, ...tiltLimits]) {
+    for(const coord of e.coords.values()) coord.affectsTarget = true
+  }
+  const place = (values, steps = order) => {
+    const worlds = new Map(roots)
+    for(const { edge, from, to, reverse } of steps) {
+      const relative = edge.transform(values)
+      worlds.set(to, worlds.get(from).clone().multiply(reverse ? relative.clone().invert() : relative))
+    }
+    return worlds
+  }
+  const floating = reachable(physical, moved.id)
+  if([...floating].some(id => fixed.has(id))) floating.clear()
+  return { fixed, floating, edges, links, closures, place, targetOrder, tiltLimits }
+}
 
-  for(let iteration = 0; iteration < iterations; iteration++) {
-    for(let index = 0; index < pathJoints.length; index++) {
-      const joint = pathJoints[index]
-      const moving = components[index]
-      const anchor = tree.findChild(
-        joint.componentA == moving.id ? joint.componentB : joint.componentA
-      )
-      const anchorFrame = joint.componentA == anchor.id ? joint.frameA : joint.frameB
-      const attachment = worldTransform(anchor).multiply(anchorFrame)
-      const pivot = framePosition(attachment)
-      const movingGroup = movingGroups[index]
-      let from = effector.clone().applyMatrix4(worldTransform(movedComponent)).sub(pivot)
-      const to = target.clone().sub(pivot)
-      const axis = frameDirection(attachment)
-
-      if(!joint.lockSlide) {
-        const distance = to.dot(axis) - from.dot(axis)
-        translateWorldGroup(movingGroup, axis.clone().multiplyScalar(distance))
-        from = effector.clone().applyMatrix4(worldTransform(movedComponent)).sub(pivot)
-      }
-
-      from.sub(axis.clone().multiplyScalar(from.dot(axis)))
-      to.sub(axis.clone().multiplyScalar(to.dot(axis)))
-      if(from.lengthSq() < EPSILON || to.lengthSq() < EPSILON) continue
-      from.normalize()
-      to.normalize()
-      const angle = Math.atan2(axis.dot(from.clone().cross(to)), from.dot(to))
-      const rotation = new THREE.Quaternion().setFromAxisAngle(axis, angle)
-
-      rotateWorldGroup(movingGroup, pivot, rotation)
-
-      if(joint.limits) {
-        const { corrections } = limitCorrections(
-          joint,
-          worldTransform(tree.findChild(joint.componentA)).multiply(joint.frameA),
-          worldTransform(tree.findChild(joint.componentB)).multiply(joint.frameB),
-        )
-        applyCorrections(movingGroup, corrections, joint.componentB == moving.id ? 1 : -1)
+// A connected set of scalar motion links contributes one independent
+// displacement. Intersect all of its members' travel ranges in that coordinate.
+function independentCoordinates({ edges, links }) {
+  for(const { link, a, b } of links) {
+    const ratio = link.travelB / link.travelA * (link.reverse ? -1 : 1)
+    a.neighbors.push([b, ratio])
+    b.neighbors.push([a, 1 / ratio])
+  }
+  const variables = []
+  for(const edge of edges) for(const first of edge.coords.values()) {
+    if(first.index !== undefined) continue
+    const index = variables.length
+    let low = -Infinity, high = Infinity, maxRotation = 0
+    const rates = new Map([[first, 1]])
+    for(const [coord, rate] of rates) {
+      coord.index = index
+      coord.rate = rate
+      if(isRotationalMotion(coord.motion)) maxRotation = Math.max(maxRotation, Math.abs(rate))
+      const lo = coord.low / rate, hi = coord.high / rate
+      low = Math.max(low, Math.min(lo, hi))
+      high = Math.min(high, Math.max(lo, hi))
+      for(const [other, ratio] of coord.neighbors) {
+        if(!rates.has(other)) rates.set(other, rate * ratio)
+        // An inconsistent ratio cycle permits only zero incremental travel.
+        else if(Math.abs(rates.get(other) / (rate * ratio) - 1) > EPSILON) low = high = 0
       }
     }
-    if(effector.clone().applyMatrix4(worldTransform(movedComponent)).distanceTo(target) < SOLVER_TOLERANCE) break
+    variables.push({ low, high, maxRotation, active: [...rates.keys()].some(c => c.affectsTarget) })
   }
-  return true
+  return variables
 }
 
-function rotateWorldGroup(components, pivot, rotation) {
-  const transform = new THREE.Matrix4().makeTranslation(pivot)
-    .multiply(new THREE.Matrix4().makeRotationFromQuaternion(rotation))
-    .multiply(new THREE.Matrix4().makeTranslation(pivot.clone().negate()))
-  transformWorldGroup(components, transform)
-}
+const dot = (a, b) => a.reduce((sum, value, i) => sum + value * b[i], 0)
+const normSq = a => dot(a, a)
 
-function transformWorldGroup(components, transform) {
-  const worlds = new Map(components.map(component => [
-    component,
-    transform.clone().multiply(worldTransform(component)),
-  ]))
-  components.slice().sort((a, b) => componentDepth(a) - componentDepth(b))
-    .forEach(component => setWorldTransform(component, worlds.get(component)))
-}
-
-function translateWorldGroup(components, translation) {
-  const transform = new THREE.Matrix4().makeTranslation(translation)
-  transformWorldGroup(components, transform)
-}
-
-function connectedRigidGroup(tree, component, joints) {
-  const groupJoints = joints.filter(joint => joint.type == 'group')
-  const ids = new Set([component.id])
-  const queue = [component.id]
-  while(queue.length) {
-    const id = queue.shift()
-    groupJoints.forEach(joint => {
-      const other = joint.componentA == id ? joint.componentB :
-        joint.componentB == id ? joint.componentA : null
-      if(!other || ids.has(other)) return
-      ids.add(other)
-      queue.push(other)
-    })
+function linearize(values, evaluate, state, variables, closureOnly) {
+  const row = () => Array(values.length).fill(0)
+  const hard = state.closure.map(row), inequalities = state.inequalities.map(row)
+  const soft = closureOnly ? [] : state.target.map(row)
+  const preference = closureOnly ? [] : state.preference.map(row)
+  for(let i = 0; i < values.length; i++) {
+    if(!variables[i].active || variables[i].low == variables[i].high) continue
+    const h = 1e-5
+    const sample = values.slice()
+    sample[i] += h
+    const plus = evaluate(sample, state)
+    sample[i] -= 2 * h
+    const minus = evaluate(sample, state)
+    hard.forEach((row, k) => { row[i] = (plus.closure[k] - minus.closure[k]) / (2 * h) })
+    inequalities.forEach((row, k) => { row[i] = (plus.inequalities[k] - minus.inequalities[k]) / (2 * h) })
+    soft.forEach((row, k) => { row[i] = (plus.target[k] - minus.target[k]) / (2 * h) })
+    preference.forEach((row, k) => { row[i] = (plus.preference[k] - minus.preference[k]) / (2 * h) })
   }
-  return [...ids].map(id => tree.findChild(id)).filter(Boolean)
+  return { hard, soft, preference, inequalities }
 }
 
-function projectRigidGroup(tree, anchor, joints) {
-  const groupJoints = joints.filter(joint => joint.type == 'group')
-  const worlds = new Map([[anchor, worldTransform(anchor)]])
-  const queue = [anchor]
-  while(queue.length) {
-    const component = queue.shift()
-    for(const joint of groupJoints) {
-      const isA = joint.componentA == component.id
-      const otherId = isA ? joint.componentB :
-        joint.componentB == component.id ? joint.componentA : null
-      const other = otherId && tree.findChild(otherId)
-      if(!other || worlds.has(other)) continue
-      const fromFrame = isA ? joint.frameA : joint.frameB
-      const toFrame = isA ? joint.frameB : joint.frameA
-      worlds.set(other, worlds.get(component).clone().multiply(fromFrame).multiply(toFrame.clone().invert()))
-      queue.push(other)
+// Satisfy the linearized closure constraints first, then fit the cursor in
+// their null space. Redundant constraints do not create additional DOFs.
+function constrainedStep({ hard, soft, preference, inequalities }, state, values, variables) {
+  const basis = []
+  const correction = values.map(() => 0)
+  const project = row => {
+    const out = row.slice()
+    for(const normal of basis) {
+      const amount = dot(normal, out)
+      for(let i = 0; i < out.length; i++) out[i] -= amount * normal[i]
+    }
+    return out
+  }
+  const constrain = (row, rhs) => {
+    const free = project(row)
+    const magnitude = Math.sqrt(normSq(free))
+    if(magnitude <= 1e-8 * Math.max(1, Math.sqrt(normSq(row)))) return
+    const normal = free.map(x => x / magnitude)
+    const distance = (rhs - dot(row, correction)) / magnitude
+    for(let i = 0; i < correction.length; i++) correction[i] += distance * normal[i]
+    basis.push(normal)
+  }
+  hard.forEach((row, i) => constrain(row, -state.closure[i]))
+  const fit = (rows, residual, start) => {
+    const free = rows.map(project)
+    // Damped least squares in task space: at most six rows for a pose.
+    const gram = free.map(a => free.map(b => dot(a, b)))
+    const damping = 1e-9 * Math.max(1, ...gram.map((row, i) => row[i]))
+    gram.forEach((row, i) => { row[i] += damping })
+    const weights = solveLinear(gram, rows.map((row, i) => -residual[i] - dot(row, start)))
+    return start.map((x, k) => x + free.reduce((sum, row, i) => sum + row[k] * weights[i], 0))
+  }
+  const stops = new Set()
+  const activeInequalities = new Set()
+  while(true) {
+    let step = fit(soft, state.target, correction)
+    if(preference.length) {
+      // When translating a pose, keep its attitude with any freedom left
+      // after fitting the position. This selects a continuous elbow branch.
+      const rank = basis.length
+      for(const row of soft) {
+        const free = project(row), length = Math.sqrt(normSq(free))
+        if(length > EPSILON) basis.push(free.map(x => x / length))
+      }
+      step = fit(preference, state.preference, step)
+      basis.length = rank
+    }
+    const stop = variables.findIndex(({ low, high }, i) => !stops.has(i) &&
+      Math.abs(limitExcess(values[i] + step[i], [low, high])) > EPSILON)
+    if(stop < 0) {
+      const k = inequalities.findIndex((row, i) => !activeInequalities.has(i) &&
+        state.inequalities[i] + dot(row, step) > 1e-10)
+      if(k < 0) return step
+      activeInequalities.add(k)
+      constrain(inequalities[k], -state.inequalities[k])
+      continue
+    }
+    stops.add(stop)
+    const { low, high } = variables[stop]
+    const bound = THREE.MathUtils.clamp(values[stop] + step[stop], low, high)
+    constrain(values.map((_, i) => Number(i == stop)), bound - values[stop])
+  }
+}
+
+function advance(values, delta, factor, variables) {
+  return values.map((x, i) => THREE.MathUtils.clamp(x + factor * delta[i], variables[i].low, variables[i].high))
+}
+
+// Retract trial steps onto closed loops (and ball-joint tilt stops) before
+// publishing a pose. An unreachable target must never pull a linkage apart.
+function closeLoops(values, state, evaluate, variables) {
+  for(let i = 0; i < 10 && constraintError(state) > 1e-18; i++) {
+    const jacobian = linearize(values, evaluate, state, variables, true)
+    const correction = constrainedStep(jacobian, state, values, variables)
+    const trial = advance(values, correction, 1, variables)
+    const next = evaluate(trial)
+    if(constraintError(next) >= constraintError(state)) break
+    values = trial
+    state = next
+  }
+  return { values, state }
+}
+
+function constraintError(state) {
+  return state.inequalities.reduce((sum, value) => sum + Math.max(0, value) ** 2, normSq(state.closure))
+}
+
+// At a straight elbow an inward drag has zero first derivative. Try a small
+// bend in the null space of the grip Jacobian before declaring it unreachable.
+// A single hinge dragged diametrically across its pivot needs a direct nudge.
+function escapeSingularity(jacobian, values, variables, evaluate, accept) {
+  const rows = [...jacobian.hard, ...jacobian.soft]
+  for(let i = 0; i < variables.length; i++) {
+    const v = variables[i]
+    if(!v.active || !v.maxRotation || v.low == v.high) continue
+    const axis = values.map((_, k) => Number(k == i))
+    const nudge = 0.001 / v.maxRotation
+    const bend = constrainedStep(
+      { hard: rows, soft: [axis], inequalities: [], preference: [] },
+      { closure: rows.map(() => 0), target: [-nudge] }, values, variables,
+    )
+    for(const delta of [bend, axis.map(x => x * nudge)]) {
+      if(normSq(delta) < EPSILON ** 2) continue
+      for(const sign of [1, -1]) {
+        const trial = advance(values, delta, sign, variables)
+        const next = closeLoops(trial, evaluate(trial), evaluate, variables)
+        if(accept(next.state)) return next
+      }
     }
   }
-  [...worlds.keys()].sort((a, b) => componentDepth(a) - componentDepth(b))
-    .forEach(component => setWorldTransform(component, worlds.get(component)))
+}
+
+function fitDrag(variables, evaluate, grip, pointerTravel, iterations) {
+  if(variables.some(v => v.low > v.high)) return null
+  const initial = variables.map(v => THREE.MathUtils.clamp(0, v.low, v.high))
+  let { values, state } = closeLoops(initial, evaluate(initial), evaluate, variables)
+  for(let i = 0; i < iterations && variables.length; i++) {
+    const error = normSq(state.target)
+    if(error < 1e-18 || pointerTravel == 0) break
+    const jacobian = linearize(values, evaluate, state, variables, false)
+    const delta = constrainedStep(jacobian, state, values, variables)
+    const maxAngle = Math.max(0, ...delta.map((x, k) => Math.abs(x) * variables[k].maxRotation))
+    let factor = maxAngle > 0.5 ? 0.5 / maxAngle : 1
+    const better = next => constraintError(next) < 1e-16 && normSq(next.target) < error &&
+      next.picked.distanceTo(grip) <= pointerTravel + 1e-10
+    const length = Math.sqrt(normSq(delta))
+    let accepted
+    while(factor * length > 1e-10) {
+      const trial = advance(values, delta, factor, variables)
+      const next = closeLoops(trial, evaluate(trial), evaluate, variables)
+      if(better(next.state)) {
+        accepted = next
+        break
+      }
+      factor *= 0.5
+    }
+    if(!accepted && i == 0 && length < EPSILON) {
+      accepted = escapeSingularity(jacobian, values, variables, evaluate, better)
+    }
+    if(!accepted) break
+    values = accepted.values
+    state = accepted.state
+  }
+  // Incompatible constraints have no admissible pose. Keep the last placement.
+  return constraintError(state) < 1e-16 ? values : null
 }
 
 function componentDepth(component) {
@@ -623,145 +694,14 @@ function componentDepth(component) {
   return depth
 }
 
-function solvePair(joint, componentA, componentB, mobilityA, mobilityB) {
-  const total = mobilityA + mobilityB
-  if(total == 0) return
-  const weightA = mobilityA / total
-  const weightB = mobilityB / total
-
-  let worldA = worldTransform(componentA)
-  let worldB = worldTransform(componentB)
-  let attachmentA = worldA.clone().multiply(joint.frameA)
-  let attachmentB = worldB.clone().multiply(joint.frameB)
-
-  if(joint.type == 'group') {
-    const desiredA = attachmentB.clone().multiply(joint.frameA.clone().invert())
-    const desiredB = attachmentA.clone().multiply(joint.frameB.clone().invert())
-    if(mobilityA) setWorldTransform(componentA,
-      mobilityB ? interpolateWorld(worldA, desiredA, weightA * RELAXATION) : desiredA
-    )
-    if(mobilityB) setWorldTransform(componentB,
-      mobilityA ? interpolateWorld(worldB, desiredB, weightB * RELAXATION) : desiredB
-    )
-    return
-  }
-
-  if(joint.type == 'ball' || joint.type == 'axis') {
-    let targetA = framePosition(attachmentB)
-    let targetB = framePosition(attachmentA)
-    if(joint.type == 'axis') {
-      const radialError = framePosition(attachmentA).sub(framePosition(attachmentB))
-      if(!joint.lockSlide) {
-        const axis = frameDirection(attachmentA)
-        radialError.sub(axis.multiplyScalar(radialError.dot(axis)))
-      }
-      targetA = framePosition(attachmentA).sub(radialError)
-      targetB = framePosition(attachmentB).add(radialError)
-    }
-    if(mobilityA) {
-      worldA = rotateAttachmentToward(worldA, framePosition(attachmentA), targetA, weightA * RELAXATION)
-      setWorldTransform(componentA, worldA)
-    }
-    if(mobilityB) {
-      worldB = rotateAttachmentToward(worldB, framePosition(attachmentB), targetB, weightB * RELAXATION)
-      setWorldTransform(componentB, worldB)
-    }
-    attachmentA = worldTransform(componentA).multiply(joint.frameA)
-    attachmentB = worldTransform(componentB).multiply(joint.frameB)
-  }
-
-  if(joint.type == 'axis' || joint.type == 'coplanar') {
-    const directionA = frameDirection(attachmentA)
-    const directionB = frameDirection(attachmentB)
-    if(mobilityA) {
-      worldA = rotateWorldAbout(worldA, framePosition(attachmentA), directionA, directionB, weightA * RELAXATION)
-      setWorldTransform(componentA, worldA)
-    }
-    if(mobilityB) {
-      worldB = rotateWorldAbout(worldB, framePosition(attachmentB), directionB, directionA, weightB * RELAXATION)
-      setWorldTransform(componentB, worldB)
-    }
-    attachmentA = worldTransform(componentA).multiply(joint.frameA)
-    attachmentB = worldTransform(componentB).multiply(joint.frameB)
-  }
-
-  const pointA = framePosition(attachmentA)
-  const pointB = framePosition(attachmentB)
-  let error = pointA.clone().sub(pointB)
-  if(joint.type == 'axis' && !joint.lockSlide) {
-    const axis = frameDirection(attachmentA)
-    error.sub(axis.multiplyScalar(error.dot(axis)))
-  } else if(joint.type == 'coplanar') {
-    const normal = frameDirection(attachmentA)
-    error = normal.multiplyScalar(error.dot(normal))
-  }
-
-  if(mobilityA) setWorldTransform(componentA, translateWorld(worldTransform(componentA), error.clone().multiplyScalar(-weightA * RELAXATION)))
-  if(mobilityB) setWorldTransform(componentB, translateWorld(worldTransform(componentB), error.clone().multiplyScalar(weightB * RELAXATION)))
-}
-
-function interpolateWorld(from, to, weight) {
-  const fromPosition = new THREE.Vector3()
-  const fromRotation = new THREE.Quaternion()
-  const fromScale = new THREE.Vector3()
-  from.decompose(fromPosition, fromRotation, fromScale)
-  const toPosition = new THREE.Vector3()
-  const toRotation = new THREE.Quaternion()
-  const toScale = new THREE.Vector3()
-  to.decompose(toPosition, toRotation, toScale)
-  return new THREE.Matrix4().compose(
-    fromPosition.lerp(toPosition, weight),
-    fromRotation.slerp(toRotation, weight),
-    fromScale.lerp(toScale, weight),
-  )
-}
-
-function rotateWorldAbout(world, pivot, from, to, weight) {
+function alignDirection(world, pivot, from, to) {
   if(from.dot(to) < 0) to = to.clone().negate()
-  const full = new THREE.Quaternion().setFromUnitVectors(from, to)
-  const rotation = new THREE.Quaternion().slerp(full, weight)
+  const rotation = new THREE.Quaternion().setFromUnitVectors(from, to)
   if(Math.abs(rotation.w - 1) < EPSILON) return world
   return new THREE.Matrix4().makeTranslation(pivot)
     .multiply(new THREE.Matrix4().makeRotationFromQuaternion(rotation))
     .multiply(new THREE.Matrix4().makeTranslation(pivot.clone().negate()))
     .multiply(world)
-}
-
-function rotateAttachmentToward(world, attachment, target, weight) {
-  const origin = framePosition(world)
-  const from = attachment.clone().sub(origin)
-  const to = target.clone().sub(origin)
-  if(from.lengthSq() < EPSILON || to.lengthSq() < EPSILON) return world
-  return rotateWorldAbout(world, origin, from.normalize(), to.normalize(), weight)
-}
-
-function translateWorld(world, delta) {
-  return new THREE.Matrix4().makeTranslation(delta).multiply(world)
-}
-
-function assemblyError(tree, joints) {
-  return joints.reduce((largest, joint) => {
-    if(joint.type == 'fix') return largest
-    const componentA = tree.findChild(joint.componentA)
-    const componentB = tree.findChild(joint.componentB)
-    if(!componentA || !componentB) return largest
-    const attachmentA = worldTransform(componentA).multiply(joint.frameA)
-    const attachmentB = worldTransform(componentB).multiply(joint.frameB)
-    const directionA = frameDirection(attachmentA)
-    const directionB = frameDirection(attachmentB)
-    if(directionA.dot(directionB) < 0) directionB.negate()
-    let positional = framePosition(attachmentA).sub(framePosition(attachmentB))
-    if(joint.type == 'axis' && !joint.lockSlide) {
-      positional.sub(directionA.clone().multiplyScalar(positional.dot(directionA)))
-    } else if(joint.type == 'coplanar') {
-      positional = directionA.clone().multiplyScalar(positional.dot(directionA))
-    }
-    const angular = joint.type == 'ball' ? 0 : joint.type == 'group' ?
-      new THREE.Quaternion().setFromRotationMatrix(attachmentA)
-        .angleTo(new THREE.Quaternion().setFromRotationMatrix(attachmentB)) :
-      directionA.cross(directionB).length()
-    return Math.max(largest, positional.length(), angular)
-  }, 0)
 }
 
 function framePosition(frame) {

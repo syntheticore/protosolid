@@ -1,5 +1,6 @@
 import Serialize from './serialize.js'
 import { Wire, Profile } from './geom3d.js'
+import { CentroidHelper } from './helpers.js'
 
 // Reference of the kind a feature setting of the given type expects to a picked item
 export function inputReference(type, item) {
@@ -388,6 +389,7 @@ export class HelperReference extends Reference {
     const comp = tree.findChild(this.componentId)
     const error = { type: 'error', msg: "Helper reference was lost" }
     if(!comp) return error
+    CentroidHelper.recordReference(comp, this.helperId)
     const helper = comp.helpers.find(helper => helper.id == this.helperId)
     if(!helper) return error
     this.item = helper
@@ -401,8 +403,8 @@ export class HelperReference extends Reference {
 
   dump() {
     return {
-      componentId: this.item.componentId,
-      helperId: this.item.id,
+      componentId: this.componentId,
+      helperId: this.helperId,
     }
   }
 

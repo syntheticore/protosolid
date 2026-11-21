@@ -7,6 +7,7 @@ import { Feature, SolidFeature, ConvertBodyToComponentFeature, CreateComponentFe
 import './sheet-metal.js'
 import { Selection } from '../selection.js'
 import { SectionView } from './component.js'
+import { centerOfMass } from './centroid.js'
 import Emitter from '../emitter.js'
 import Serialize from './serialize.js'
 import { readDocumentFile, formatDocument, gzip, decodeFile } from './document-format.js'
@@ -223,6 +224,7 @@ export default class Document extends Emitter {
     } else {
       // Every cached tree shares the base definition
       Object.assign(timeline.baseCompDef, Serialize.parse(target.baseCompDef, context))
+      timeline.centroids.sync([timeline.cache[0]])
     }
     timeline.features.slice(0, first).forEach(feature => {
       if(feature.sketch) context.sketches[feature.sketch.id] = feature.sketch
@@ -455,32 +457,51 @@ export default class Document extends Emitter {
     this.activeDrawingComponentId = drawing && component ? component.id : null
   }
 
+  setCentroid(component, enabled) {
+    const source = this.getComponent(component.sourceId())
+    const center = enabled ? centerOfMass(source) : null
+    source.creator.cog = enabled
+    source.creator.cogPosition = center && { x: center.x, y: center.y, z: center.z }
+    const timeline = this.timeline
+    timeline.centroids.sync(timeline.cache)
+    const reader = timeline.centroids.firstReaderIndex(timeline.features, source.id)
+    if(reader >= 0) timeline.invalidateFeature(timeline.features[reader])
+    this.markChanged()
+    return this.regenerateKeepingActiveFeature()
+  }
+
+  // Earlier markers retain the last final estimate until the end is evaluated.
+  regenerateMaterialCentroids() {
+    if(this.timeline.marker == this.timeline.features.length &&
+      this.top().getChildren().some(component => component.creator.cog)) {
+      return this.regenerateKeepingActiveFeature()
+    }
+  }
+
   // Parameter values live on component definitions, which are shared by the
   // cached timeline trees. Invalidate the timeline before regenerating so
   // every feature that may consume an expression referencing a parameter is
   // evaluated again.
   async regenerateParameters() {
-    const activeFeature = this.activeFeature
-    const activeSketch = this.activeSketch
     const firstFeature = this.timeline.features[0]
     if(firstFeature) this.timeline.invalidateFeature(firstFeature)
+    await this.regenerateKeepingActiveFeature()
+    this.markChanged()
+  }
+
+  async regenerateKeepingActiveFeature() {
+    const activeFeature = this.activeFeature
+    const activeSketch = this.activeSketch
     await this.regenerate()
 
     // regenerate() reactivates the active component, which intentionally
-    // clears sketch-editing state. Parameter edits must not close an active
+    // clears sketch-editing state. Property edits must not close an active
     // sketch or switch the toolbar back to non-sketch tools.
-    if(activeFeature) {
-      this.activeFeature = activeFeature
+    if(activeFeature && this.activeFeature === activeFeature) {
       this.activeComponent = this.getComponent(activeFeature.componentOccurrenceId) ||
         this.getComponent(activeFeature.componentId) || this.activeComponent
       this.activeSketch = activeFeature.sketch || activeSketch
     }
-
-    // Profiles are cached by the sketch proxies. Mark all current sketches
-    // dirty so closed regions are rebuilt from the regenerated geometry.
-    this.top().getChildren().flatMap(component => component.sketches)
-      .forEach(sketch => { sketch.profileUpdateNeeded = true })
-    this.markChanged()
   }
 
   renameParameterReferences(oldName, newName) {

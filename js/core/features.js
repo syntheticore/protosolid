@@ -1680,6 +1680,9 @@ export class CreateSketchFeature extends Feature {
     this.sketch.component = tree.findChild(this.componentId)
     this.sketch.component.sketches.push(this.sketch)
     this.sketch.solve(tree)
+    // Upstream changes, like a moved centroid, may move projected geometry.
+    // Sketch proxies cache their regions until told to rebuild them.
+    this.sketch.profileUpdateNeeded = true
   }
 
   involvedSketches() {

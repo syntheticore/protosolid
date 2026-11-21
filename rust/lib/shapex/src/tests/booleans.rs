@@ -317,6 +317,22 @@ fn boolean_repeated_bores_preserve_volume_and_topology() {
 }
 
 #[test]
+fn off_center_through_hole_moves_the_prism_centroid_away() {
+    let tolerance = ModelTolerance::default();
+    let body = owned_cuboid(Point3::origin(), Point3::new(80.0, 40.0, 20.0));
+    let tool = Profile::new(
+        Wire2::new([TrimmedCurve2::circle(Point2::new(55.0, 25.0), 5.0).unwrap()], tolerance).unwrap(),
+        [], tolerance,
+    ).unwrap().extrude(Plane3::xy(), Vec3::unit_z() * 20.0).unwrap();
+    let body = body.difference(&tool).unwrap();
+    let hole = std::f64::consts::PI * 25.0 * 20.0;
+    let volume = 64000.0 - hole;
+    let expected = Point3::new((64000.0 * 40.0 - hole * 55.0) / volume, (64000.0 * 20.0 - hole * 25.0) / volume, 10.0);
+    assert!((body.volume() - volume).abs() < 1e-6);
+    assert!(body.centroid().distance(expected) < 1e-6, "{:?} != {expected:?}", body.centroid());
+}
+
+#[test]
 fn overlapping_cylinders_have_analytic_boolean_results() {
     let tolerance = ModelTolerance::default();
     let cylinder = |center: Point2, radius: f64| {

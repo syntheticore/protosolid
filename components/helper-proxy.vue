@@ -3,7 +3,7 @@
 <script setup>
 
   import * as THREE from 'three'
-  import { PlaneHelper, AxisHelper, PointHelper } from '../js/core/helpers.js'
+  import { PlaneHelper, AxisHelper, PointHelper, CentroidHelper } from '../js/core/helpers.js'
   import { PlaneHelperObject, AxisHelperObject, PointHelperObject } from '../js/three/helper-objects.js'
 
   const props = defineProps(['document', 'component', 'helper', 'parentHighlighted', 'parentSelected', 'parentTransform'])
@@ -25,6 +25,7 @@
       [PlaneHelper]: PlaneHelperObject,
       [AxisHelper]: AxisHelperObject,
       [PointHelper]: PointHelperObject,
+      [CentroidHelper]: PointHelperObject,
     }[props.helper.constructor]
     mesh = new HelperObject(props.helper)
     mesh.setMaterial(highlighted.value, selected.value)

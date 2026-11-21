@@ -30,6 +30,7 @@ function tolerancePreference(key, dimension = 'length') {
 export const getViewportTessellationTolerance = () => tolerancePreference('tessellationTolerance')
 export const getViewportAngularTessellationTolerance = () => tolerancePreference('tessellationAngularTolerance', 'angle')
 export const getSketchTessellationTolerance = () => tolerancePreference('sketchTessellationTolerance')
+export const getCenterOfMassTolerance = () => tolerancePreference('centerOfMassTolerance')
 
 // Display meshes are built once per session; the preferences require a restart.
 export async function initializeShapex(options) {

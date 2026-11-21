@@ -443,7 +443,12 @@
               { title: 'Plane', feature: PlaneFeature },
               { title: 'Axis', feature: AxisFeature },
               { title: 'Point', feature: PointFeature },
-              { title: 'Centroid', action: this.addCog, icon: 'atom' },
+              {
+                title: 'Centroid',
+                action: this.addCog,
+                icon: 'atom',
+                isDisabled: () => !!this.document.activeComponent.creator.cog,
+              },
               { title: 'Parameter', action: this.addParameter, icon: 'square-root-alt' },
               {
                 title: 'Variant',
@@ -863,8 +868,7 @@
       },
 
       addCog: function() {
-        this.document.activeComponent.creator.cog = true
-        this.document.markChanged()
+        return this.document.setCentroid(this.document.activeComponent, true)
       },
 
       addParameter: function() {
@@ -960,6 +964,7 @@
         this.document.activeComponent.creator.material = this.document.materials[0]
         this.document.markChanged()
         this.bus.emit('material-changed')
+        return this.document.regenerateMaterialCentroids()
       },
 
       addHeatFlow: function() {

@@ -17,6 +17,8 @@ export class ComponentDefinition {
     this.hidden = false
     this.material = null
     this.cog = false
+    // Center of mass at the end of the timeline, as { x, y, z } in component space
+    this.cogPosition = null
     this.sectionViews = []
     this.parameters = []
     this.variant = null

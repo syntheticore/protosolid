@@ -137,6 +137,7 @@ export const propertyTools = [
       doc.markChanged()
       app.bus.emit('material-changed')
       app.bus.emit('render-needed')
+      if(material !== undefined || properties?.density !== undefined) await doc.regenerateMaterialCentroids()
       const effective = component.getMaterial()
       return {
         component: itemId(component),

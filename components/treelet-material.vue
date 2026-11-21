@@ -18,7 +18,7 @@
           Icon.delete(
             icon="trash-alt" fixed-width
             title="Delete"
-            @click.stop="remove"
+            @click.stop="setMaterial(null)"
           )
 
       .content.form(v-if="expanded" @input="document.markChanged()")
@@ -27,7 +27,7 @@
 
           label
 
-            ComboBox(v-model="component.creator.material" @update:model-value="document.markChanged()" label="Material" :options="document.materials.map(material => ({ value: material, label: material.title }))")
+            ComboBox(:model-value="component.creator.material" @update:model-value="setMaterial" label="Material" :options="document.materials.map(material => ({ value: material, label: material.title }))")
 
             IconButton.clone(icon="plus" @click="cloneMaterial")
 
@@ -150,6 +150,7 @@
         this.material[key] = value
         this.document.markChanged()
         this.bus.emit('render-needed')
+        if(key == 'density') return this.document.regenerateMaterialCentroids()
       },
 
       cloneMaterial: function() {
@@ -158,9 +159,10 @@
         this.document.markChanged()
       },
 
-      remove: function() {
-        this.component.creator.material = null
+      setMaterial(material) {
+        this.component.creator.material = material
         this.document.markChanged()
+        return this.document.regenerateMaterialCentroids()
       },
     },
   }

@@ -81,3 +81,37 @@ export class PointHelper extends ConstructionHelper {
     return this.transform
   }
 }
+
+// Features reading a centroid while the timeline executes them,
+// as the source ids of the components whose centroid they read
+let centroidReads = null
+
+export function trackCentroidReads(fn) {
+  const previous = centroidReads
+  const reads = centroidReads = new Set()
+  try {
+    fn()
+  } finally {
+    centroidReads = previous
+  }
+  return reads
+}
+
+// Center of mass of the component at the end of the timeline. Its position is
+// an estimate the timeline refines until it matches the final geometry.
+export class CentroidHelper extends PointHelper {
+  static idFor(componentId) { return `${componentId}/centroid` }
+
+  constructor(componentId, position) {
+    const { x, y, z } = position || { x: 0, y: 0, z: 0 }
+    super(componentId, new THREE.Matrix4().makeTranslation(x, y, z), CentroidHelper.idFor(componentId))
+    this.position = position
+  }
+
+  typename() { return 'Centroid' }
+
+  // A missing centroid can be recreated under the same ID.
+  static recordReference(component, helperId) {
+    if(centroidReads && helperId == this.idFor(component.id)) centroidReads.add(component.sourceId())
+  }
+}

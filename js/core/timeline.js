@@ -1,6 +1,7 @@
 import Serialize from './serialize.js'
 import { Component, ComponentDefinition, syncComponentInstances } from './component.js'
 import { ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, PatternFeature, Feature } from './features.js'
+import { CentroidSolver } from './centroid.js'
 import { arrayRange, makeColor } from './utils.js'
 
 
@@ -15,6 +16,8 @@ export class Timeline {
     this.last_change_index = 0
     this.last_eval_index = 0
     this.change_version = 0
+    this.centroids = new CentroidSolver()
+    this.centroids.sync(this.cache)
     // removal_modifications: Vec<CompRef>,
   }
 
@@ -91,9 +94,15 @@ export class Timeline {
   }
 
   evaluate() {
-    const last_change = this.last_change_index
+    let last_change = Math.min(this.last_change_index, this.marker)
     console.log('evaluate', last_change, this.marker)
-    this.regenerate(Math.min(last_change, this.marker), this.marker)
+    this.regenerate(last_change, this.marker)
+    for(let iteration = 0; ; iteration++) {
+      const index = this.updateCentroids(iteration)
+      if(index === null) break
+      last_change = Math.min(last_change, index)
+      this.regenerate(index, this.marker)
+    }
     const [from, to] = ordered(this.last_eval_index, this.marker)
     this.last_eval_index = this.marker
     return this.componentsModified(Math.min(from, last_change), to)
@@ -103,50 +112,30 @@ export class Timeline {
     // Let pointer events settle for this frame before capturing the pass.
     // Capturing first would let every drag event cancel it before execution.
     await yieldToBrowser()
-    const lastChange = this.last_change_index
+    let lastChange = Math.min(this.last_change_index, this.marker)
     const marker = this.marker
-    const completed = await this.regenerateAsync(Math.min(lastChange, marker), marker, onFeature)
-    if(!completed) return null
+    if(!await this.regenerateAsync(lastChange, marker, onFeature)) return null
+    for(let iteration = 0; ; iteration++) {
+      const index = this.updateCentroids(iteration)
+      if(index === null) break
+      lastChange = Math.min(lastChange, index)
+      if(!await this.regenerateAsync(index, marker, onFeature)) return null
+    }
     const [from, to] = ordered(this.last_eval_index, marker)
     this.last_eval_index = marker
     return this.componentsModified(Math.min(from, lastChange), to)
   }
 
   regenerate(from, to) {
-    // this.cache.resize(this.features.len() + 1, Component::default());
-    // console.log('before regenerate', from, to, this.cache)
     for(let i = from; i < to; i++) {
-      const feature = this.features[i]
-      let newComp = this.cache[i].deepClone()
-      let j = i + 1
-      // console.log('updating cache at with', j, newComp)
-      this.cache[j] = newComp
-      feature.execute(newComp)
-      syncComponentInstances(newComp)
-      if(feature.error && feature.error.type == 'error') {
-        this.cache[j] = this.cache[i].deepClone()
-      } else {
-        // let repair_error = feature.modified_components()
-        //   .find_map(|id| newComp.find_child_mut(id).unwrap().compound.repair().err() )
-        //   .map(|error| FeatureError::Error(error) );
-        // if repair_error.is_some() {
-        //   feature.error = repair_error;
-        //   this.cache[j] = this.cache[i].deep_clone()
-        // } else {
-          // console.log('updating cache at with', j, newComp)
-          // this.cache[j] = newComp
-        // }
-      }
-      this.last_change_index = j
+      this.regenerateFeature(i)
     }
-    // console.log('after regenerate', from, to, this.cache)
   }
 
   async regenerateAsync(from, to, onFeature) {
     const version = this.change_version
     for(let i = from; i < to; i++) {
-      const feature = this.features[i]
-      onFeature(feature, i, to)
+      onFeature(this.features[i], i, to)
       if(i > from) await yieldToBrowser()
 
       // A newer edit or structural change supersedes this pass. In
@@ -154,18 +143,26 @@ export class Timeline {
       // task was yielding.
       if(this.change_version != version) return false
 
-      const newComp = this.cache[i].deepClone()
-      const j = i + 1
-      this.cache[j] = newComp
-      feature.execute(newComp)
-      syncComponentInstances(newComp)
-      if(feature.error && feature.error.type == 'error') {
-        this.cache[j] = this.cache[i].deepClone()
-      }
-
-      this.last_change_index = j
+      this.regenerateFeature(i)
     }
     return true
+  }
+
+  regenerateFeature(index) {
+    const feature = this.features[index]
+    const tree = this.cache[index].deepClone()
+    this.cache[index + 1] = tree
+    this.centroids.execute(feature, tree, () => {
+      feature.execute(tree)
+      syncComponentInstances(tree)
+    })
+    if(feature.error?.type == 'error') this.cache[index + 1] = this.cache[index].deepClone()
+    this.last_change_index = index + 1
+  }
+
+  updateCentroids(iteration) {
+    const finalTree = this.marker == this.features.length && this.cache[this.marker]
+    return this.centroids.update(this.cache, finalTree, this.features, iteration)
   }
 
   reorder(feature, other, after) {

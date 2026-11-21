@@ -5,7 +5,7 @@ import Serialize from '../core/serialize.js'
 import { Face, Edge, Vertex, Solid, Profile, selectionType } from '../core/geom3d.js'
 import { SketchElement, SketchPoint, Line, Circle, Arc, Spline, SketchText } from '../core/geom2d.js'
 import { SketchOrigin, ProjectedPoint, HorVertConstraint, Dimension } from '../core/sketch.js'
-import { ConstructionHelper } from '../core/helpers.js'
+import { ConstructionHelper, PointHelper } from '../core/helpers.js'
 import { Feature } from '../core/features.js'
 import { PlanarReference, AxialReference, PointReference, ProfileReference, PatternInputReference } from '../core/references.js'
 import { measureOptions, measureValue } from '../core/measures.js'
@@ -203,13 +203,15 @@ export function describeTopology(component, solid) {
 
 function describeHelper(component, helper) {
   const transform = helper.transform
+  const isPoint = helper instanceof PointHelper
   return {
     id: itemId(helper),
-    type: helper.typename().toLowerCase(),
+    // The centroid is a point named 'centroid'
+    type: isPoint ? 'point' : helper.typename().toLowerCase(),
     name: helper.isStandard() ? helper.id.split('/').pop() : undefined,
     ...(component.isItemHidden(helper.id) && { hidden: true }),
     origin: vector(new THREE.Vector3().setFromMatrixPosition(transform)),
-    ...(helper.typename() != 'Point' && {
+    ...(!isPoint && {
       [helper.typename() == 'Plane' ? 'normal' : 'direction']: vector(new THREE.Vector3().setFromMatrixColumn(transform, 2)),
     }),
   }

@@ -240,7 +240,7 @@
 
             span.setting-label
               strong Center of mass deviation
-              small Allowed deviation when calculating mass properties
+              small Max distance of centroids from actual center of mass
 
             ExpressionInput.measurement(
               stretch

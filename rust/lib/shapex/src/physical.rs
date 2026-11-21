@@ -1077,15 +1077,12 @@ fn simpson_curve_integrals(
     plane: super::Plane3,
     tolerance: ModelTolerance,
 ) -> KernelResult<[f64; 6]> {
-    if let Curve2::Nurbs(nurbs) = curve {
-        let mut breaks = nurbs
-            .knots()
-            .iter()
-            .copied()
-            .filter(|value| {
-                *value >= range.start.min(range.end) && *value <= range.start.max(range.end)
-            })
-            .collect::<Vec<_>>();
+    // Simpson's rule is exact for the line terms, which are cubic at most.
+    // Boolean results trim holes with derived p-curves, whose moments two
+    // fixed intervals miss entirely while the exact area stays correct.
+    if !matches!(curve, Curve2::Line(_) | Curve2::Circle(_)) {
+        let mut breaks = curve.integration_breakpoints(range);
+        breaks.extend(curve.support_integration_breakpoints(range)?);
         breaks.extend([range.start, range.end]);
         breaks.sort_by(f64::total_cmp);
         breaks.dedup_by(|first, second| (*first - *second).abs() <= f64::EPSILON * 64.0);
@@ -1171,7 +1168,7 @@ fn adaptive_curve_integrals(
         terms,
         targets,
         24,
-        "certified NURBS boundary integration did not converge",
+        "certified boundary curve integration did not converge",
     )
 }
 

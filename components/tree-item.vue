@@ -127,12 +127,13 @@
         :setup="setup"
       )
 
-      //- Center of Mass
-      li(v-if="component.cog")
-        .box
-          header
-            Icon(icon="atom" fixed-width)
-            h2 Center of Mass
+      //- Centroid
+      TreeletCentroid(
+        v-if="component.creator.cog"
+        v-bind="$attrs"
+        :document="document"
+        :component="component"
+      )
 
       //- Construction planes, axes and points
       TreeletHelper(

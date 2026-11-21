@@ -27,9 +27,9 @@
       path(v-for="path in allPaths", :d="path.data", :stroke="path.color")
       circle(v-for="path in allPaths", :cx="path.targetPos.x", :cy="path.targetPos.y", r="5", :fill="path.color")
 
-      g.thermal-probe(v-if="thermalProbe")
-        path(:d="probePath")
-        circle(:cx="thermalProbe.position.x" :cy="thermalProbe.position.y" r="4")
+      g.thermal-probe(v-for="probe in probes")
+        path(:d="probePath(probe.position)")
+        circle(:cx="probe.position.x" :cy="probe.position.y" r="4")
 
       //- Snap guides
       TransitionGroup(name="hide-guides" tag="g")
@@ -91,9 +91,9 @@
       )
 
       .thermal-probe-box(
-        v-if="thermalProbe"
-        :style="{ left: thermalProbe.position.x + 22 + 'px', top: thermalProbe.position.y - 31 + 'px' }"
-      ) {{ thermalProbe.label }}
+        v-for="probe in probes"
+        :style="{ left: probe.position.x + 22 + 'px', top: probe.position.y - 31 + 'px' }"
+      ) {{ probe.label }}
 
       //- Snap anchor highlights active snap point
       .anchor.handle(
@@ -515,9 +515,14 @@
         return paths
       },
 
-      probePath: function() {
-        const position = this.thermalProbe.position
-        return `M ${position.x} ${position.y} L ${position.x + 12} ${position.y - 18} L ${position.x + 22} ${position.y - 18}`
+      // The pointer's probe and labels the active tool pins to the model
+      probes: function() {
+        this.frame
+        const markers = (this.activeTool?.markers || []).map(marker => ({
+          position: this.renderer.toScreen(marker.point),
+          label: marker.label,
+        }))
+        return this.thermalProbe ? [...markers, this.thermalProbe] : markers
       },
 
       visibleJoints: function() {
@@ -685,6 +690,10 @@
         this.document.hasChanges = true
         this.regionsDirty = false
         this.$nextTick(() => this.renderer.render())
+      },
+
+      probePath: function(position) {
+        return `M ${position.x} ${position.y} L ${position.x + 12} ${position.y - 18} L ${position.x + 22} ${position.y - 18}`
       },
 
       updateSketchSectionSide: function() {

@@ -121,6 +121,17 @@ class Materials {
     this.uiWire = this.wire.clone()
     this.uiWire.linewidth = 3
 
+    // Curvature combs stay visible where teeth reach into the model
+    this.curvatureComb = this.line.clone()
+    this.curvatureComb.color.set('#d0569b')
+    this.curvatureComb.linewidth = 1
+    this.curvatureComb.opacity = 0.6
+    this.curvatureComb.depthTest = false
+
+    this.curvatureEnvelope = this.curvatureComb.clone()
+    this.curvatureEnvelope.linewidth = 2
+    this.curvatureEnvelope.opacity = 1
+
     this.invisibleLine = new LineMaterial({
       linewidth: 3,
       transparent: true,

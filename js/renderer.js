@@ -785,6 +785,8 @@ export default class Renderer {
     materials.splineControlLine.resolution.set(width, height)
     materials.wire.resolution.set(width, height)
     materials.ghostWire.resolution.set(width, height)
+    materials.curvatureComb.resolution.set(width, height)
+    materials.curvatureEnvelope.resolution.set(width, height)
     this.render()
   }
 

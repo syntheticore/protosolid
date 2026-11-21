@@ -612,6 +612,169 @@ class HighlightTool extends Tool {
 }
 
 
+// Curvature and unit principal normal, pointing to the center of curvature,
+// from a curve's first and second derivatives
+function curvatureAt(d1, d2) {
+  const speed = d1.length()
+  const kappa = new THREE.Vector3().crossVectors(d1, d2).length() / speed ** 3
+  const normal = d2.clone().addScaledVector(d1, -d1.dot(d2) / speed ** 2).normalize()
+  return { kappa, normal }
+}
+
+function isCurved(item) {
+  if(item instanceof Edge) return !(item.geom().curve() instanceof sx.Line3)
+  return item instanceof SketchElement && !!item.geom &&
+    !(item instanceof Line || item instanceof SketchPoint || item instanceof SketchText)
+}
+
+// Shows curvature combs on edges and sketch curves. Clicking a curve toggles
+// its comb, clicking a face toggles the combs of its curved boundary edges.
+export class CurvatureTool extends HighlightTool {
+  static icon = 'curvature'
+  static hasOptions = true
+
+  constructor(component, viewport) {
+    super(component, viewport, ['edge', 'curve', 'face'])
+    this.probesSurface = true
+    this.cursor = 'crosshair'
+    this.combScale = 1
+    this.samples = 64
+    this.combs = markRaw([])
+    this.markers = markRaw([])
+    this.combPreview = markRaw(new THREE.Group())
+    this.settings = {
+      combScale: {
+        title: 'Scale',
+        type: 'number',
+        min: 0.1,
+        max: 100,
+        step: 0.1,
+      },
+      samples: {
+        title: 'Samples',
+        type: 'integer',
+        min: 4,
+        max: 512,
+      },
+    }
+    viewport.renderer.add(this.combPreview)
+    new Set(viewport.document.selection.items.flatMap(item => this.curvesOf(item)))
+      .forEach(curve => this.combs.push({ curve }))
+    this.update()
+  }
+
+  acceptsInput(item) {
+    return this.curvesOf(item).length > 0
+  }
+
+  // Edges first, as faces lie behind their boundaries
+  orderItems(items) {
+    return [...items].sort((a, b) => (a instanceof Face) - (b instanceof Face))
+  }
+
+  curvesOf(item) {
+    item = toRaw(item)
+    if(item instanceof Face) return item.boundaryEdges().filter(isCurved)
+    return isCurved(item) ? [item] : []
+  }
+
+  setOption(key, value) {
+    this[key] = value
+    this.update()
+  }
+
+  async mouseMove(vec, coords) {
+    await super.mouseMove(vec, coords)
+    if(this.disposed) return
+    this.viewport.thermalProbe = this.probe(coords)
+  }
+
+  async click(vec, coords) {
+    const item = await this.getObject(coords, true)
+    if(!item || this.disposed) return
+    const curves = this.curvesOf(item)
+    const shown = curves.filter(curve => this.combs.some(comb => comb.curve == curve))
+    if(shown.length == curves.length) {
+      this.combs = markRaw(this.combs.filter(comb => !curves.includes(comb.curve)))
+    } else {
+      curves.filter(curve => !shown.includes(curve)).forEach(curve => this.combs.push({ curve }))
+    }
+    this.update()
+    this.viewport.thermalProbe = this.probe(coords)
+  }
+
+  // Curvature samples in world space
+  sampleCurve(curve) {
+    const isEdge = curve instanceof Edge
+    const geom = isEdge ? curve.geom().trimmedCurve() : curve.geom()
+    const transform = isEdge ?
+      worldTransform(curve.solid.component) :
+      worldTransform(curve.sketch.component).multiply(curve.sketch.workplane)
+    const range = geom.range()
+    return Array.from({ length: this.samples }, (_, i) => {
+      const evaluation = geom.evaluate(range.start + range.span() * i / (this.samples - 1))
+      const [point, d1, d2] = [evaluation.point, evaluation.firstDerivative, evaluation.secondDerivative]
+        .map(value => new THREE.Vector3(value.x, value.y, value.z || 0))
+      const { kappa, normal } = curvatureAt(d1, d2)
+      return {
+        point: point.applyMatrix4(transform),
+        normal: normal.transformDirection(transform),
+        kappa,
+      }
+    })
+  }
+
+  update() {
+    this.combs.forEach(comb => comb.samples = this.sampleCurve(comb.curve))
+    const samples = this.combs.flatMap(comb => comb.samples)
+    const maxKappa = Math.max(...samples.map(sample => sample.kappa))
+    const size = new THREE.Box3().setFromPoints(samples.map(sample => sample.point)).getSize(new THREE.Vector3()).length()
+    // The strongest curvature gets teeth a fifth the size of all combs together
+    const toothScale = this.combScale * 0.2 * size / maxKappa
+
+    const tips = this.combs.map(comb => comb.samples.map(sample =>
+      sample.point.clone().addScaledVector(sample.normal, -sample.kappa * toothScale)
+    ))
+    const teeth = this.combs.flatMap((comb, i) => comb.samples.map((sample, j) => [sample.point.toArray(), tips[i][j].toArray()]))
+    const envelopes = tips.map(points => points.map(point => point.toArray()))
+
+    this.combPreview.clear()
+    this.combPreview.add(
+      this.viewport.renderer.convertLines(teeth, materials.curvatureComb),
+      this.viewport.renderer.convertLines(envelopes, materials.curvatureEnvelope),
+    )
+    // Each comb's smallest radius is pinned to where it occurs
+    this.markers = markRaw(this.combs.map(comb => {
+      const tightest = comb.samples.reduce((best, sample) => sample.kappa > best.kappa ? sample : best)
+      return { point: tightest.point, label: `Min. R ${(1 / tightest.kappa).toFixed(2)} mm` }
+    }))
+    this.viewport.renderer.render()
+  }
+
+  // Radius at the comb sample closest to the cursor
+  probe(coords) {
+    const renderer = this.viewport.renderer
+    const nearest = this.combs.flatMap(comb => comb.samples).map(sample => {
+      const position = renderer.toScreen(sample.point)
+      return { sample, position, distance: position.distanceTo(coords) }
+    }).reduce((best, candidate) => !best || candidate.distance < best.distance ? candidate : best, null)
+    if(!nearest || nearest.distance > 16) return null
+    const kappa = nearest.sample.kappa
+    return {
+      position: nearest.position,
+      label: kappa < EPSILON ? 'Straight' : `R ${(1 / kappa).toFixed(2)} mm`,
+    }
+  }
+
+  dispose() {
+    this.disposed = true
+    this.viewport.thermalProbe = null
+    this.viewport.renderer.remove(this.combPreview)
+    this.viewport.renderer.render()
+  }
+}
+
+
 export class ManipulationTool extends HighlightTool {
   constructor(component, viewport) {
     super(component, viewport, [])

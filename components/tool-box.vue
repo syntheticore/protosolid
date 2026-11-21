@@ -363,6 +363,7 @@
     IntersectTool,
     DiagnosticShadingTool,
     InterferenceTool,
+    CurvatureTool,
   } from './../js/tools.js'
 
   import { Aluminum } from './../js/material.js'
@@ -553,7 +554,6 @@
               { title: 'Flange', feature: FlangeFeature },
               { title: 'Hem', feature: HemFeature },
               { title: 'Bend', feature: BendFeature },
-              { title: 'Corner', icon: 'border-style' },
               { title: 'Unfold', feature: UnfoldFeature },
               { title: 'Refold', feature: RefoldFeature },
               { title: 'Flatten', action: this.addFlatPattern, icon: 'flat-pattern' },
@@ -582,7 +582,7 @@
             title: 'Inspect',
             tools: [
               { title: 'Interference', tool: InterferenceTool },
-              { title: 'Curvature', icon: 'curvature' },
+              { title: 'Curvature', tool: CurvatureTool },
               { title: 'Diagnostic Shading', tool: DiagnosticShadingTool },
               { title: 'Section View', icon: 'section-view', action: this.addSectionView },
             ],

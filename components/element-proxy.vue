@@ -6,6 +6,7 @@
   import materials from '../js/materials.js'
   import { SketchPoint, SketchText, Spline } from '../js/core/geom2d.js'
   import { Constraint } from '../js/core/sketch.js'
+  import { curvatureSamples, toothScale, combLines } from '../js/core/curvature.js'
   import { ScreenPointObject } from '../js/three/helper-objects.js'
   import HiddenLine from '../js/three/hidden-line.js'
 
@@ -30,6 +31,7 @@
   let mesh
   let hiddenMesh
   let controlMesh
+  let combMesh
 
   const getMesh = () => mesh
 
@@ -41,8 +43,10 @@
     }
     window.alcRenderer.remove(mesh)
     window.alcRenderer.remove(controlMesh)
+    window.alcRenderer.remove(combMesh)
     mesh = null
     controlMesh = null
+    combMesh = null
   }
 
   function renderElement() {
@@ -63,6 +67,16 @@
         )
         controlMesh.renderOrder = -1
         window.alcRenderer.add(controlMesh, true)
+      }
+      if(props.element instanceof Spline && props.element.showCurvature) {
+        const samples = curvatureSamples(props.element.geom(), new THREE.Matrix4(), 64)
+        const { teeth, envelopes } = combLines([samples], toothScale(samples, 1))
+        combMesh = new THREE.Group()
+        combMesh.add(
+          window.alcRenderer.convertLines(teeth, materials.curvatureComb),
+          window.alcRenderer.convertLines(envelopes, materials.curvatureEnvelope),
+        )
+        window.alcRenderer.add(combMesh)
       }
     }
     updateTransform()
@@ -113,6 +127,10 @@
     if(controlMesh) {
       controlMesh.matrix.copy(mesh.matrix)
       controlMesh.matrix.decompose(controlMesh.position, controlMesh.quaternion, controlMesh.scale)
+    }
+    if(combMesh) {
+      combMesh.matrix.copy(mesh.matrix)
+      combMesh.matrix.decompose(combMesh.position, combMesh.quaternion, combMesh.scale)
     }
     if(props.element instanceof SketchPoint) {
       mesh.matrix.multiply(new THREE.Matrix4().makeTranslation(

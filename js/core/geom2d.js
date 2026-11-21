@@ -487,6 +487,7 @@ export class Spline extends SketchElement {
     super()
     this.points = points
     this.trim = trim
+    this.showCurvature = false
     this.update(geom)
   }
 
@@ -556,7 +557,11 @@ export class Spline extends SketchElement {
     this.update()
   }
 
-  _clone() { return new Spline([...this.points], this.trim) }
+  _clone() {
+    const clone = new Spline([...this.points], this.trim)
+    clone.showCurvature = this.showCurvature
+    return clone
+  }
 
   dump() {
     return {
@@ -564,6 +569,7 @@ export class Spline extends SketchElement {
       points: this.points,
       trim: this.trim,
       isReference: this.isReference,
+      showCurvature: this.showCurvature,
     }
   }
 
@@ -571,6 +577,7 @@ export class Spline extends SketchElement {
     const line = new Spline(dump.points, dump.trim)
     line.id = dump.id
     line.isReference = dump.isReference || false
+    line.showCurvature = dump.showCurvature || false
     return line
   }
 }

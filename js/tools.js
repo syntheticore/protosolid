@@ -57,6 +57,7 @@ import {
   worldTransform,
 } from './core/assembly.js'
 import { EPSILON } from './core/utils.js'
+import { curvatureSamples, toothScale, combLines } from './core/curvature.js'
 import { supportsFillet, curveFillet, trimToPoint } from './core/sketch-fillet.js'
 import { pasteSketchSelection } from './sketch-clipboard.js'
 import materials, { DRAFT_DIRECTIONS } from './materials.js'
@@ -612,15 +613,6 @@ class HighlightTool extends Tool {
 }
 
 
-// Curvature and unit principal normal, pointing to the center of curvature,
-// from a curve's first and second derivatives
-function curvatureAt(d1, d2) {
-  const speed = d1.length()
-  const kappa = new THREE.Vector3().crossVectors(d1, d2).length() / speed ** 3
-  const normal = d2.clone().addScaledVector(d1, -d1.dot(d2) / speed ** 2).normalize()
-  return { kappa, normal }
-}
-
 function isCurved(item) {
   if(item instanceof Edge) return !(item.geom().curve() instanceof sx.Line3)
   return item instanceof SketchElement && !!item.geom &&
@@ -710,33 +702,14 @@ export class CurvatureTool extends HighlightTool {
     const transform = isEdge ?
       worldTransform(curve.solid.component) :
       worldTransform(curve.sketch.component).multiply(curve.sketch.workplane)
-    const range = geom.range()
-    return Array.from({ length: this.samples }, (_, i) => {
-      const evaluation = geom.evaluate(range.start + range.span() * i / (this.samples - 1))
-      const [point, d1, d2] = [evaluation.point, evaluation.firstDerivative, evaluation.secondDerivative]
-        .map(value => new THREE.Vector3(value.x, value.y, value.z || 0))
-      const { kappa, normal } = curvatureAt(d1, d2)
-      return {
-        point: point.applyMatrix4(transform),
-        normal: normal.transformDirection(transform),
-        kappa,
-      }
-    })
+    return curvatureSamples(geom, transform, this.samples)
   }
 
   update() {
     this.combs.forEach(comb => comb.samples = this.sampleCurve(comb.curve))
-    const samples = this.combs.flatMap(comb => comb.samples)
-    const maxKappa = Math.max(...samples.map(sample => sample.kappa))
-    const size = new THREE.Box3().setFromPoints(samples.map(sample => sample.point)).getSize(new THREE.Vector3()).length()
-    // The strongest curvature gets teeth a fifth the size of all combs together
-    const toothScale = this.combScale * 0.2 * size / maxKappa
-
-    const tips = this.combs.map(comb => comb.samples.map(sample =>
-      sample.point.clone().addScaledVector(sample.normal, -sample.kappa * toothScale)
-    ))
-    const teeth = this.combs.flatMap((comb, i) => comb.samples.map((sample, j) => [sample.point.toArray(), tips[i][j].toArray()]))
-    const envelopes = tips.map(points => points.map(point => point.toArray()))
+    // Shared tooth scale, keeping combs comparable
+    const scale = toothScale(this.combs.flatMap(comb => comb.samples), this.combScale)
+    const { teeth, envelopes } = combLines(this.combs.map(comb => comb.samples), scale)
 
     this.combPreview.clear()
     this.combPreview.add(

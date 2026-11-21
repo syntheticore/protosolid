@@ -26,8 +26,10 @@
         )
           | {{ tab.title }}
 
-        label.reference(
+        //- Options of the selected geometry
+        label.selection-option(
           v-if="document.activeSketch && index == activeTab && !stacked"
+          :class="{ collapsed: !referenceElements.length }"
           data-flip="reference"
           title="Reference geometry"
         )
@@ -41,6 +43,23 @@
             :indeterminate.prop="refIndeterminate"
             :key="Math.random()"
             @click.prevent="toggleReference"
+          )
+
+        label.selection-option(
+          v-if="document.activeSketch && index == activeTab && !stacked"
+          :class="{ collapsed: !splineElements.length }"
+          data-flip="curvature"
+          title="Curvature comb of selected splines"
+        )
+
+          Icon(icon="curvature")
+
+          input(
+            type="checkbox"
+            :checked="curvatureChecked"
+            :indeterminate.prop="curvatureIndeterminate"
+            :key="Math.random()"
+            @click.prevent="toggleCurvature"
           )
 
         ul.tools(:data-flip="'tools-' + index" @scroll="index == activeTab && onScroll($event)")
@@ -120,15 +139,27 @@
       opacity: 0
       pointer-events: none
 
-  .reference
+  .selection-option
     position: relative
-    border-right: 1px solid dark1()
     display: flex
     flex-direction: column
     font-size: 0.7rem
     justify-content: center
     gap: 0.5rem
     padding-inline: 0.5rem
+    // Room for the content, so it collapses at its own pace
+    max-width: 48px
+    overflow: hidden
+    transition-property: max-width, padding, opacity, visibility
+    transition-duration: 0.2s
+    transition-timing-function: ease-out
+
+    // Folds away while nothing it applies to is selected
+    &.collapsed
+      max-width: 0
+      padding-inline: 0
+      opacity: 0
+      visibility: hidden
 
     svg
       padding-inline: 8px
@@ -284,6 +315,7 @@
 
   import {
     SketchElement,
+    Spline,
   } from './../js/core/geom2d.js'
 
   import {
@@ -416,18 +448,28 @@
         }
       },
 
+      referenceElements: function() {
+        return this.document.selection.items.filter(item => item instanceof SketchElement)
+      },
+
       refChecked: function() {
-        if(this.document.selection.items.length) {
-          return this.document.selection.items.some(sel => sel.isReference )
-        } else {
-          return this.document.referenceMode
-        }
+        return this.referenceElements.some(elem => elem.isReference)
       },
 
       refIndeterminate: function() {
-        const first = this.document.selection.items[0]
-        if(!first) return false
-        return this.document.selection.items.some(sel => sel.isReference != first.isReference )
+        return this.refChecked && !this.referenceElements.every(elem => elem.isReference)
+      },
+
+      splineElements: function() {
+        return this.document.selection.items.filter(item => item instanceof Spline)
+      },
+
+      curvatureChecked: function() {
+        return this.splineElements.some(elem => elem.showCurvature)
+      },
+
+      curvatureIndeterminate: function() {
+        return this.curvatureChecked && !this.splineElements.every(elem => elem.showCurvature)
       },
     },
 
@@ -993,17 +1035,18 @@
       },
 
       toggleReference: function() {
-        if(!this.document.selection.items.length) {
-          this.document.referenceMode = !this.document.referenceMode
-        } else {
-          this.document.selection.items
-            .filter(item => item instanceof SketchElement )
-            .forEach(elem => {
-              elem.isReference = !elem.isReference
-              if(elem.projection) elem.projection.isReference = elem.isReference
-              elem.sketch.profileUpdateNeeded = true
-            })
-        }
+        this.referenceElements.forEach(elem => {
+          elem.isReference = !elem.isReference
+          if(elem.projection) elem.projection.isReference = elem.isReference
+          elem.sketch.profileUpdateNeeded = true
+        })
+      },
+
+      toggleCurvature: function() {
+        const show = !this.curvatureChecked
+        this.splineElements.forEach(elem => elem.showCurvature = show)
+        this.document.activeSketch.recordHistory()
+        this.document.hasChanges = true
       },
     },
   }

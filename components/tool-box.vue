@@ -403,6 +403,7 @@
   import { StaticSimulation } from './../js/core/static.js'
   import { FluidSimulation } from './../js/core/fluid.js'
   import { CamSetup, addOperation, operationTypes } from './../js/core/cam.js'
+  import { Animation } from './../js/core/animation.js'
   import { createDrawing } from './../js/core/drawing.js'
 
   const layoutDuration = 200
@@ -613,7 +614,7 @@
               { title: 'Joint', feature: JointFeature },
               { title: 'Group', feature: GroupFeature },
               { title: 'Motion Link', feature: MotionLinkFeature },
-              { title: 'Animation', icon: 'feather' }, //icon: 'clapperboard'
+              { title: 'Animation', action: this.addAnimation, icon: 'film' },
               { title: 'Static Load', action: this.addStaticLoad, icon: 'weight' },
               { title: 'Heat Flow', action: this.addHeatFlow, icon: 'thermometer' },
               { title: 'Fluid Flow', action: this.addFluidFlow, icon: 'wind' },
@@ -985,6 +986,14 @@
         const setup = new CamSetup()
         this.document.activeComponent.creator.camSetups.push(setup)
         this.document.activateInteractivePanel(`cam:${this.document.activeComponent.id}:${setup.id}`)
+        this.document.markChanged()
+      },
+
+      addAnimation: function() {
+        const component = this.document.activeComponent
+        const animation = new Animation()
+        component.creator.animations.push(animation)
+        this.document.activateInteractivePanel(`animation:${component.id}:${animation.id}`)
         this.document.markChanged()
       },
 

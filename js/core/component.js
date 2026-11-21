@@ -26,6 +26,7 @@ export class ComponentDefinition {
     this.flatPatterns = []
     this.simulations = []
     this.camSetups = []
+    this.animations = []
     this.drawings = []
     this.canvases = []
     this.itemsHidden = {}
@@ -95,6 +96,7 @@ export class ComponentDefinition {
     def.parameters ||= []
     def.simulations ||= []
     def.camSetups ||= []
+    def.animations ||= []
     def.drawings ||= []
     def.flatPatterns ||= []
     def.updateMaterials()

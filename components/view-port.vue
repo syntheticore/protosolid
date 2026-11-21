@@ -747,7 +747,8 @@
           this.document.activeFeature ||
           this.document.creatingFeature ||
           this.document.activeSketch ||
-          this.document.activeInteractivePanel
+          // Animations keyframe components moved with the gizmo
+          (this.document.activeInteractivePanel && !this.document.animationMode)
         ) return
 
         const selectedComponents = this.document.selection.items
@@ -794,6 +795,7 @@
             })
             gizmo.setTransform(desiredWorld)
           }
+          this.bus.emit('components-moved', componentIds)
           this.renderer.render()
         }))
         const captureStart = () => {

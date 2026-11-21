@@ -127,6 +127,15 @@
         :setup="setup"
       )
 
+      //- Animations
+      TreeletAnimation(
+        v-for="animation in component.creator.animations"
+        :key="animation.id"
+        :document="document"
+        :component="component"
+        :animation="animation"
+      )
+
       //- Centroid
       TreeletCentroid(
         v-if="component.creator.cog"
@@ -459,6 +468,7 @@
           this.component.creator.material ||
           this.component.creator.simulations.length ||
           this.component.creator.camSetups.length ||
+          this.component.creator.animations.length ||
           this.component.creator.parameters.length ||
           this.component.creator.variant ||
           this.component.creator.sectionViews.length ||

@@ -57,6 +57,7 @@ export default class Document extends Emitter {
     this.activeExportConfig = null
     this.activeExportComponentId = null
     this.camPlayer = null
+    this.animationPlayer = null
     this.activeDrawing = null
     this.activeDrawingComponentId = null
     this.activeDrawingTool = null
@@ -429,6 +430,10 @@ export default class Document extends Emitter {
 
   get camMode() {
     return !!this.activeInteractivePanel?.startsWith('cam:')
+  }
+
+  get animationMode() {
+    return !!this.activeInteractivePanel?.startsWith('animation:')
   }
 
   // The stock replaces the part while machining is simulated

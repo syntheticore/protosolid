@@ -140,7 +140,7 @@
             ToggleSwitch(v-model="showConstraintMarkers")
             span Constraints
 
-      .pose(:class="{ hidden: !document.top().hasPoseChange() || document.activeMerge }")
+      .pose(:class="{ hidden: !document.top().hasPoseChange() || document.activeMerge || document.animationMode }")
 
         h1 POSE
 
@@ -155,6 +155,12 @@
     )
 
     CamBar(v-if="document.camMode && document.camPlayer" :player="document.camPlayer")
+
+    AnimationBar(
+      v-else-if="document.animationMode && document.animationPlayer"
+      :document="document"
+      :player="document.animationPlayer"
+    )
 
     FeatureBar(
       v-else
@@ -316,6 +322,7 @@
 
   .feature-bar
   .cam-bar
+  .animation-bar
     position: absolute
     bottom: 12px
     max-width: calc(100% - 24px)

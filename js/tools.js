@@ -1043,6 +1043,7 @@ export class ManipulationTool extends HighlightTool {
       // continuous. Keeping the previous solution as the next initial pose
       // prevents multi-joint chains from jumping to another valid branch.
       solveAssembly(tree, comp, desiredWorld, 64, this.dragPoint, pointerTravel)
+      this.viewport.bus.emit('components-moved', [comp.id])
 
     // Drag Empty Sketch Area
     } else if(this.boxDrag) {

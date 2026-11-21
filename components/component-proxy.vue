@@ -269,7 +269,7 @@
 
   // Hovered helpers show even when hidden or outside the active component
   function isHelperHighlighted(helper) {
-    return helper == highlight.value || helper.id == highlight.value?.planeId
+    return helper == highlight.value || helper.id == highlight.value?.helperId
   }
 
   function getSections(comp) {

@@ -13,7 +13,7 @@
   const pickerSelection = inject('picker-selection')
   const renderNeeded = inject('render-needed')
 
-  const highlighted = computed(() => props.parentHighlighted || props.helper == highlight.value || props.helper.id == highlight.value?.planeId )
+  const highlighted = computed(() => props.parentHighlighted || props.helper == highlight.value || props.helper.id == highlight.value?.helperId )
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.helper) ||
     pickerSelection.value.get(props.component.id)?.has(props.helper.id))
 

@@ -134,15 +134,15 @@
             Icon(icon="atom" fixed-width)
             h2 Center of Mass
 
-      //- Planes
-      TreeletPlane(
-        v-for="(plane, i) in planes"
-        :key="plane.id"
+      //- Construction planes, axes and points
+      TreeletHelper(
+        v-for="helper in constructionHelpers"
+        :key="helper.id"
         v-bind="$attrs"
         :component="component"
         :document="document"
-        :plane="plane"
-        :index="i"
+        :helper="helper"
+        :index="constructionHelpers.filter(other => other.constructor === helper.constructor).indexOf(helper)"
       )
 
       //- Canvases
@@ -412,8 +412,6 @@
 
 <script>
 
-  import { PlaneHelper } from '../js/core/helpers.js'
-
   export default {
     name: 'TreeItem',
 
@@ -453,7 +451,7 @@
       canExpand: function() {
         if(this.isInstance) return false
         return this.component.children.length ||
-          this.planes.length ||
+          this.constructionHelpers.length ||
           this.component.compound.solids().length ||
           this.component.sketches.length ||
           this.component.creator.cog ||
@@ -468,11 +466,8 @@
           this.component.creator.flatPatterns.length
       },
 
-      planes: function() {
-        const defaultPlaneIds = ['XY', 'XZ', 'YZ'].map(name => `${this.component.id}/${name}`)
-        return this.component.helpers.filter(helper =>
-          helper instanceof PlaneHelper && !defaultPlaneIds.includes(helper.id)
-        )
+      constructionHelpers: function() {
+        return this.component.helpers.filter(helper => !helper.isStandard())
       },
 
       isVisible: function() {

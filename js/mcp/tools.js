@@ -200,7 +200,7 @@ function featureResult(doc, feature, warning) {
   return {
     feature: describeFeature(doc, feature, { schema: false }),
     ...(warning && { warning }),
-    ...(feature.planeId && { plane: `helper:${feature.componentId}:${feature.planeId}` }),
+    ...(feature.helperId && { [featureName(feature)]: `helper:${feature.componentId}:${feature.helperId}` }),
     marker: doc.timeline.marker,
     modifiedComponents: feature.modifiedComponents().map(id => tree.findChild(id)).filter(Boolean).map(component => ({
       id: itemId(component),

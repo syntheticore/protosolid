@@ -2,6 +2,8 @@ import Serialize from '../core/serialize.js'
 import {
   CreateSketchFeature,
   PlaneFeature,
+  AxisFeature,
+  PointFeature,
   ExtrudeFeature,
   RevolveFeature,
   LoftFeature,
@@ -39,6 +41,8 @@ import {
 export const featureTypes = {
   sketch: CreateSketchFeature,
   plane: PlaneFeature,
+  axis: AxisFeature,
+  point: PointFeature,
   extrude: ExtrudeFeature,
   revolve: RevolveFeature,
   loft: LoftFeature,
@@ -77,6 +81,14 @@ export const settingNotes = {
     rotationX: 'Turns the offset plane about its own X axis, before rotationY turns it about its own Y axis. ' +
       'Based on XY, the normal becomes Rx(rotationX)·Ry(rotationY)·Z. Later changes turn the plane further from its current orientation.',
     rotationY: 'Turns the offset plane about its own Y axis, after rotationX',
+    position: 'Position along the curve in percent of its length',
+  },
+  axis: {
+    facePoint: 'Where the axis leaves the face. Defaults to the face center.',
+  },
+  point: {
+    axis: 'Any straight edge, sketch line, circle, cylindrical face or axis. Skew axes give the point halfway between them.',
+    path: 'Straight curves extend infinitely to cross the plane',
     position: 'Position along the curve in percent of its length',
   },
   extrude: {

@@ -23,7 +23,7 @@
           .picker(
             v-if="activeFeature.needsPicker(key, true)"
             :ref="key"
-            :class="{ active: activePicker == key, filled: activeFeature[key] }"
+            :class="['color-' + pickerColors[key], { active: activePicker == key, filled: activeFeature[key] }]"
             @click="pick(key)"
             @contextmenu.prevent.stop="clearPick(key)"
           )
@@ -178,26 +178,6 @@
     & + .setting
       margin-left: 12px
 
-    &:nth-of-type(1) .picker
-      background: $blue
-      border-color: lighten($blue, 75%)
-
-    &:nth-of-type(2) .picker
-      background: $purple
-      border-color: lighten($purple, 75%)
-
-    &:nth-of-type(3) .picker
-      background: $pink
-      border-color: lighten($pink, 75%)
-
-    &:nth-of-type(4) .picker
-      background: $orange
-      border-color: lighten($orange, 75%)
-
-    &:nth-of-type(5) .picker
-      background: $green
-      border-color: lighten($green, 75%)
-
     > :not(span)
       margin-top: 6px
 
@@ -232,6 +212,26 @@
     border: 7px solid white
     border-radius: 99px
     transition: all 0.06s
+
+    &.color-0
+      background: $blue
+      border-color: lighten($blue, 75%)
+
+    &.color-1
+      background: $purple
+      border-color: lighten($purple, 75%)
+
+    &.color-2
+      background: $pink
+      border-color: lighten($pink, 75%)
+
+    &.color-3
+      background: $orange
+      border-color: lighten($orange, 75%)
+
+    &.color-4
+      background: $green
+      border-color: lighten($green, 75%)
 
     &:hover
       border-width: 0px
@@ -385,6 +385,12 @@
             Number(this.activeFeature.isPickerSetting(right)) - Number(this.activeFeature.isPickerSetting(left))
           )
         )
+      },
+
+      // Colors follow the visible pickers, skipping those hidden by the current mode
+      pickerColors: function() {
+        const keys = Object.keys(this.orderedSettings).filter(key => this.activeFeature.needsPicker(key, true))
+        return Object.fromEntries(keys.map((key, index) => [key, index % 5]))
       },
 
       canConfirm: function() {

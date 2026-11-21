@@ -3,7 +3,7 @@ import { nextTick, markRaw } from 'vue'
 
 import { Timeline } from './timeline.js'
 import { saveFile, loadFile, chooseSavePath } from '../utils.js'
-import { Feature, SolidFeature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PlaneFeature, PoseFeature, PlaceFeature } from './features.js'
+import { Feature, SolidFeature, ConvertBodyToComponentFeature, CreateComponentFeature, CreateComponentInstanceFeature, CreateSketchFeature, PoseFeature, PlaceFeature } from './features.js'
 import './sheet-metal.js'
 import { Selection } from '../selection.js'
 import { SectionView } from './component.js'
@@ -618,8 +618,8 @@ export default class Document extends Emitter {
         for(let comp = component; comp; comp = comp.parent) comp.creator.hidden = false
       })
 
-      // Show the edited plane while editing.
-      if(feature instanceof PlaneFeature) this.activeComponent.creator.itemsHidden[feature.planeId] = false
+      // Show the edited plane, axis or point while editing.
+      if(feature.helperId) this.activeComponent.creator.itemsHidden[feature.helperId] = false
 
       // Legacy and non-solid features do not have a saved visibility state.
       if(!feature.visibilities) compIds.forEach(id => this.getComponent(id).creator.hidden = false )

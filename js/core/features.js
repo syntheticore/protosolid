@@ -7,7 +7,7 @@ import { Compound, chamferReferenceFaces, importedCompound } from './geom3d.js'
 import { cylinderFrame, standardPitch, threadGroove } from './thread.js'
 import { shapex, modelTolerance, matrixFromTransform } from './shapex.js'
 import { PatternInputReference } from './references.js'
-import { PlaneHelper } from './helpers.js'
+import { PlaneHelper, AxisHelper, PointHelper } from './helpers.js'
 import { normalFromMatrix, parseHsl, rad, rotationFromNormal } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
@@ -1718,24 +1718,90 @@ function planeFrame(origin, normal, xHint) {
   return new THREE.Matrix4().makeBasis(xAxis, normal.clone().cross(xAxis), normal).setPosition(origin)
 }
 
+const matrixPosition = matrix => new THREE.Vector3().setFromMatrixPosition(matrix)
+
+// Line where two planes meet as { origin, direction }, or null for parallel
+// planes. The origin lies closest to the middle of both plane origins.
+function planeIntersection(first, second) {
+  const normalA = normalFromMatrix(first)
+  const normalB = normalFromMatrix(second)
+  const direction = normalA.clone().cross(normalB)
+  if(direction.lengthSq() < 1e-12) return null
+  const originA = matrixPosition(first)
+  const originB = matrixPosition(second)
+  const support = normalB.clone().cross(direction).multiplyScalar(normalA.dot(originA))
+    .add(direction.clone().cross(normalA).multiplyScalar(normalB.dot(originB)))
+    .divideScalar(direction.lengthSq())
+  direction.normalize()
+  const center = originA.add(originB).multiplyScalar(0.5)
+  return { origin: support.addScaledVector(direction, center.sub(support).dot(direction)), direction }
+}
+
+// Point shared by three planes, or null if they don't meet in one
+function threePlaneIntersection(planes) {
+  const normals = planes.map(normalFromMatrix)
+  const [normalA, normalB, normalC] = normals
+  const [distA, distB, distC] = planes.map((plane, i) => normals[i].dot(matrixPosition(plane)))
+  const det = normalA.dot(normalB.clone().cross(normalC))
+  if(Math.abs(det) < 1e-6) return null
+  return normalB.clone().cross(normalC).multiplyScalar(distA)
+    .add(normalC.clone().cross(normalA).multiplyScalar(distB))
+    .add(normalA.clone().cross(normalB).multiplyScalar(distC))
+    .divideScalar(det)
+}
+
+// Closest points of two axes, or null for parallel axes
+function axisClosestPoints(first, second) {
+  const originA = matrixPosition(first)
+  const originB = matrixPosition(second)
+  const directionA = normalFromMatrix(first)
+  const directionB = normalFromMatrix(second)
+  const between = originA.clone().sub(originB)
+  const cos = directionA.dot(directionB)
+  const denominator = 1 - cos * cos
+  if(denominator < 1e-12) return null
+  const along = directionA.dot(between)
+  const alongB = directionB.dot(between)
+  return [
+    originA.addScaledVector(directionA, (cos * alongB - along) / denominator),
+    originB.addScaledVector(directionB, (alongB - cos * along) / denominator),
+  ]
+}
+
+// First crossing of a path with a plane. Straight paths extend infinitely.
+function pathPlaneIntersection(path, plane) {
+  const normal = normalFromMatrix(plane)
+  const origin = matrixPosition(plane)
+  const points = path.getPath()
+  const distances = points.map(point => point.clone().sub(origin).dot(normal))
+  if(points.length == 2) {
+    const span = distances[0] - distances[1]
+    if(Math.abs(span) < 1e-9) return null
+    return points[0].clone().lerp(points[1], distances[0] / span)
+  }
+  const index = distances.findIndex((distance, i) => i && distance * distances[i - 1] <= 0)
+  if(index == -1) return null
+  const t = distances[index - 1] / (distances[index - 1] - distances[index]) || 0
+  return points[index - 1].clone().lerp(points[index], t)
+}
+
+const axisFrame = (origin, direction) => rotationFromNormal(direction.clone().normalize()).setPosition(origin)
+
 // Planes halfway between parallel planes, or bisecting the acute angle
 // between intersecting ones. The origin lies central to both base origins.
 function midplaneFrame(first, second) {
   const normalA = normalFromMatrix(first)
   const normalB = normalFromMatrix(second)
-  const originA = new THREE.Vector3().setFromMatrixPosition(first)
-  const originB = new THREE.Vector3().setFromMatrixPosition(second)
-  const line = normalA.clone().cross(normalB)
+  const originA = matrixPosition(first)
+  const originB = matrixPosition(second)
+  const line = planeIntersection(first, second)
   let normal, support
-  if(line.lengthSq() < 1e-12) {
+  if(!line) {
     normal = normalA
     support = originA.clone().addScaledVector(normalA, originB.clone().sub(originA).dot(normalA) / 2)
   } else {
     normal = normalA.dot(normalB) >= 0 ? normalA.clone().add(normalB) : normalA.clone().sub(normalB)
-    // Point on the intersection line of both planes
-    support = normalB.clone().cross(line).multiplyScalar(normalA.dot(originA))
-      .add(line.clone().cross(normalA).multiplyScalar(normalB.dot(originB)))
-      .divideScalar(line.lengthSq())
+    support = line.origin
   }
   normal = normal.clone().normalize()
   const center = originA.clone().add(originB).multiplyScalar(0.5)
@@ -1863,6 +1929,10 @@ export class PlaneFeature extends Feature {
     this.rotationAppliedY = 0
 
     this.planeId = makeID()
+  }
+
+  get helperId() {
+    return this.planeId
   }
 
   settingChanged(key, value) {
@@ -2045,6 +2115,230 @@ export class PlaneFeature extends Feature {
 }
 
 Serialize.register(PlaneFeature, 'PlaneFeature')
+
+
+// Construction axes and points add one helper, placed from their inputs
+class ConstructionFeature extends Feature {
+  constructor(doc, title, settings) {
+    super(doc, false, title, settings)
+    this.mode = Object.keys(settings.mode.options)[0]
+    this.helperId = makeID()
+  }
+
+  updateFeature(tree, references) {
+    const transform = this.placement(references)
+    if(!transform) {
+      this.error = { type: 'error', msg: this.constructor.placementErrors[this.mode] }
+      return
+    }
+    const helper = new this.constructor.Helper(this.componentId, transform, this.helperId)
+    tree.findChild(this.componentId).helpers.push(helper)
+  }
+
+  dump() {
+    return {
+      ...super.dump(),
+      helperId: this.helperId,
+    }
+  }
+
+  static undump(dump, context) {
+    return Object.assign(super.undump(dump, context), {
+      helperId: dump.helperId,
+    })
+  }
+}
+
+
+export class AxisFeature extends ConstructionFeature {
+  static icon = 'construction-axis'
+  static Helper = AxisHelper
+
+  constructor(doc) {
+    const modes = modes => feature => modes.includes(feature.mode)
+    super(doc, 'Axis', {
+      mode: {
+        title: 'Mode',
+        type: 'select',
+        options: {
+          perpendicular: { title: 'Perpendicular to face', icon: 'long-arrow-alt-up' },
+          twoPlanes: { title: 'Through two planes', icon: 'times' },
+          twoPoints: { title: 'Through two points', icon: 'arrows-alt-h' },
+        },
+      },
+      face: {
+        title: 'Face',
+        type: 'face',
+        when: modes(['perpendicular']),
+      },
+      facePoint: {
+        title: '(Point)',
+        type: 'point',
+        optional: true,
+        when: modes(['perpendicular']),
+      },
+      base: {
+        title: 'Plane',
+        type: 'plane',
+        when: modes(['twoPlanes']),
+      },
+      base2: {
+        title: 'Second plane',
+        type: 'plane',
+        when: modes(['twoPlanes']),
+      },
+      point: {
+        title: 'Point',
+        type: 'point',
+        when: modes(['twoPoints']),
+      },
+      point2: {
+        title: 'Second point',
+        type: 'point',
+        when: modes(['twoPoints']),
+      },
+    })
+
+    this.face = null
+    this.facePoint = null
+    this.base = null
+    this.base2 = null
+    this.point = null
+    this.point2 = null
+  }
+
+  static placementErrors = {
+    twoPlanes: 'Planes must not be parallel',
+    twoPoints: 'Points must not coincide',
+  }
+
+  placement(references) {
+    switch(this.mode) {
+      case 'perpendicular': {
+        const face = references.face
+        const target = references.facePoint ? matrixPosition(references.facePoint) : face.center()
+        const plane = face.getPlane()
+        if(!plane) {
+          const { center, direction } = faceGizmoFrame(face.tesselate(), target)
+          return axisFrame(center, direction)
+        }
+        const normal = normalFromMatrix(plane)
+        const offset = target.clone().sub(matrixPosition(plane)).dot(normal)
+        return axisFrame(target.addScaledVector(normal, -offset), normal)
+      }
+      case 'twoPlanes': {
+        const line = planeIntersection(references.base, references.base2)
+        return line && axisFrame(line.origin, line.direction)
+      }
+      default: {
+        const start = matrixPosition(references.point)
+        const direction = matrixPosition(references.point2).sub(start)
+        return direction.lengthSq() > 1e-12 ? axisFrame(start, direction) : null
+      }
+    }
+  }
+}
+
+Serialize.register(AxisFeature, 'AxisFeature')
+
+
+export class PointFeature extends ConstructionFeature {
+  static icon = 'construction-point'
+  static Helper = PointHelper
+
+  constructor(doc) {
+    const modes = modes => feature => modes.includes(feature.mode)
+    super(doc, 'Point', {
+      mode: {
+        title: 'Mode',
+        type: 'select',
+        options: {
+          twoAxes: { title: 'Through two axes', icon: 'times' },
+          threePlanes: { title: 'Through three planes', icon: 'cube' },
+          edgePlane: { title: 'At edge and plane', icon: 'crosshairs' },
+          path: { title: 'Along path', icon: 'bezier-curve' },
+        },
+      },
+      axis: {
+        title: 'Axis',
+        type: 'axis',
+        when: modes(['twoAxes']),
+      },
+      axis2: {
+        title: 'Second axis',
+        type: 'axis',
+        when: modes(['twoAxes']),
+      },
+      path: {
+        title: 'Curve',
+        type: 'path',
+        when: modes(['edgePlane', 'path']),
+      },
+      base: {
+        title: 'Plane',
+        type: 'plane',
+        when: modes(['threePlanes', 'edgePlane']),
+      },
+      base2: {
+        title: 'Second plane',
+        type: 'plane',
+        when: modes(['threePlanes']),
+      },
+      base3: {
+        title: 'Third plane',
+        type: 'plane',
+        when: modes(['threePlanes']),
+      },
+      position: {
+        title: 'Position %',
+        type: 'number',
+        min: 0,
+        max: 100,
+        when: modes(['path']),
+      },
+    })
+
+    this.axis = null
+    this.axis2 = null
+    this.path = null
+    this.base = null
+    this.base2 = null
+    this.base3 = null
+    this.position = 50
+  }
+
+  static placementErrors = {
+    twoAxes: 'Axes must not be parallel',
+    threePlanes: 'Planes must meet in a single point',
+    edgePlane: 'Curve must cross the plane',
+  }
+
+  placement(references) {
+    const point = this.placementPoint(references)
+    return point && new THREE.Matrix4().setPosition(point)
+  }
+
+  placementPoint(references) {
+    switch(this.mode) {
+      case 'twoAxes': {
+        const closest = axisClosestPoints(references.axis, references.axis2)
+        if(!closest) return null
+        if(closest[0].distanceTo(closest[1]) > modelTolerance.linear) {
+          this.error = { type: 'warning', msg: 'Axes do not intersect, the point lies halfway between them' }
+        }
+        return closest[0].lerp(closest[1], 0.5)
+      }
+      case 'threePlanes':
+        return threePlaneIntersection([references.base, references.base2, references.base3])
+      case 'edgePlane':
+        return pathPlaneIntersection(references.path, references.base)
+      default:
+        return matrixPosition(curveFrame(references.path, this.position / 100))
+    }
+  }
+}
+
+Serialize.register(PointFeature, 'PointFeature')
 
 
 // Features that store a referenced file's contents regenerate without it.

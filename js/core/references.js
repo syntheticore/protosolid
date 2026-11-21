@@ -327,11 +327,17 @@ Serialize.register(SketchOriginReference, 'SketchOriginReference')
 
 
 export class ProfileReference extends Reference {
-  update(_tree) {
+  get componentId() { return this.item.componentId }
+
+  update(tree) {
+    const component = tree.findChild(this.componentId)
+    const sketch = component?.sketches.find(sketch => sketch.id == this.item.sketch.id)
+    if(!sketch) return { type: 'error', msg: 'Profile was lost' }
+    this.item.sketch = sketch
     return this.item.update()
   }
 
-  referencedItems() { return [{ componentId: this.item.sketch.component.id, itemId: this.item.sketch.id }] }
+  referencedItems() { return [{ componentId: this.componentId, itemId: this.item.sketch.id }] }
 
   clone() {
     return new ProfileReference(this.item.clone())

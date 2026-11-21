@@ -193,7 +193,8 @@ export class SheetFaceFeature extends SolidFeature {
   }
 
   getGizmo() {
-    const profile = this.profiles().at(-1).getItem()
+    const profile = this.profileInComponent(this.profiles().at(-1).getItem())
+    if(!profile) return
     return {
       distance: {
         center: profile.center(),

@@ -124,6 +124,17 @@ export class Profile {
     this.rings = rings
     this.id = makeID()
   }
+  get componentId() {
+    return this.sketch.creator?.componentId ?? this.sketch.component?.id
+  }
+  get workplane() {
+    return this.placedWorkplane ?? this.sketch.workplane
+  }
+  transform(transform) {
+    const profile = this.clone()
+    profile.placedWorkplane = transform.clone().multiply(this.workplane)
+    return profile
+  }
   geom() {
     const rings = this.rings.map(ring => ring.geom())
     return sx.Profile.new(rings[0], rings.slice(1), modelTolerance)
@@ -154,17 +165,17 @@ export class Profile {
     const out = new THREE.Vector3()
     this.rings[0].segments.forEach(seg => out.add(seg.center()))
     out.divideScalar(this.rings[0].segments.length)
-    return out.applyMatrix4(this.sketch.workplane)
+    return out.applyMatrix4(this.workplane)
   }
   normal() {
-    return normalFromMatrix(this.sketch.workplane)
+    return normalFromMatrix(this.workplane)
   }
   getBaseId(curve) {
     return curve.id.split('/')[0]
   }
   extrude(componentId, height, featureId, offset = 0) {
     if (!height) fail('Extrusion has no volume')
-    const plane = planeFromMatrix(this.sketch.workplane)
+    const plane = planeFromMatrix(this.workplane)
     const geometry = this.geom().extrude(plane, plane.normal().scaled(height))
     const compound = new Compound(componentId, geometry)
     compound.seedProfileTopology([this], featureId)
@@ -175,7 +186,7 @@ export class Profile {
   extrudeThroughAll(componentId, support, featureId, side = 'forward') {
     if (!support?.geom || !support.solids().length) fail('Through all requires an existing body')
     const profileDirection = this.normal().normalize()
-    const origin = new THREE.Vector3().setFromMatrixPosition(this.sketch.workplane)
+    const origin = new THREE.Vector3().setFromMatrixPosition(this.workplane)
     const [minimum, maximum] = extrusionRange(support.geom(), origin, profileDirection)
     const start = side == 'forward' ? 0 : Math.min(0, minimum)
     const end = side == 'reverse' ? 0 : Math.max(0, maximum)
@@ -194,14 +205,14 @@ export class Profile {
     const body = target.solid.geom().toCompound()
     try {
       const geometry = this.geom().extrudeUpToFace(
-        planeFromMatrix(this.sketch.workplane), body, target.geom(), offset, endOffset,
+        planeFromMatrix(this.workplane), body, target.geom(), offset, endOffset,
       )
       return new Compound(componentId, geometry).seedProfileTopology([this], featureId)
     } finally { body.free() }
   }
   revolve(componentId, axis, angle, featureId, offset = 0) {
     if (!angle) fail('Revolution has no volume')
-    const geometry = this.geom().revolve(planeFromMatrix(this.sketch.workplane), axisFromMatrix(axis), angle)
+    const geometry = this.geom().revolve(planeFromMatrix(this.workplane), axisFromMatrix(axis), angle)
     const compound = new Compound(componentId, geometry).seedProfileTopology([this], featureId)
     if (!offset) return compound
     const turn = axis.clone().multiply(new THREE.Matrix4().makeRotationZ(offset)).multiply(axis.clone().invert())
@@ -212,11 +223,11 @@ export class Profile {
     // Successive turns of a profile taller than the pitch overlap
     const direction = normalFromMatrix(axis)
     const heights = this.rings[0].tesselate().map(point =>
-      new THREE.Vector3(point[0], point[1], 0).applyMatrix4(this.sketch.workplane).dot(direction))
+      new THREE.Vector3(point[0], point[1], 0).applyMatrix4(this.workplane).dot(direction))
     if (Math.abs(angle) >= 2 * Math.PI && Math.max(...heights) - Math.min(...heights) >= Math.abs(pitch)) {
       fail('Pitch must exceed the profile height along the axis')
     }
-    const geometry = this.geom().coil(planeFromMatrix(this.sketch.workplane), axisFromMatrix(axis), angle, pitch)
+    const geometry = this.geom().coil(planeFromMatrix(this.workplane), axisFromMatrix(axis), angle, pitch)
     return new Compound(componentId, geometry).seedProfileTopology([this], featureId)
   }
   revolveUpToFace(componentId, axis, target, featureId, forward = true) {
@@ -224,7 +235,7 @@ export class Profile {
     const body = target.solid.geom().toCompound()
     try {
       const geometry = this.geom().revolveUpToFace(
-        planeFromMatrix(this.sketch.workplane), axisFromMatrix(axis), body, target.geom(), forward,
+        planeFromMatrix(this.workplane), axisFromMatrix(axis), body, target.geom(), forward,
       )
       return new Compound(componentId, geometry).seedProfileTopology([this], featureId)
     } finally { body.free() }
@@ -235,7 +246,7 @@ export class Profile {
     const untilBody = until.solid.geom().toCompound()
     try {
       const geometry = this.geom().revolveBetweenFaces(
-        planeFromMatrix(this.sketch.workplane), axisFromMatrix(axis),
+        planeFromMatrix(this.workplane), axisFromMatrix(axis),
         fromBody, from.geom(), untilBody, until.geom(), forward,
       )
       return new Compound(componentId, geometry).seedProfileTopology([this], featureId)
@@ -249,8 +260,8 @@ export class Profile {
     // Rational loft sections explicitly approximate derived curves at model tolerance.
     const section = profile => profile.geom().approximateRational(modelTolerance).profile
     const geometry = section(this).loft(
-      planeFromMatrix(this.sketch.workplane),
-      others.map(profile => ({ profile: section(profile), plane: planeFromMatrix(profile.sketch.workplane) })),
+      planeFromMatrix(this.workplane),
+      others.map(profile => ({ profile: section(profile), plane: planeFromMatrix(profile.workplane) })),
       untwist,
       connectedWires(guides.map(spatialCurve)),
     )
@@ -265,7 +276,7 @@ export class Profile {
       rail.solid.edges()))].filter(item => !selected.has(item.id))
     const rail = sx.Wire3.connect(rails.map(spatialCurve), modelTolerance)
       .extended(candidates.map(spatialCurve), true)
-    const geometry = this.geom().sweep(planeFromMatrix(this.sketch.workplane), rail)
+    const geometry = this.geom().sweep(planeFromMatrix(this.workplane), rail)
     return new Compound(componentId, geometry).seedProfileTopology([this], featureId, railSources)
   }
   update() {
@@ -317,6 +328,7 @@ export class Profile {
     const clone = new Profile(this.sketch, [...this.rings])
     clone.id = this.id
     clone.serializedRingIds = this.serializedRingIds
+    clone.placedWorkplane = this.placedWorkplane
     return clone
   }
 }

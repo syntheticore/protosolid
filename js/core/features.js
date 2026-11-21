@@ -3,7 +3,7 @@ import { markRaw, toRaw } from 'vue'
 
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
-import { Compound, boundingSphere, chamferReferenceFaces, importedCompound, namedBody } from './geom3d.js'
+import { Compound, Profile, boundingSphere, chamferReferenceFaces, importedCompound, namedBody } from './geom3d.js'
 import { SketchElement } from './geom2d.js'
 import { cylinderFrame, standardPitch, threadGroove } from './thread.js'
 import { shapex, modelTolerance, matrixFromTransform, planeFromMatrix, point2, threeVector } from './shapex.js'
@@ -85,11 +85,11 @@ export class Feature {
     return PatternInputReference.fromFeature(this)
   }
 
-  execute(tree) {
+  execute(tree, profilePlacementTree = tree) {
     if(this.suppressUpdate || !this.isComplete()) return
 
     this.error = null
-    const references = this.updateReferences(tree)
+    const references = this.updateReferences(tree, profilePlacementTree)
 
     if(this.error && this.error.type == 'error') return
 
@@ -138,7 +138,7 @@ export class Feature {
     }
   }
 
-  updateReferences(tree) {
+  updateReferences(tree, profilePlacementTree = tree) {
     const results = {}
     const errors = []
 
@@ -149,6 +149,7 @@ export class Feature {
       const { references, error } = this.resolveInputReferences(key, tree)
       let items = references.flatMap(ref => ref.getItems())
       if(error) errors.push(error)
+      if(setting.type == 'profile') items = items.map(profile => this.profileInComponent(profile, profilePlacementTree))
       // Saved selections of separate patches may resolve to the same cell.
       if(setting.multi && (setting.type == 'face' || setting.type == 'edge')) items = [...new Set(items)]
       results[key] = setting.multi ? items : items[0]
@@ -198,8 +199,9 @@ export class Feature {
 
   confirm() {
     const comp = this.document.top().findChild(this.componentId)
-    // Hide sketches whose geometry was consumed by the feature
+    // Hide consumed sketches owned by this component.
     this.involvedSketches(setting => ['profile', 'curve'].includes(setting.type) || setting.consumesSketch)
+      .filter(sketch => comp.sketches.includes(sketch))
       .forEach(sketch => comp.creator.itemsHidden[sketch.id] = true )
   }
 
@@ -237,7 +239,21 @@ export class Feature {
 
   acceptsInput(item) {
     const componentId = inputComponentId(item)
-    return !componentId || componentId == this.componentId
+    if(!componentId || componentId == this.componentId) return true
+    if(!(item instanceof Profile)) return false
+
+    const tree = this.document.top()
+    const source = tree.findChild(componentId)
+    const target = tree.findChild(this.componentOccurrenceId) || tree.findChild(this.componentId)
+    return !!(source && target?.hasAncestor(source))
+  }
+
+  profileInComponent(profile, tree = this.document.top()) {
+    if(!profile || profile.componentId == this.componentId) return profile
+    const source = tree.findChild(profile.componentId)
+    if(!source) return
+    const target = tree.findChild(this.componentOccurrenceId) || tree.findChild(this.componentId)
+    return profile.transform(relativeComponentTransform(source, target))
   }
 
   resolveInputReferences(key, tree = this.document.top(this.document.timeline.features.indexOf(this))) {
@@ -535,7 +551,8 @@ class RepeatingFeature extends SolidFeature {
 
       const replicas = features.map(feature => {
         const replica = replayReplica(feature)
-        replica.execute(tree)
+        // A later pose moves the result, but the profile stays in its original component frame.
+        replica.execute(tree, timeline.tree(feature))
         if(replica.error?.type == 'error') fail(`${feature.title}: ${replica.error.msg}`)
         if(replica.error) this.error = { ...replica.error, msg: `${feature.title}: ${replica.error.msg}` }
         return replica
@@ -2853,7 +2870,8 @@ export class ExtrudeFeature extends SolidFeature {
   }
 
   pickedInput(key, _reference, item) {
-    const profile = key == 'limitFace' && this.profiles?.().at(-1)?.getItem()
+    if(key != 'limitFace') return
+    const profile = this.profileInComponent(this.profiles?.().at(-1)?.getItem())
     if(!profile) return
     this.matchOperationToSide(item.center().sub(profile.center()).dot(profile.normal()) >= 0)
   }
@@ -2895,7 +2913,8 @@ export class ExtrudeFeature extends SolidFeature {
 
   getGizmo() {
     if(this.extent != 'distance') return
-    const profile = this.profiles().at(-1).getItem()
+    const profile = this.profileInComponent(this.profiles().at(-1).getItem())
+    if(!profile) return
     const center = profile.center().clone().addScaledVector(profile.normal(), this.offset * (this.side == 'reverse' ? -1 : 1))
     return {
       distance: {
@@ -3020,8 +3039,10 @@ export class RevolveFeature extends SolidFeature {
   }
 
   getGizmo() {
+    const profile = this.profileInComponent(this.profiles().at(-1).getItem())
+    if(!profile) return {}
     const axis = this.axis().getItem()
-    const profileCenter = this.profiles().at(-1).getItem().center()
+    const profileCenter = profile.center()
     const direction = normalFromMatrix(axis)
     const origin = new THREE.Vector3().setFromMatrixPosition(axis)
     const center = origin.clone().addScaledVector(direction, profileCenter.clone().sub(origin).dot(direction))
@@ -3373,10 +3394,12 @@ export class CoilFeature extends SolidFeature {
   }
 
   getGizmo() {
+    const profile = this.profileInComponent(this.profiles().at(-1).getItem())
+    if(!profile) return
     const axis = this.axis().getItem()
     const direction = normalFromMatrix(axis)
     const origin = new THREE.Vector3().setFromMatrixPosition(axis)
-    const profileCenter = this.profiles().at(-1).getItem().center()
+    const profileCenter = profile.center()
     const center = origin.clone().addScaledVector(direction, profileCenter.clone().sub(origin).dot(direction))
     const { revolutions, pitch } = this.coilSize()
     return {

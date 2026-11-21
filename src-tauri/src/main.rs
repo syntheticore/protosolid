@@ -120,8 +120,9 @@ fn show_preferences(app: &AppHandle, section: Option<String>) -> tauri::Result<(
 
     let mut builder = WebviewWindowBuilder::new(app, PREFERENCES, WebviewUrl::App(url.into()))
         .title("Settings")
-        .inner_size(760.0, 500.0)
-        .min_inner_size(680.0, 480.0)
+        // Fits the tallest section with the restart notice below it
+        .inner_size(760.0, 560.0)
+        .min_inner_size(680.0, 560.0)
         .center()
         .resizable(false)
         .decorations(false)

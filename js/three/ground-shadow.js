@@ -82,11 +82,12 @@ export default class GroundShadow {
       toneMapped: false,
     }))
     this.ground.visible = false
+    this.enabled = true
     this.hidden = false
   }
 
   update() {
-    if(this.hidden) {
+    if(this.hidden || !this.enabled) {
       this.ground.visible = false
       return
     }

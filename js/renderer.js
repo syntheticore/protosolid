@@ -99,10 +99,9 @@ export default class Renderer {
     this.dashY = new THREE.Vector3()
 
     // Ground Shadow
-    if(preferences.shadowMaps) {
-      this.groundShadow = new GroundShadow(this.renderer, this.world)
-      this.scene.add(this.groundShadow.ground)
-    }
+    this.groundShadow = new GroundShadow(this.renderer, this.world)
+    this.groundShadow.enabled = preferences.shadowMaps
+    this.scene.add(this.groundShadow.ground)
 
     // Gizmos
     this.gizmos = []
@@ -134,6 +133,13 @@ export default class Renderer {
 
     setPixelRatio()
     prefEmitter.on('updated', setPixelRatio)
+
+    prefEmitter.on('updated', () => {
+      if(this.groundShadow.enabled == preferences.shadowMaps) return
+      this.groundShadow.enabled = preferences.shadowMaps
+      this.invalidateShadows()
+      this.render()
+    })
 
     // Store as global
     window.alcRenderer = this
@@ -433,7 +439,7 @@ export default class Renderer {
     this.emitter.emit('before-render')
     if(this.shadowsNeedUpdate) {
       this.shadowsNeedUpdate = false
-      this.groundShadow?.update()
+      this.groundShadow.update()
     }
     // Camera-dependent dimension geometry must be ready before Three.js
     // culls objects and uploads their buffers for this frame.
@@ -531,7 +537,6 @@ export default class Renderer {
   }
 
   setGroundShadowHidden(hidden) {
-    if(!this.groundShadow) return
     this.groundShadow.hidden = hidden
     this.invalidateShadows()
     this.render()

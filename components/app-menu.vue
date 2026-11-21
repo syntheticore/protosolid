@@ -144,9 +144,8 @@
     font-size: 11px
     font-weight: 600
     color: bright2()
-    padding: 14px 8px 6px
+    padding: 18px 8px 6px
     border-top: 1px solid dark1()
-    margin-top: 4px
 
   .recent-files
     li:first-child button

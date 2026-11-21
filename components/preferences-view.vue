@@ -24,7 +24,7 @@
           Icon(:icon="section.icon" fixed-width)
           span {{ section.title }}
 
-    main.settings-content(:class="{ 'has-restart': restartRequired }")
+    main.settings-content
 
       section(v-if="activeSection === 'files'")
 
@@ -120,7 +120,7 @@
               strong Display shadows
               small Show a soft shadow below the model
 
-            ToggleSwitch(v-model="preferences.shadowMaps" @update:model-value="restartRequired = true")
+            ToggleSwitch(v-model="preferences.shadowMaps")
 
           label
 
@@ -380,20 +380,21 @@
         svg
           color: var(--fg)
 
+  // Only the section scrolls, so the restart notice below never covers it
   .settings-content
-    position: relative
+    display: grid
+    grid-template-rows: minmax(0, 1fr) auto
     min-width: 0
-    padding: contentInset
-    overflow: auto
-
-    &.has-restart
-      padding-bottom: 88px
 
     .input:focus
       border-color: bright2(0.7)
 
     section
-      max-width: 560px
+      padding: contentInset contentInset 24px
+      overflow: auto
+
+      > *
+        max-width: 560px
 
     header
       margin-bottom: 32px
@@ -480,10 +481,8 @@
     font-size: 12px
 
   .restart
-    position: absolute
-    right: contentInset
-    bottom: 24px
-    left: contentInset
+    max-width: 560px
+    margin: 0 contentInset 24px
     display: flex
     align-items: center
     justify-content: space-between

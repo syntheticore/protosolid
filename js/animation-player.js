@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import {
   captureMotionLinkStates, localTransform, restoreMotionLinkStates, solveAssembly, worldTransform,
 } from './core/assembly.js'
-import { sampleTrack, setKeyframe } from './core/animation.js'
+import { easings, sampleTrack, setKeyframe } from './core/animation.js'
 import { makeID } from './core/id.js'
 
 export function formatDuration(seconds) {
@@ -20,8 +20,9 @@ function depth(component) {
 // they are keyframed or the time changes. Closing returns to the pose the
 // assembly had when the animation opened.
 export default class AnimationPlayer {
-  constructor(document, animation) {
+  constructor(document, component, animation) {
     this.document = document
+    this.component = component
     this.animation = animation
     this.time = 0
     this.playing = false
@@ -30,6 +31,9 @@ export default class AnimationPlayer {
     this.pose = null
     // Ids of components moved in the viewport since the last keyframe
     this.posed = []
+    // Tracer id → Map(sample index → world position), as far as played
+    this.trails = markRaw(new Map())
+    this.trailsVersion = 0
   }
 
   get duration() {
@@ -46,6 +50,17 @@ export default class AnimationPlayer {
     return this.posed.filter(id => !this.track(id))
   }
 
+  // Tracers of components that still exist
+  get tracers() {
+    const tree = this.document.top()
+    return this.animation.tracers.filter(tracer => tree.findChild(tracer.componentId))
+  }
+
+  // Only components below the animation's own can be animated
+  animates(component) {
+    return component.id != this.component.id && component.hasAncestor(this.component)
+  }
+
   track(componentId) {
     return this.animation.tracks.find(track => track.componentId == componentId)
   }
@@ -60,6 +75,7 @@ export default class AnimationPlayer {
     })
     this.posed = []
     this.time = 0
+    this.clearTrails()
     this.stepTo(0, 0)
   }
 
@@ -105,24 +121,33 @@ export default class AnimationPlayer {
     this.playing ? this.pause() : this.play()
   }
 
-  // Unkeyed moves are dropped when the time changes
+  // Unkeyed moves are dropped when the time changes. Back at the start,
+  // trails start over.
   seek(time) {
     time = THREE.MathUtils.clamp(time, 0, this.duration)
     if(this.posed.length) this.refresh(time)
     else this.stepTo(this.time, time)
+    if(time > 0) return
+    this.clearTrails()
+    this.record(0)
   }
 
-  // Replays the animation from the start, after keyframes changed
+  // Replays the animation from its start pose, after keyframes changed
   refresh(time = this.time) {
     this.restore()
     this.posed = []
+    this.stepTo(0, 0)
     this.stepTo(0, Math.min(time, this.duration))
   }
 
   // Large jumps go in steps, so linkages follow continuously as in a drag
   stepTo(from, to) {
     const steps = Math.max(1, Math.ceil(Math.abs(to - from) / (this.duration / 60)))
-    for(let i = 1; i <= steps; i++) this.apply(from + (to - from) * i / steps)
+    for(let i = 1; i <= steps; i++) {
+      const time = from + (to - from) * i / steps
+      this.apply(time)
+      this.record(time)
+    }
     this.time = to
   }
 
@@ -136,6 +161,46 @@ export default class AnimationPlayer {
       .forEach(({ track, component }) => {
         solveAssembly(tree, component, worldTransform(component.parent).multiply(sampleTrack(track, time)))
       })
+  }
+
+  // Samples the traced points, at most a thousand times per animation, so
+  // replaying overwrites the samples instead of adding more
+  record(time) {
+    const index = Math.round(time / this.duration * 1000)
+    for(const tracer of this.tracers) {
+      if(!this.trails.has(tracer.id)) this.trails.set(tracer.id, new Map())
+      this.trails.get(tracer.id).set(index, this.tracerPosition(tracer))
+    }
+    this.trailsVersion++
+  }
+
+  // Recorded positions of a traced point, in time order
+  trail(tracer) {
+    const samples = this.trails.get(tracer.id)
+    if(!samples) return []
+    return [...samples.keys()].sort((a, b) => a - b).map(index => samples.get(index))
+  }
+
+  // Trails show the animation as it is keyframed now
+  clearTrails() {
+    this.trails.clear()
+    this.trailsVersion++
+  }
+
+  tracerPosition(tracer) {
+    const component = this.document.top().findChild(tracer.componentId)
+    return new THREE.Vector3().fromArray(tracer.point).applyMatrix4(worldTransform(component))
+  }
+
+  addTracer(component, worldPoint) {
+    const point = worldPoint.clone().applyMatrix4(worldTransform(component).invert())
+    this.animation.tracers.push({ id: makeID(), componentId: component.id, point: point.toArray() })
+  }
+
+  removeTracer(tracer) {
+    this.animation.tracers = this.animation.tracers.filter(other => other !== tracer)
+    this.trails.delete(tracer.id)
+    this.trailsVersion++
   }
 
   // Components were moved in the viewport
@@ -182,6 +247,10 @@ export default class AnimationPlayer {
 
   removeTrack(track) {
     this.animation.tracks = this.animation.tracks.filter(other => other !== track)
+  }
+
+  cycleEasing(keyframe) {
+    keyframe.easing = easings[(easings.indexOf(keyframe.easing || 'linear') + 1) % easings.length]
   }
 
   moveKeyframe(track, keyframe, time) {

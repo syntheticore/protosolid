@@ -748,6 +748,27 @@ export class CurvatureTool extends HighlightTool {
 }
 
 
+// Clicked points of animated components get traced while an animation is
+// open, clicked traced points are removed again
+function toggleTracer(viewport, coords) {
+  const player = viewport.document.animationPlayer
+  const renderer = viewport.renderer
+  const tracer = player.tracers.find(tracer =>
+    renderer.toScreen(player.tracerPosition(tracer)).distanceTo(coords) < 8
+  )
+  if(tracer) {
+    player.removeTracer(tracer)
+  } else {
+    const hit = renderer.hitTest(coords).find(intersection => intersection.object.alcObject?.solid)
+    const component = hit?.object.alcObject.solid.component
+    if(!component || !player.animates(component)) return false
+    player.addTracer(component, hit.point)
+  }
+  viewport.document.markChanged()
+  return true
+}
+
+
 export class ManipulationTool extends HighlightTool {
   constructor(component, viewport) {
     super(component, viewport, [])
@@ -778,6 +799,7 @@ export class ManipulationTool extends HighlightTool {
   }
 
   click(vec, coords) {
+    if(this.viewport.document.animationPlayer && toggleTracer(this.viewport, coords)) return
     if(!this.viewport.document.activeSketch) {
       this.selectionClickPending = true
       return

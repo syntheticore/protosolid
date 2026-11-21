@@ -309,6 +309,7 @@
   import { TransformGizmo } from './../js/three/gizmos.js'
   import SimulationFlow from '../js/three/simulation-flow.js'
   import CamView from '../js/three/cam-view.js'
+  import TrailView from '../js/three/trail-view.js'
   import { componentTriangles } from './../js/core/export.js'
   import { listSystemFonts, preferredFont } from './../js/core/sketch-text.js'
   import {
@@ -632,6 +633,10 @@
 
       this.bus.on('alt-pressed', this.setOrbiting)
 
+      this.trailView = markRaw(new TrailView())
+      this.renderer.scene.add(this.trailView)
+      this.$watch(this.animationTracers, this.updateTrails)
+
       this.registerDocument(this.document)
       const initialView = this.document.dirtyView || this.document.previewView || this.activeView || this.document.activeView
       if(initialView) this.applyView(initialView)
@@ -658,6 +663,7 @@
       this.bus.off('alt-pressed', this.setOrbiting)
       this.clearSimulationFlow()
       this.camView?.dispose()
+      this.trailView.dispose()
       this.clearExportPreview()
       this.clearSelectionTransformGizmo()
       this.renderer.dispose()
@@ -1279,6 +1285,20 @@
           this.camView.update(null)
           this.renderer.scene.add(this.camView)
         }
+        this.renderer.render()
+      },
+
+      // Traced points of the open animation, with their paths as far as played
+      animationTracers: function() {
+        const player = this.document.animationPlayer
+        if(!player) return []
+        // The recorded samples themselves aren't reactive
+        player.trailsVersion
+        return player.tracers.map(tracer => ({ trail: player.trail(tracer), position: player.tracerPosition(tracer) }))
+      },
+
+      updateTrails: function(tracers) {
+        this.trailView.update(tracers)
         this.renderer.render()
       },
 

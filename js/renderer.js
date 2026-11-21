@@ -787,6 +787,7 @@ export default class Renderer {
     materials.ghostWire.resolution.set(width, height)
     materials.curvatureComb.resolution.set(width, height)
     materials.curvatureEnvelope.resolution.set(width, height)
+    materials.trail.resolution.set(width, height)
     this.render()
   }
 

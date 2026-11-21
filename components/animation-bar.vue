@@ -50,12 +50,12 @@
           .keyframe(
             v-for="keyframe in row.track?.keyframes || []"
             :style="{ left: percent(keyframe.time) }"
-            :class="{ current: Math.abs(keyframe.time - player.time) < 1e-3, selected: selected?.keyframe === keyframe }"
-            title="Drag to move, Delete or double-click to remove"
+            :class="[keyframe.easing || 'linear', { current: Math.abs(keyframe.time - player.time) < 1e-3, selected: selected?.keyframe === keyframe }]"
+            :title="`${easingTitles[keyframe.easing || 'linear']}. Double-click to change.`"
             @pointerdown.stop="startDrag(row.track, keyframe, $event)"
             @pointermove.stop="drag"
             @pointerup.stop="endDrag"
-            @dblclick.stop="removeKeyframe(row.track, keyframe)"
+            @dblclick.stop="cycleEasing(keyframe)"
           )
 
         .hint(v-if="!rows.length") Move components in the viewport to animate them
@@ -214,6 +214,12 @@
     background: bright2()
     cursor: grab
 
+    // Grabbable beyond the small shape, about as tall as the row
+    &::before
+      content: ''
+      position: absolute
+      inset: -7px
+
     &:hover
       background: bright1()
 
@@ -223,6 +229,19 @@
     &.selected
       background: bright1()
       box-shadow: 0 0 0 2px $highlight
+
+    // Linear keyframes are diamonds, smooth ones round, stepping ones square
+    &.smooth
+      width: 10px
+      height: 10px
+      border-radius: 50%
+      transform: none
+
+    &.step
+      width: 8px
+      height: 8px
+      margin: -4px 0 0 -4px
+      transform: none
 
   // As tall as a track, so the first one doesn't change the height
   .hint
@@ -386,6 +405,17 @@
 
   function removeKeyframe(track, keyframe) {
     props.player.removeKeyframe(track, keyframe)
+    props.document.markChanged()
+  }
+
+  const easingTitles = {
+    linear: 'Linear',
+    smooth: 'Smooth',
+    step: 'Step',
+  }
+
+  function cycleEasing(keyframe) {
+    props.player.cycleEasing(keyframe)
     props.document.markChanged()
   }
 

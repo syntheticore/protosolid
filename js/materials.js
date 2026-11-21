@@ -132,6 +132,12 @@ class Materials {
     this.curvatureEnvelope.linewidth = 2
     this.curvatureEnvelope.opacity = 1
 
+    // Paths of traced points of animations, colored per point
+    this.trail = this.line.clone()
+    this.trail.color.set('white')
+    this.trail.linewidth = 2
+    this.trail.depthTest = false
+
     this.invisibleLine = new LineMaterial({
       linewidth: 3,
       transparent: true,

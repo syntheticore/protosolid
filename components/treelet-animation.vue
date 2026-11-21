@@ -60,7 +60,7 @@
   const props = defineProps(['document', 'component', 'animation'])
   const bus = inject('bus')
 
-  const player = reactive(new AnimationPlayer(props.document, props.animation))
+  const player = reactive(new AnimationPlayer(props.document, props.component, props.animation))
 
   const panelKey = computed(() => `animation:${props.component.id}:${props.animation.id}`)
 
@@ -76,7 +76,9 @@
 
   // Replay with the edited keyframes
   watch(() => JSON.stringify([props.animation.tracks, props.animation.duration]), () => {
-    if(expanded.value) player.refresh()
+    if(!expanded.value) return
+    player.clearTrails()
+    player.refresh()
   })
 
   onMounted(() => {
@@ -101,10 +103,9 @@
     if(props.document.animationPlayer === player) props.document.animationPlayer = null
   }
 
-  // Only components below this one can be animated
   function moved(componentIds) {
     const tree = props.document.top()
-    player.moved(componentIds.filter(id => id != props.component.id && tree.findChild(id)?.hasAncestor(props.component)))
+    player.moved(componentIds.filter(id => player.animates(tree.findChild(id))))
   }
 
   // The regenerated assembly starts over from its pose

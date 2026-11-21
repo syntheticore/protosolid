@@ -230,6 +230,9 @@
 
     beforeUnmount() {
       this.stopRepeat()
+      // Leave transitions keep the input on screen after unmounting. It must
+      // not keep receiving keys meanwhile.
+      if(this.$el.contains(document.activeElement)) document.activeElement.blur()
     },
 
     methods: {

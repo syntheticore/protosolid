@@ -300,6 +300,7 @@
     SweepFeature,
     CoilFeature,
     ThreadFeature,
+    WebFeature,
     OffsetFeature,
     ShellFeature,
     DissolveFeature,
@@ -515,8 +516,7 @@
               { title: 'Mirror', feature: MirrorFeature },
               { title: 'Coil', feature: CoilFeature },
               { title: 'Thread', feature: ThreadFeature },
-              { title: 'Web', icon: 'rib' },
-              { title: 'Thicken', icon: 'thicken' },
+              { title: 'Web', feature: WebFeature },
             ],
           },
           {

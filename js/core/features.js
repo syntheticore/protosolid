@@ -3,12 +3,13 @@ import { markRaw, toRaw } from 'vue'
 
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
-import { Compound, chamferReferenceFaces, importedCompound } from './geom3d.js'
+import { Compound, boundingSphere, chamferReferenceFaces, extrusionRange, importedCompound, namedBody } from './geom3d.js'
+import { SketchElement } from './geom2d.js'
 import { cylinderFrame, standardPitch, threadGroove } from './thread.js'
-import { shapex, modelTolerance, matrixFromTransform } from './shapex.js'
+import { shapex, modelTolerance, matrixFromTransform, planeFromMatrix, point2, threeVector } from './shapex.js'
 import { PatternInputReference } from './references.js'
 import { PlaneHelper, AxisHelper, PointHelper } from './helpers.js'
-import { normalFromMatrix, parseHsl, rad, rotationFromNormal } from './utils.js'
+import { EPSILON, normalFromMatrix, parseHsl, rad, rotationFromNormal } from './utils.js'
 import { loadFile } from '../utils.js'
 import Serialize from './serialize.js'
 import { checkedOutData, parseDocument, decodeFile } from './document-format.js'
@@ -3518,6 +3519,238 @@ export class ThreadFeature extends SolidFeature {
 }
 
 Serialize.register(ThreadFeature, 'ThreadFeature')
+
+
+// Selected sketch curves joined head to tail at shared endpoints, each
+// oriented along its chain. Chains end where curves stop or branch.
+function curveChains(elems) {
+  const close = (p, q) => p.distanceTo(q) <= modelTolerance.linear
+  const isChainEnd = point => elems.filter(elem => elem.endpoints().some(q => close(point, q))).length != 2
+  const remaining = new Set(elems)
+  const chains = []
+  while(remaining.size) {
+    let elem = [...remaining].find(elem => elem.endpoints().some(isChainEnd))
+    if(!elem) fail('Closed loops of curves are not supported')
+    const start = elem.endpoints().find(isChainEnd)
+    let point = start
+    const chain = []
+    for(;;) {
+      remaining.delete(elem)
+      const reversed = !close(elem.endpoints()[0], point)
+      chain.push({ name: elem.id, curve: reversed ? elem.geom().reversed() : elem.geom() })
+      point = elem.endpoints()[reversed ? 0 : 1]
+      if(isChainEnd(point)) break
+      elem = [...remaining].find(other => other.endpoints().some(q => close(q, point)))
+    }
+    if(close(start, point)) fail('Closed loops of curves are not supported')
+    chains.push(chain)
+  }
+  return chains
+}
+
+const sketchVector = point => new THREE.Vector3(point.x, point.y, 0)
+
+// Unit tangent along a trimmed curve, at its start or end
+function curveTangent(curve, atEnd) {
+  const range = curve.range()
+  const { firstDerivative } = curve.curve().evaluate(atEnd ? range.end : range.start)
+  return sketchVector(firstDerivative).normalize().multiplyScalar(Math.sign(range.span()))
+}
+
+// Chain lengthened at its ends by the given lengths. Lines grow themselves,
+// other curves continue in a straight line.
+function extendedChain(chain, [before, after]) {
+  chain = [...chain]
+  const line = (from, to) => shapex.TrimmedCurve2.line(point2(from), point2(to))
+  const isLine = curve => curve.curve() instanceof shapex.Line2
+  if(before) {
+    const { name, curve } = chain[0]
+    const start = sketchVector(curve.start()).addScaledVector(curveTangent(curve, false), -before)
+    if(isLine(curve)) chain[0] = { name, curve: line(start, sketchVector(curve.end())) }
+    else chain.unshift({ name: `${name}/start-extension`, curve: line(start, sketchVector(curve.start())) })
+  }
+  if(after) {
+    const { name, curve } = chain.at(-1)
+    const end = sketchVector(curve.end()).addScaledVector(curveTangent(curve, true), after)
+    if(isLine(curve)) chain[chain.length - 1] = { name, curve: line(sketchVector(curve.start()), end) }
+    else chain.push({ name: `${name}/end-extension`, curve: line(sketchVector(curve.end()), end) })
+  }
+  return chain
+}
+
+// Closed outline around a chain, between two offsets to the side of it
+function ribOutline(chain, offsets) {
+  const wire = shapex.Wire2.new(chain.map(({ curve }) => curve), modelTolerance)
+  const [a, b] = offsets.map((distance, side) => {
+    const { wire: offset, sources } = distance ? wire.offset(distance, { join: 'miter' }) :
+      { wire, sources: chain.map((_, i) => i) }
+    let source
+    return offset.segments().map((curve, i) => {
+      // Miter joins cut off at sharp corners have no source curve
+      if(sources[i] != null) source = sources[i]
+      return { curve, name: `${chain[source].name}/${'ab'[side]}${sources[i] == null ? '/joint' : ''}` }
+    })
+  })
+  const back = b.reverse().map(({ curve, name }) => ({ curve: curve.reversed(), name }))
+  const cap = (from, to, name) => ({ curve: shapex.TrimmedCurve2.line(from.curve.end(), to.curve.start()), name })
+  const segments = [
+    ...a, cap(a.at(-1), back[0], `${chain.at(-1).name}/end`),
+    ...back, cap(back.at(-1), a[0], `${chain[0].name}/start`),
+  ]
+  return { curves: segments.map(({ curve }) => curve), names: segments.map(({ name }) => name) }
+}
+
+// Ribs along the sketch normal from `start` to `end`
+function ribBodies(componentId, sketch, chains, offsets, [start, end], owner) {
+  const shift = normalFromMatrix(sketch.workplane).multiplyScalar(start)
+  const plane = planeFromMatrix(new THREE.Matrix4().makeTranslation(shift.x, shift.y, shift.z).multiply(sketch.workplane))
+  return chains.map(chain => {
+    const { curves, names } = ribOutline(chain, offsets)
+    return namedBody(componentId, curves, names, profile => profile.extrude(plane, plane.normal().scaled(end - start)), owner)
+  }).reduce((tool, rib) => tool.boolean(rib, 'join'))
+}
+
+// Network of ribs along open sketch curves, thickened in the sketch plane and
+// extended along its normal. Free ends of the curves can run on to the walls
+// of the body.
+export class WebFeature extends SolidFeature {
+  static icon = 'rib'
+  constructor(document) {
+    super(document, false, 'Web', {
+      curves: {
+        title: 'Curves',
+        type: 'curve',
+        multi: true,
+      },
+      thickness: {
+        title: 'Thickness',
+        type: 'length',
+      },
+      placement: {
+        title: 'Thickness side',
+        type: 'select',
+        options: {
+          center: { title: 'Symmetric', icon: 'arrows-alt-h' },
+          left: { title: 'One side', icon: 'caret-left' },
+          right: { title: 'Other side', icon: 'caret-right' },
+        },
+      },
+      extend: {
+        title: 'Extend to body',
+        type: 'bool',
+        icons: ['expand-arrows-alt', 'compress-arrows-alt'],
+      },
+      side: {
+        title: 'Side',
+        type: 'select',
+        options: {
+          forward: { title: 'Forward', icon: 'caret-up' },
+          reverse: { title: 'Reverse', icon: 'caret-down' },
+          both: { title: 'Both directions', icon: 'arrows-alt-v' },
+        },
+      },
+      depth: {
+        title: 'Depth',
+        type: 'length',
+      },
+    })
+
+    this.operation = 'join'
+    this.curves = null
+    this.thickness = 1.0
+    this.placement = 'center'
+    this.extend = true
+    this.side = 'reverse'
+    this.depth = 10.0
+  }
+
+  acceptsInput(item) {
+    return super.acceptsInput(item) &&
+      (!(item instanceof SketchElement) || !!item.geom && !item.isClosed() && item.endpoints().length == 2)
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    const support = comp.compound
+    this.previewBody = null
+    try {
+      if(!(this.thickness > 0)) fail('Thickness must be positive')
+      if(!(this.depth > 0)) fail('Depth must be positive')
+      const elems = references.curves
+      const sketch = elems[0].sketch
+      if(elems.some(elem => elem.sketch !== sketch)) fail('Web curves must lie in one sketch')
+
+      const offsets = {
+        center: [this.thickness / 2, -this.thickness / 2],
+        left: [this.thickness, 0],
+        right: [0, -this.thickness],
+      }[this.placement]
+      const range = {
+        forward: [0, this.depth],
+        reverse: [-this.depth, 0],
+        both: [-this.depth, this.depth],
+      }[this.side]
+      const chains = curveChains(elems)
+
+      let tool
+      if(this.extend) {
+        if(!support.solids().length) fail('Extending a web requires an existing body')
+        // Free ends run on well past the body, out of reach of its walls
+        const sphere = boundingSphere(support.geom())
+        const freeEnd = point => elems.filter(elem => elem.distanceTo(point) <= modelTolerance.linear).length == 1
+        const reach = point => freeEnd(point) ?
+          sketchVector(point).applyMatrix4(sketch.workplane).distanceTo(sphere.center) + 2 * sphere.radius : 0
+        const extended = chains.map(chain => extendedChain(chain,
+          [reach(chain[0].curve.start()), reach(chain.at(-1).curve.end())]))
+        const ribs = ribBodies(this.componentId, sketch, extended, offsets, range, this.id)
+
+        // Walls cut the extended ribs apart. Keep the parts that the ribs, as
+        // drawn, reach into right at the sketch plane.
+        const h = Math.min(this.thickness, this.depth) / 2
+        const seed = ribBodies(this.componentId, sketch, chains, offsets,
+          [Math.max(range[0], -h), Math.min(range[1], h)], this.id)
+        const pieces = ribs.boolean(support, 'cut')
+        const kept = pieces.solids().filter(solid =>
+          seed.geom().intersection(solid.toCompound().geom()).volume() > EPSILON)
+        if(!kept.length) fail('Web does not reach into the body')
+        tool = pieces.subset(kept)
+
+        // Ends that miss every wall run out as far as the extension goes
+        const mesh = tool.geom().tessellate(shapex.TessellationOptions.new(0.1, 0.1, 24))
+        if(mesh.positions.some(point => threeVector(point).distanceTo(sphere.center) > 1.5 * sphere.radius)) {
+          fail('Extended curves must end at walls of the body')
+        }
+      } else {
+        tool = ribBodies(this.componentId, sketch, chains, offsets, range, this.id)
+      }
+      comp.compound = support.boolean(tool, this.operation)
+      this.previewBody = tool
+    } catch(err) { this.error = featureError(err, 'Web could not be created') }
+  }
+
+  getGizmo() {
+    const curve = this.curves().at(-1).getItem()
+    return {
+      distance: {
+        center: curve.sample(0.5).applyMatrix4(curve.sketch.workplane),
+        direction: normalFromMatrix(curve.sketch.workplane),
+        distance: this.depth,
+        side: this.side != 'reverse',
+        cb: (depth, side) => {
+          this.setExpression('depth', null)
+          this.depth = depth
+          if(this.side != 'both') this.side = side ? 'forward' : 'reverse'
+        },
+      },
+    }
+  }
+
+  preview() {
+    return this.isComplete() && this.error?.type != 'error' ? this.previewBody : null
+  }
+}
+
+Serialize.register(WebFeature, 'WebFeature')
 
 
 function edgePropagationSetting() {

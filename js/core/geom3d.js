@@ -12,7 +12,7 @@ import {
   planeFromMatrix, axisFromMatrix, transformFromMatrix, consumeEntityIds, tessellateMesh,
 } from './shapex.js'
 
-function extrusionRange(geometry, origin, direction) {
+export function extrusionRange(geometry, origin, direction) {
   // Only the disposable prism extent comes from the mesh; Booleans retain the
   // exact body. A fixed mesh keeps modeling independent of display settings.
   const extentOptions = sx.TessellationOptions.new(0.1, 0.1, 24)
@@ -29,6 +29,14 @@ function extrusionRange(geometry, origin, direction) {
   const padding = Math.max(extentOptions.chordTolerance * 4,
     modelTolerance.linear * 16, (maximum - minimum) * 0.01)
   return [minimum - padding, maximum + padding]
+}
+
+// Sphere clearing a body, for disposable tools that must reach past it
+export function boundingSphere(geometry) {
+  const mesh = geometry.tessellate(sx.TessellationOptions.new(0.1, 0.1, 24))
+  const sphere = new THREE.Box3().setFromPoints(mesh.positions.map(threeVector)).getBoundingSphere(new THREE.Sphere())
+  sphere.radius = sphere.radius * 1.01 + 0.4
+  return sphere
 }
 
 // A sketch element lifted from its workplane, or a model edge's curve

@@ -10,6 +10,7 @@ import {
   SweepFeature,
   CoilFeature,
   ThreadFeature,
+  WebFeature,
   PatternFeature,
   MirrorFeature,
   ShellFeature,
@@ -49,6 +50,7 @@ export const featureTypes = {
   sweep: SweepFeature,
   coil: CoilFeature,
   thread: ThreadFeature,
+  web: WebFeature,
   pattern: PatternFeature,
   mirror: MirrorFeature,
   shell: ShellFeature,
@@ -115,6 +117,11 @@ export const settingNotes = {
     restY: 'Moves component 2 along the joint plane Y axis from where the joint aligned it',
     minAngle: 'Ranges of a full turn or more do not limit rotation',
     maxTilt: 'Largest angle the ball joint Z axis of component 2 may swing away from its aligned direction',
+  },
+  web: {
+    curves: 'Open sketch curves of one sketch. Connected curves form mitered chains.',
+    extend: 'Runs free curve ends on until they meet walls of the body. Ribs start at the sketch plane, which must cut into the body.',
+    side: 'Forward follows the normal of the sketch plane',
   },
   thread: {
     faces: 'Cylindrical faces. A shaft keeps its diameter as the major diameter, a bore as the minor diameter.',

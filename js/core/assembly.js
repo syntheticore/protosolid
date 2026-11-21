@@ -88,6 +88,92 @@ export function alignJointWorld(type, worldA, frameA, worldB, frameB, lockSlide 
   return translateWorld(result, delta)
 }
 
+// Joint coordinates are measured from the joint's zero: the relative pose of
+// the attachments where the joint feature aligned component B, before any rest
+// offset. Translation and rotation are expressed in attachment A's frame.
+function jointOffset(joint, attachmentA, attachmentB) {
+  const relative = attachmentA.clone().invert().multiply(attachmentB)
+  const zero = joint.zero
+  return {
+    translation: framePosition(relative).sub(framePosition(zero)),
+    rotation: new THREE.Quaternion().setFromRotationMatrix(relative)
+      .multiply(new THREE.Quaternion().setFromRotationMatrix(zero).invert()),
+    direction: frameDirection(relative),
+    zeroDirection: frameDirection(zero),
+  }
+}
+
+// World transform that moves component B from the joint's zero to the given
+// offset. Rotations turn about B's attachment so slide values are unaffected.
+export function jointRestTransform(attachmentA, zero, translation, rotation) {
+  const pivot = framePosition(zero)
+  return attachmentA.clone()
+    .multiply(new THREE.Matrix4().makeTranslation(pivot.clone().add(translation)))
+    .multiply(new THREE.Matrix4().makeRotationFromQuaternion(rotation))
+    .multiply(new THREE.Matrix4().makeTranslation(pivot.negate()))
+    .multiply(attachmentA.clone().invert())
+}
+
+// Rotation about Z, ignoring the swing a solver residual may add.
+function twistAngle(rotation) {
+  return 2 * Math.atan2(rotation.z, rotation.w)
+}
+
+// Ranges of a full turn or more cannot be enforced without tracking turns, so
+// angles wrap around the middle of the range and stay inside it.
+function wrapAngle(angle, center) {
+  return center + THREE.MathUtils.euclideanModulo(angle - center + Math.PI, Math.PI * 2) - Math.PI
+}
+
+function limitExcess(value, [min, max]) {
+  return value < min ? value - min : value > max ? value - max : 0
+}
+
+// World space moves of component B that bring the joint back into its limits.
+// Applying them negated to component A has the same relative effect.
+export function limitCorrections(joint, attachmentA, attachmentB) {
+  const corrections = []
+  let error = 0
+  const limits = joint.limits
+  if(!limits) return { corrections, error }
+  const offset = jointOffset(joint, attachmentA, attachmentB)
+  const pivot = framePosition(attachmentB)
+  const axisA = index => new THREE.Vector3().setFromMatrixColumn(attachmentA, index).normalize()
+
+  if(limits.rotateZ) {
+    const [min, max] = limits.rotateZ
+    const excess = limitExcess(wrapAngle(twistAngle(offset.rotation), (min + max) / 2), limits.rotateZ)
+    if(excess) corrections.push({ pivot, axis: axisA(2), angle: -excess })
+    error = Math.max(error, Math.abs(excess))
+  }
+  ;['slideX', 'slideY', 'slideZ'].forEach((motion, index) => {
+    if(!limits[motion]) return
+    const excess = limitExcess(offset.translation.getComponent(index), limits[motion])
+    if(excess) corrections.push({ translation: axisA(index).multiplyScalar(-excess) })
+    error = Math.max(error, Math.abs(excess))
+  })
+  if(limits.tilt) {
+    const excess = limitExcess(offset.direction.angleTo(offset.zeroDirection), limits.tilt)
+    const axis = offset.direction.clone().cross(offset.zeroDirection)
+    if(excess && axis.lengthSq() > EPSILON) {
+      corrections.push({ pivot, axis: axis.normalize().transformDirection(attachmentA), angle: excess })
+    }
+    error = Math.max(error, Math.abs(excess))
+  }
+  return { corrections, error }
+}
+
+function applyCorrections(components, corrections, sign) {
+  corrections.forEach(correction => {
+    if(correction.translation) {
+      translateWorldGroup(components, correction.translation.clone().multiplyScalar(sign))
+    } else {
+      const rotation = new THREE.Quaternion().setFromAxisAngle(correction.axis, correction.angle * sign)
+      rotateWorldGroup(components, correction.pivot, rotation)
+    }
+  })
+}
+
 export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 64, targetLocal) {
   const joints = tree.assemblyJoints || []
   if(!movedComponent || !movedComponent.parent || !joints.length) {
@@ -128,14 +214,14 @@ export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 6
     if(anchor) setWorldTransform(movedComponent, anchor.fixedWorld)
     return
   }
-  let pathSolved
+  let pinned = true
   const mobility = component => {
     if(!component || !component.parent || fixed.has(component.id)) return 0
-    return !pathSolved && component.id == movedComponent.id ? 0 : 1
+    return pinned && component.id == movedComponent.id ? 0 : 1
   }
 
   const effector = targetLocal || new THREE.Vector3()
-  pathSolved = solveKinematicPath(
+  const pathSolved = solveKinematicPath(
     tree,
     movedComponent,
     effector.clone().applyMatrix4(desiredWorld),
@@ -144,9 +230,8 @@ export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 6
     fixed,
     iterations,
   )
-  if(!pathSolved) {
-    setWorldTransform(movedComponent, desiredWorld)
-  }
+  if(pathSolved) pinned = false
+  else setWorldTransform(movedComponent, desiredWorld)
 
   const projectJoints = () => {
     for(const joint of joints) {
@@ -176,13 +261,48 @@ export function solveAssembly(tree, movedComponent, desiredWorld, iterations = 6
     }
   }).filter(Boolean)
 
-  for(let i = 0; i < iterations; i++) {
-    projectJoints()
-    if(!pathSolved) setWorldTransform(movedComponent, desiredWorld)
-    const linkError = activeLinks.reduce((largest, active) =>
-      Math.max(largest, projectMotionLink(tree, active, fixed)), 0
+  // A joint at its stop pushes whichever side is free to move, so dragging
+  // past a limit carries the other component along.
+  const projectLimits = () => joints.reduce((largest, joint) => {
+    if(!joint.limits) return largest
+    const a = tree.findChild(joint.componentA)
+    const b = tree.findChild(joint.componentB)
+    if(!a || !b) return largest
+    const { corrections, error } = limitCorrections(
+      joint,
+      worldTransform(a).multiply(joint.frameA),
+      worldTransform(b).multiply(joint.frameB),
     )
-    if(assemblyError(tree, joints) < SOLVER_TOLERANCE && linkError < SOLVER_TOLERANCE) break
+    if(!corrections.length) return largest
+    const movable = component => mobility(component) &&
+      !connectedRigidGroup(tree, component, joints).some(member => fixed.has(member.id))
+    if(movable(b)) applyCorrections(connectedRigidGroup(tree, b, joints), corrections, 1)
+    else if(movable(a)) applyCorrections(connectedRigidGroup(tree, a, joints), corrections, -1)
+    return Math.max(largest, error)
+  }, 0)
+
+  const relax = () => {
+    for(let i = 0; i < iterations; i++) {
+      projectJoints()
+      if(pinned) setWorldTransform(movedComponent, desiredWorld)
+      const limitError = projectLimits()
+      const linkError = activeLinks.reduce((largest, active) =>
+        Math.max(largest, projectMotionLink(tree, active, fixed)), 0
+      )
+      if(
+        assemblyError(tree, joints) < SOLVER_TOLERANCE &&
+        linkError < SOLVER_TOLERANCE &&
+        limitError < SOLVER_TOLERANCE
+      ) return true
+    }
+  }
+  // Without a kinematic path the dragged component follows the pointer
+  // exactly while the rest of the assembly adapts. Where that pose violates
+  // a joint or limit the pointer cannot be followed, so release it and let the
+  // constraints pull it back.
+  if(!relax() && pinned) {
+    pinned = false
+    relax()
   }
 
   activeLinks.forEach(active => updateMotionLinkState(tree, active.link, active.joints))
@@ -419,6 +539,15 @@ function solveKinematicPath(tree, movedComponent, target, effector, joints, fixe
       const rotation = new THREE.Quaternion().setFromAxisAngle(axis, angle)
 
       rotateWorldGroup(movingGroup, pivot, rotation)
+
+      if(joint.limits) {
+        const { corrections } = limitCorrections(
+          joint,
+          worldTransform(tree.findChild(joint.componentA)).multiply(joint.frameA),
+          worldTransform(tree.findChild(joint.componentB)).multiply(joint.frameB),
+        )
+        applyCorrections(movingGroup, corrections, joint.componentB == moving.id ? 1 : -1)
+      }
     }
     if(effector.clone().applyMatrix4(worldTransform(movedComponent)).distanceTo(target) < SOLVER_TOLERANCE) break
   }

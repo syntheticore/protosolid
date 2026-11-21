@@ -227,6 +227,7 @@ export class Component {
         frameA: joint.frameA && joint.frameA.clone(),
         frameB: joint.frameB && joint.frameB.clone(),
         fixedWorld: joint.fixedWorld && joint.fixedWorld.clone(),
+        zero: joint.zero && joint.zero.clone(),
       })),
       motionLinks: this.motionLinks && this.motionLinks.map(link => ({
         ...link,

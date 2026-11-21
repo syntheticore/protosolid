@@ -93,6 +93,17 @@ export const settingNotes = {
   mirror: {
     inputs: 'Bodies are copied, features are replayed. Components cannot be mirrored.',
   },
+  joint: {
+    restAngle: 'Turns component 2 about the joint Z axis, away from where the joint aligned it. ' +
+      'Rest pose and limits are measured from that aligned placement.',
+    restTiltX: 'Turns component 2 about the joint X axis, before restTiltY and restAngle',
+    restTiltY: 'Turns component 2 about the joint Y axis, after restTiltX',
+    restSlide: 'Moves component 2 along the axis from where the joint aligned it',
+    restX: 'Moves component 2 along the joint plane X axis from where the joint aligned it',
+    restY: 'Moves component 2 along the joint plane Y axis from where the joint aligned it',
+    minAngle: 'Ranges of a full turn or more do not limit rotation',
+    maxTilt: 'Largest angle the ball joint Z axis of component 2 may swing away from its aligned direction',
+  },
   thread: {
     faces: 'Cylindrical faces. A shaft keeps its diameter as the major diameter, a bore as the minor diameter.',
     series: 'Standard pitches follow from each face diameter',

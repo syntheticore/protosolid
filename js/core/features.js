@@ -24,6 +24,8 @@ import {
   isRotationalMotion,
   jointFrame,
   jointMotionOptions,
+  jointRestTransform,
+  limitCorrections,
   referenceComponentId,
   relativeComponentTransform,
   solveAssembly,
@@ -1069,6 +1071,12 @@ export class JointFeature extends Feature {
 
   constructor(doc) {
     const is = type => feature => feature.jointType == type
+    const turns = feature => ['axis', 'coplanar', 'ball'].includes(feature.jointType)
+    const slides = feature => feature.jointType == 'axis' && !feature.lockSlide
+    const angleLimited = feature => ['axis', 'coplanar'].includes(feature.jointType) && feature.limitAngle
+    const slideLimited = feature => slides(feature) && feature.limitSlide
+    const planeLimited = feature => feature.jointType == 'coplanar' && feature.limitSlide
+    const offset = (title, type, when) => ({ title, type, when, autoFocus: false, allowNegative: true })
     super(doc, false, 'Joint', {
       jointType: {
         title: 'Type',
@@ -1100,12 +1108,100 @@ export class JointFeature extends Feature {
       pointA: { title: '1', type: 'point', when: is('ball') },
       pointB: { title: '2', type: 'point', when: is('ball') },
       fixedComponent: { title: 'Component', type: 'componentRef', when: is('fix') },
+      restAngle: offset('Rest Angle', 'angle', turns),
+      restTiltX: offset('Rest Tilt X', 'angle', is('ball')),
+      restTiltY: offset('Rest Tilt Y', 'angle', is('ball')),
+      restSlide: offset('Rest Slide', 'length', slides),
+      restX: offset('Rest X', 'length', is('coplanar')),
+      restY: offset('Rest Y', 'length', is('coplanar')),
+      limitAngle: {
+        title: 'Limit Angle',
+        type: 'bool',
+        icons: ['compress-arrows-alt', 'expand-arrows-alt'],
+        when: feature => ['axis', 'coplanar'].includes(feature.jointType),
+      },
+      minAngle: offset('Min Angle', 'angle', angleLimited),
+      maxAngle: offset('Max Angle', 'angle', angleLimited),
+      limitSlide: {
+        title: 'Limit Slide',
+        type: 'bool',
+        icons: ['compress-arrows-alt', 'expand-arrows-alt'],
+        when: feature => slides(feature) || feature.jointType == 'coplanar',
+      },
+      minSlide: offset('Min Slide', 'length', slideLimited),
+      maxSlide: offset('Max Slide', 'length', slideLimited),
+      minX: offset('Min X', 'length', planeLimited),
+      maxX: offset('Max X', 'length', planeLimited),
+      minY: offset('Min Y', 'length', planeLimited),
+      maxY: offset('Max Y', 'length', planeLimited),
+      limitTilt: {
+        title: 'Limit Tilt',
+        type: 'bool',
+        icons: ['compress-arrows-alt', 'expand-arrows-alt'],
+        when: is('ball'),
+      },
+      maxTilt: {
+        title: 'Max Tilt',
+        type: 'angle',
+        autoFocus: false,
+        when: feature => feature.jointType == 'ball' && feature.limitTilt,
+      },
     })
     // Assembly joints belong to an occurrence, not to its shared definition.
     this.componentId = doc.activeComponent.id
     this.jointType = 'axis'
     this.lockSlide = false
     this.offset = 0
+    this.restAngle = 0
+    this.restTiltX = 0
+    this.restTiltY = 0
+    this.restSlide = 0
+    this.restX = 0
+    this.restY = 0
+    this.limitAngle = false
+    this.minAngle = -90
+    this.maxAngle = 90
+    this.limitSlide = false
+    this.minSlide = -10
+    this.maxSlide = 10
+    this.minX = -10
+    this.maxX = 10
+    this.minY = -10
+    this.maxY = 10
+    this.limitTilt = false
+    this.maxTilt = 45
+  }
+
+  // Offset of component B from where the joint aligns it, in attachment A's frame
+  restOffset() {
+    const angle = rad(this.restAngle)
+    if(this.jointType == 'ball') return {
+      translation: new THREE.Vector3(),
+      rotation: new THREE.Quaternion().setFromEuler(new THREE.Euler(rad(this.restTiltX), rad(this.restTiltY), angle, 'XYZ')),
+    }
+    return {
+      translation: this.jointType == 'coplanar' ? new THREE.Vector3(this.restX, this.restY, 0) :
+        new THREE.Vector3(0, 0, this.lockSlide ? 0 : this.restSlide),
+      rotation: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), angle),
+    }
+  }
+
+  // Motion ranges measured from the joint's zero, in radians and millimeters
+  motionLimits() {
+    const range = (min, max) => [Math.min(min, max), Math.max(min, max)]
+    const limits = {}
+    if(['axis', 'coplanar'].includes(this.jointType) && this.limitAngle) {
+      limits.rotateZ = range(rad(this.minAngle), rad(this.maxAngle))
+    }
+    if(this.jointType == 'axis' && !this.lockSlide && this.limitSlide) {
+      limits.slideZ = range(this.minSlide, this.maxSlide)
+    }
+    if(this.jointType == 'coplanar' && this.limitSlide) {
+      limits.slideX = range(this.minX, this.maxX)
+      limits.slideY = range(this.minY, this.maxY)
+    }
+    if(this.jointType == 'ball' && this.limitTilt) limits.tilt = [0, rad(this.maxTilt)]
+    return Object.keys(limits).length ? limits : null
   }
 
   inputKeys() {
@@ -1181,8 +1277,14 @@ export class JointFeature extends Feature {
     const worldA = baselineWorldTransform(componentA)
     const worldB = baselineWorldTransform(componentB)
     const alignedB = alignJointWorld(this.jointType, worldA, frameA, worldB, frameB, this.lockSlide)
-    setBaselineWorldTransform(componentB, alignedB)
-    tree.assemblyJoints.push({
+    // The aligned placement is the joint's zero. Rest pose and limits are
+    // measured from it, so zero keeps the orientation B was modeled in.
+    const attachmentA = worldA.clone().multiply(frameA)
+    const zero = attachmentA.clone().invert().multiply(alignedB.clone().multiply(frameB))
+    const { translation, rotation } = this.restOffset()
+    const restB = jointRestTransform(attachmentA, zero, translation, rotation).multiply(alignedB)
+    setBaselineWorldTransform(componentB, restB)
+    const joint = {
       id: this.id,
       type: this.jointType,
       componentA: componentA.id,
@@ -1190,7 +1292,13 @@ export class JointFeature extends Feature {
       frameA: frameA.clone(),
       frameB: frameB.clone(),
       lockSlide: this.jointType == 'axis' && this.lockSlide,
-    })
+      zero,
+      limits: this.motionLimits(),
+    }
+    tree.assemblyJoints.push(joint)
+    if(limitCorrections(joint, attachmentA, restB.clone().multiply(frameB)).error > 1e-6) {
+      this.error = { type: 'warning', msg: 'Rest pose lies outside the motion limits' }
+    }
   }
 
   modifiedComponents() {
@@ -2203,6 +2311,7 @@ export class PlaceFeature extends Feature {
           componentB,
           frameA: joint.frameA && joint.frameA.clone(),
           frameB: joint.frameB && joint.frameB.clone(),
+          zero: joint.zero && joint.zero.clone(),
           fixedWorld: undefined,
         })
       })

@@ -628,7 +628,7 @@ export default class Document extends Emitter {
         // Store camera view
         this.previousActiveView = this.activeView
         this.previousDirtyView = this.dirtyView
-        if(preferences.sketchCameraMovement != 'off') this.emit('look-at', this.activeSketch.workplane)
+        if(preferences.sketchCameraMovement != 'off') this.emit('look-at', this.activeSketch.workplane, true)
       }
 
       // Show referenced geometry and the components containing it while editing.

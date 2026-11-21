@@ -609,11 +609,7 @@
       this.bus.on('preview-zoom-selection', () => this.previewCamera(view =>
         this.zoomToFit(this.document.selection.items, true, view)
       ))
-      this.bus.on('preview-look-at', plane => this.previewCamera(() => {
-        this.renderer.lookAt(plane, false)
-        const sketch = this.document.activeSketch
-        if(sketch && sketch.elements.length) this.zoomToFit(sketch.elements, true)
-      }))
+      this.bus.on('preview-look-at', plane => this.previewCamera(() => this.renderer.lookAt(plane, false) ))
       this.bus.on('commit-camera-preview', this.commitCameraPreview)
       this.bus.on('unpreview-camera', this.unpreviewCamera)
       this.bus.on('render-needed', () => this.renderer.render() )
@@ -895,10 +891,10 @@
           this.renderer.setView(view.position, view.target)
           doc.cameraViewApplied(view.position, view.target)
         })
-        doc.on('look-at', (plane) => setTimeout(() => {
+        doc.on('look-at', (plane, zoomToSketch=false) => setTimeout(() => {
           this.renderer.lookAt(plane)
           const sketch = this.document.activeSketch
-          if(sketch && sketch.elements.length) this.zoomToFit(sketch.elements)
+          if(zoomToSketch && sketch.elements.length) this.zoomToFit(sketch.elements)
         }))
         doc.on('regenerated', this.updateExportPreview)
       },

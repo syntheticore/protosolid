@@ -263,15 +263,6 @@ const hatch = (min, max, offsets, w) => offsets.map(c => {
   return seg(x0, c - x0, x1, c - x1, w)
 }).join('')
 
-// Filled region between a bezier curve shifted down by top and by bottom
-function slab(points, top, bottom) {
-  const fn = bezierPoint(...points)
-  const edge = sample(fn, 32)
-  return poly(...edge.map(([x, y]) => [x, y + top]), ...edge.reverse().map(([x, y]) => [x, y + bottom]))
-}
-
-const thickenSurface =[[28, 104], [170, 40], [342, 168], [484, 104]]
-
 const planeOutline = [[156, 60], [484, 60], [356, 452], [28, 452]]
 
 // Block with its top left edge filleted or chamfered. The treated edge is
@@ -420,11 +411,6 @@ const definitions = {
     rect(384, 128, 64, 64, 16),
     rect(384, 320, 64, 64, 16),
     rect(480, 240, 32, 32, 8),
-  ],
-  'thicken': [
-    bezier(...thickenSurface, THIN),
-    slab(thickenSurface, 224, 368),
-    arrow(256, 296, 90, 140, 192),
   ],
   'coil': [coil()],
   // Threaded rod: slanted crests across a core

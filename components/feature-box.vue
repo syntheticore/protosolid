@@ -75,10 +75,16 @@
           )
 
           IconToggle(
-            v-if="setting.type == 'bool'"
+            v-if="setting.type == 'bool' && setting.icons"
             :icons="setting.icons"
             v-model:active="activeFeature[key]"
             @update:active="update"
+          )
+
+          ToggleSwitch(
+            v-if="setting.type == 'bool' && !setting.icons"
+            v-model="activeFeature[key]"
+            @update:model-value="update"
           )
 
           RadioBar(
@@ -179,6 +185,7 @@
       margin-left: 12px
 
     > :not(span)
+    > .toggle-switch
       margin-top: 6px
 
     > .picker
@@ -188,12 +195,18 @@
       flex-direction: column-reverse
 
       > :not(span)
+      > .toggle-switch
         margin-top: 0
         margin-bottom: 8px
     input
     .radio-bar
     .icon-toggle
+    .toggle-switch
       flex: 1 1 auto
+
+    // Centers the switch within the height of the neighboring inputs
+    .toggle-switch
+      align-items: center
 
   .file-input
     align-items: center

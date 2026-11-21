@@ -29,10 +29,16 @@
             )
 
             IconToggle(
-              v-if="setting.type == 'bool'"
+              v-if="setting.type == 'bool' && setting.icons"
               :icons="setting.icons"
               :active="activeTool[key]"
               @update:active="setSetting(key, $event)"
+            )
+
+            ToggleSwitch(
+              v-if="setting.type == 'bool' && !setting.icons"
+              :model-value="activeTool[key]"
+              @update:model-value="setSetting(key, $event)"
             )
 
             IntegerInput(
@@ -88,12 +94,17 @@
       margin-left: 12px
 
     > :not(span)
+    > .toggle-switch
       margin-top: 6px
 
     // Match the number input's natural height, independent of which settings are visible
     .radio-bar
     .icon-toggle
+    .toggle-switch
       height: 26px
+
+    .toggle-switch
+      align-items: center
 
     .info-list
       flex: 1 1 auto

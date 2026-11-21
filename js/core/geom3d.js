@@ -12,7 +12,7 @@ import {
   planeFromMatrix, axisFromMatrix, transformFromMatrix, consumeEntityIds, tessellateMesh,
 } from './shapex.js'
 
-export function extrusionRange(geometry, origin, direction) {
+function extrusionRange(geometry, origin, direction) {
   // Only the disposable prism extent comes from the mesh; Booleans retain the
   // exact body. A fixed mesh keeps modeling independent of display settings.
   const extentOptions = sx.TessellationOptions.new(0.1, 0.1, 24)

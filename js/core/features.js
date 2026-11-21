@@ -3,7 +3,7 @@ import { markRaw, toRaw } from 'vue'
 
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
-import { Compound, boundingSphere, chamferReferenceFaces, extrusionRange, importedCompound, namedBody } from './geom3d.js'
+import { Compound, boundingSphere, chamferReferenceFaces, importedCompound, namedBody } from './geom3d.js'
 import { SketchElement } from './geom2d.js'
 import { cylinderFrame, standardPitch, threadGroove } from './thread.js'
 import { shapex, modelTolerance, matrixFromTransform, planeFromMatrix, point2, threeVector } from './shapex.js'
@@ -1094,7 +1094,6 @@ export class JointFeature extends Feature {
       lockSlide: {
         title: 'Lock Slide',
         type: 'bool',
-        icons: ['lock', 'lock-open'],
         when: is('axis'),
       },
       offset: {
@@ -1118,7 +1117,6 @@ export class JointFeature extends Feature {
       limitAngle: {
         title: 'Limit Angle',
         type: 'bool',
-        icons: ['compress-arrows-alt', 'expand-arrows-alt'],
         when: feature => ['axis', 'coplanar'].includes(feature.jointType),
       },
       minAngle: offset('Min Angle', 'angle', angleLimited),
@@ -1126,7 +1124,6 @@ export class JointFeature extends Feature {
       limitSlide: {
         title: 'Limit Slide',
         type: 'bool',
-        icons: ['compress-arrows-alt', 'expand-arrows-alt'],
         when: feature => slides(feature) || feature.jointType == 'coplanar',
       },
       minSlide: offset('Min Slide', 'length', slideLimited),
@@ -1138,7 +1135,6 @@ export class JointFeature extends Feature {
       limitTilt: {
         title: 'Limit Tilt',
         type: 'bool',
-        icons: ['compress-arrows-alt', 'expand-arrows-alt'],
         when: is('ball'),
       },
       maxTilt: {
@@ -1334,7 +1330,7 @@ export class MotionLinkFeature extends Feature {
       motionB: { title: 'Motion 2', type: 'enum', options: {}, when: feature => !!feature.motionB },
       angleB: { title: 'Travel 2', type: 'angle', autoFocus: false, when: rotational('B') },
       distanceB: { title: 'Travel 2', type: 'length', autoFocus: false, when: linear('B') },
-      reverse: { title: 'Reverse', type: 'bool', icons: ['exchange-alt', 'arrows-alt-h'] },
+      reverse: { title: 'Reverse', type: 'bool' },
     })
     this.componentId = doc.activeComponent.id
     this.angleA = 360
@@ -2405,7 +2401,6 @@ export class PlaceFeature extends Feature {
       flatten: {
         title: 'Flatten',
         type: 'bool',
-        icons: ['layer-group', 'sitemap'],
         when: feature => isStepData(feature.cachedData || ''),
       },
     })
@@ -3080,7 +3075,6 @@ export class LoftFeature extends SolidFeature {
       untwist: {
         title: 'Untwist',
         type: 'bool',
-        icons: ['caret-up', 'caret-down']
       },
       guides: {
         title: '(Guides)',
@@ -3638,7 +3632,6 @@ export class WebFeature extends SolidFeature {
       extend: {
         title: 'Extend to body',
         type: 'bool',
-        icons: ['expand-arrows-alt', 'compress-arrows-alt'],
       },
       side: {
         title: 'Side',
@@ -3900,7 +3893,6 @@ export class ChamferFeature extends SolidFeature {
       flipSides: {
         title: 'Flip sides',
         type: 'bool',
-        icons: ['exchange-alt', 'exchange-alt'],
         when: feature => feature.chamferType != 'equal',
       },
       propagation: edgePropagationSetting(),
@@ -4135,7 +4127,6 @@ export class BooleanFeature extends SolidFeature {
       keepTools: {
         title: 'Keep',
         type: 'bool',
-        icons: ['hand-paper', 'trash'],
       },
     })
 

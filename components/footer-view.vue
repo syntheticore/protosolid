@@ -296,7 +296,7 @@
               value: item.radius * 2
             },
             Length: {
-              title: 'Circumfence',
+              title: 'Circumference',
               unit: 'mm',
               value: item.length()
             },

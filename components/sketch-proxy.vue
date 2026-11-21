@@ -200,7 +200,7 @@
   watch([() => props.sketch, () => props.sketch.profileUpdateNeeded], ([sketch, updateNeeded], [oldSketch] = []) => {
     if(!updateNeeded && sketch == oldSketch && !fresh) return
     solve()
-    profiles.value = props.sketch.profiles(props.component)
+    profiles.value = props.sketch.profiles()
     props.sketch.profileUpdateNeeded = false
     props.sketch.solveHandle = null
     if(active.value && !props.activeHandle) {

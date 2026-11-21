@@ -22,7 +22,7 @@ const round = value => Number(value.toFixed(4))
 const vector = v => [round(v.x), round(v.y), round(v.z)]
 const vector2 = v => [round(v.x), round(v.y)]
 
-export function itemId(item, component) {
+export function itemId(item) {
   if(item instanceof Feature) return `feature:${item.id}`
   if(item?.typename?.() == 'Component') return `component:${item.id}`
   if(item instanceof Solid) return `body:${item.compound.componentId}:${item.id}`
@@ -30,7 +30,7 @@ export function itemId(item, component) {
   if(item instanceof Edge) return `edge:${item.solid.compound.componentId}:${item.id}`
   if(item instanceof Vertex) return `vertex:${item.solid.compound.componentId}:${item.id}`
   if(item instanceof ConstructionHelper) return `helper:${item.componentId}:${item.id}`
-  if(item instanceof Profile) return `profile:${item.sketch.id}:${profileIndex(item, component)}`
+  if(item instanceof Profile) return `profile:${item.sketch.id}:${profileIndex(item)}`
   if(item instanceof SketchElement || item instanceof ProjectedPoint) return `curve:${item.sketch.id}:${item.id}`
   if(item?.componentA) return `joint:${item.id}`
 }
@@ -40,13 +40,9 @@ export function sketchComponent(tree, sketchId) {
   return tree.getChildren().find(component => component.sketches.some(sketch => sketch.id == sketchId))
 }
 
-function sketchProfiles(sketch, component) {
-  return sketch.profiles(component)
-}
-
-function profileIndex(profile, component) {
+function profileIndex(profile) {
   const reference = new ProfileReference(profile)
-  return sketchProfiles(profile.sketch, component).findIndex(other => reference.matches(other))
+  return profile.sketch.profiles().findIndex(other => reference.matches(other))
 }
 
 export function findSketch(doc, sketchId) {
@@ -101,7 +97,7 @@ export function resolveItem(doc, id, tree = doc.top()) {
       const sketchComp = sketchComponent(tree, parts[0])
       if(!sketchComp) throw missing()
       const sketch = sketchComp.sketches.find(sketch => sketch.id == parts[0])
-      const profile = sketchProfiles(sketch, sketchComp)[Number(parts[1])]
+      const profile = sketch.profiles()[Number(parts[1])]
       if(!profile) throw missing()
       return profile
     }
@@ -358,13 +354,12 @@ export function describeSettings(feature) {
 export function describeFeature(doc, feature, { schema = true } = {}) {
   const index = doc.timeline.features.indexOf(toRaw(feature))
   const tree = doc.top(index)
-  const component = tree.findChild(feature.componentId)
   const values = Object.fromEntries(Object.entries(feature.settings).map(([key, setting]) => {
     if(feature.isPickerSetting(setting)) {
       if(!feature[key]) return [key, null]
       const items = feature.resolveInputReferences(key, tree).references
         .flatMap(referenceItems)
-        .map(item => itemId(item, sketchComponent(tree, item.sketch?.id) || component) || selectionType(item))
+        .map(item => itemId(item) || selectionType(item))
       return [key, setting.multi ? items : items[0] || null]
     }
     if(feature.expressions[key]) return [key, { expression: feature.expressions[key], value: round(feature[key]) }]
@@ -460,7 +455,7 @@ export function describeSketch(doc, sketch, tree = doc.top()) {
   const component = sketchComponent(tree, sketch.id)
   const workplane = sketch.workplane
   const axis = column => vector(new THREE.Vector3().setFromMatrixColumn(workplane, column))
-  const profiles = component ? sketchProfiles(sketch, component) : []
+  const profiles = component ? sketch.profiles() : []
   const elements = [...sketch.elements, ...sketch.projectedElements()]
   return {
     id: `sketch:${sketch.id}`,

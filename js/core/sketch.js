@@ -367,11 +367,9 @@ export class Sketch {
     return curves
   }
 
-  profiles(comp, includeOuter) {
+  profiles(includeOuter) {
     const wires = this.getWires(this.cutElements(), includeOuter)
-    const profiles = this.buildProfiles(comp, wires)
-
-    return profiles
+    return this.buildProfiles(wires)
   }
 
   // Exact intersections are expensive, and sketches with text have many curves
@@ -455,7 +453,7 @@ export class Sketch {
     return loops.filter(wire => !wire.isClockwise() )
   }
 
-  buildProfiles(comp, wires) {
+  buildProfiles(wires) {
     return wires.map(wire => {
       // Find all other wires enclosed by this one
       let cutouts = []

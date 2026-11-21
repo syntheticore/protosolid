@@ -120,7 +120,7 @@ test('rectangles joined by a bridge line each form one profile', () => {
   rectangle(20, -10, 30, 0)
   const bridge = line(20, 0, 10, 0)
   rectangle(0, 0, 10, 10)
-  const profiles = sketch.profiles(null, false)
+  const profiles = sketch.profiles(false)
   assert.equal(profiles.length, 2)
   for(const profile of profiles) {
     assert.equal(profile.rings.length, 1)

@@ -69,7 +69,8 @@
 
     // Projected points are fixed references, unlike draggable handles,
     // so their dot keeps its size on hover. Follows the hover rule above.
-    // Spanning the whole handle, the ring frames a coincident handle's ring.
+    // The ring frames a coincident handle's ring while staying
+    // inside the snap anchor ring.
     &.projected
       &::before
         width: 8px
@@ -78,8 +79,8 @@
 
       &::after
         box-sizing: border-box
-        width: 100%
-        height: 100%
+        width: calc(100% - 4px)
+        height: calc(100% - 4px)
         border-color: $projected
 
       &.broken

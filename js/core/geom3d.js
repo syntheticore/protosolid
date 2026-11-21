@@ -9,7 +9,7 @@ import { normalFromMatrix, rotationFromNormal, EPSILON } from './utils.js'
 import { fail } from './errors.js'
 import {
   shapex as sx, modelTolerance, tessellationOptions, point2, threeVector,
-  planeFromMatrix, axisFromMatrix, transformFromMatrix, consumeEntityIds, tessellateMesh,
+  planeFromMatrix, axisFromMatrix, transformFromMatrix, consumeEntityIds, tessellateMesh, meshBuffers,
 } from './shapex.js'
 
 function extrusionRange(geometry, origin, direction) {
@@ -39,11 +39,13 @@ export function boundingSphere(geometry) {
   return sphere
 }
 
-// A sketch element lifted from its workplane, or a model edge's curve
+// A sketch element lifted onto its support, or a model edge's curve
 export function spatialCurve(item) {
-  return item.sketch ?
-    planeFromMatrix(item.sketch.workplane).liftCurve(item.geom(), modelTolerance) :
-    item.geom().trimmedCurve()
+  if(!item.sketch) return item.geom().trimmedCurve()
+  const { surfaceSketch, surfacePlacement, workplane } = item.sketch
+  return surfaceSketch ?
+    surfaceSketch.liftCurve(item.geom()).transformed(transformFromMatrix(surfacePlacement)) :
+    planeFromMatrix(workplane).liftCurve(item.geom(), modelTolerance)
 }
 
 // Curves grouped by shared endpoints into chains, one wire each
@@ -128,11 +130,15 @@ export class Profile {
     return this.sketch.creator?.componentId ?? this.sketch.component?.id
   }
   get workplane() {
-    return this.placedWorkplane ?? this.sketch.workplane
+    return this.placement ? this.placement.clone().multiply(this.sketch.workplane) : this.sketch.workplane
+  }
+  get surfacePlacement() {
+    const placement = this.sketch.surfacePlacement
+    return this.placement ? this.placement.clone().multiply(placement) : placement
   }
   transform(transform) {
     const profile = this.clone()
-    profile.placedWorkplane = transform.clone().multiply(this.workplane)
+    profile.placement = this.placement ? transform.clone().multiply(this.placement) : transform.clone()
     return profile
   }
   geom() {
@@ -145,7 +151,16 @@ export class Profile {
   reference() {
     return new ProfileReference(this)
   }
-  tesselate() {
+  tesselate(flat = false) {
+    if(this.sketch.surfaceSketch && !flat) {
+      const mesh = this.sketch.surfaceSketch.tessellateProfile(this.geom(), tessellationOptions)
+      const placement = this.surfacePlacement
+      return meshBuffers({
+        triangles: mesh.triangles,
+        positions: mesh.positions.map(point => threeVector(point).applyMatrix4(placement)),
+        normals: mesh.normals.map(normal => threeVector(normal).transformDirection(placement)),
+      })
+    }
     let polyRings = this.rings.map(wire => wire.tesselate())
     const contours = polyRings.map(ring => ring.map(p => new THREE.Vector2(p[0], p[1])))
     const indices = THREE.ShapeUtils.triangulateShape(contours[0], contours.slice(1)).flat()
@@ -161,19 +176,34 @@ export class Profile {
   containsPoint(p) {
     return this.rings[0].containsPoint(p) && !this.rings.slice(1).some(wire => wire.containsPoint(p))
   }
-  center() {
+  chartCenter() {
     const out = new THREE.Vector3()
     this.rings[0].segments.forEach(seg => out.add(seg.center()))
-    out.divideScalar(this.rings[0].segments.length)
-    return out.applyMatrix4(this.workplane)
+    return out.divideScalar(this.rings[0].segments.length)
+  }
+  center() {
+    const center = this.chartCenter()
+    return this.sketch.surfaceSketch ?
+      threeVector(this.sketch.surfaceSketch.pointNormal(point2(center)).point).applyMatrix4(this.surfacePlacement) :
+      center.applyMatrix4(this.workplane)
   }
   normal() {
+    if(this.sketch.surfaceSketch) {
+      const { normal } = this.sketch.surfaceSketch.pointNormal(point2(this.chartCenter()))
+      return threeVector(normal).transformDirection(this.surfacePlacement)
+    }
     return normalFromMatrix(this.workplane)
   }
   getBaseId(curve) {
     return curve.id.split('/')[0]
   }
   extrude(componentId, height, featureId, offset = 0) {
+    if(this.sketch.surfaceSketch) {
+      const geometry = this.sketch.surfaceSketch.extrude(this.geom(), offset, offset + height)
+      const compound = new Compound(componentId, geometry).seedProfileTopology([this], featureId)
+      const placement = this.surfacePlacement
+      return placement.equals(new THREE.Matrix4()) ? compound : compound.transform(placement)
+    }
     if (!height) fail('Extrusion has no volume')
     const plane = planeFromMatrix(this.workplane)
     const geometry = this.geom().extrude(plane, plane.normal().scaled(height))
@@ -328,7 +358,7 @@ export class Profile {
     const clone = new Profile(this.sketch, [...this.rings])
     clone.id = this.id
     clone.serializedRingIds = this.serializedRingIds
-    clone.placedWorkplane = this.placedWorkplane
+    clone.placement = this.placement
     return clone
   }
 }

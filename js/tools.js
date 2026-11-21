@@ -1677,10 +1677,9 @@ export class AxisPickTool extends PickTool {
 }
 
 export class PlanePickTool extends PickTool {
-  constructor(component, viewport, callback) {
-    super(component, viewport, ['plane'], callback)
-    // Planar faces on inactive components are ghosted and live outside the
-    // normal raycast tree, but they can still support a new sketch.
+  constructor(component, viewport, callback, selectors = ['plane']) {
+    super(component, viewport, selectors, callback)
+    // Supports on inactive components are outside the normal raycast tree.
     this.includeInactive = true
   }
 
@@ -1690,6 +1689,17 @@ export class PlanePickTool extends PickTool {
     return items.filter(item => item instanceof PlaneHelper).concat(
       items.filter(item => !(item instanceof PlaneHelper))
     )
+  }
+}
+
+export class SketchSupportPickTool extends PlanePickTool {
+  constructor(component, viewport, callback) {
+    super(component, viewport, callback, ['plane', 'face'])
+  }
+
+  orderItems(items) {
+    const closest = items[0]
+    return closest instanceof Face && !closest.getPlane() ? items : super.orderItems(items)
   }
 }
 

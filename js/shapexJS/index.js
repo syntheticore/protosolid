@@ -1026,6 +1026,7 @@ export function createShapex(bindings) {
       if(kind == 'sphere') return { kind, center: new Point3(...values) }
       return { kind }
     }
+    surfaceSketch() { return new SurfaceSketch(nativeCall(() => this._raw().surfaceSketch())) }
     boundaryEdges() {
       const raw = nativeCall(() => this._raw().boundaryEdges())
       try { return Array.from({ length: raw.length }, (_, index) => new Edge(raw.get(index))) }
@@ -1034,6 +1035,40 @@ export function createShapex(bindings) {
     tessellate(options) {
       const value = tessellation(options)
       return nativeCall(() => mesh(this._raw().tessellate(value.chordTolerance, value.angularTolerance, value.maximumDepth)))
+    }
+  }
+
+  class SurfaceSketch extends NativeValue {
+    editPlane() {
+      const values = this._raw().editPlane()
+      return Plane3.new(new Point3(...values.slice(0, 3)), new Vec3(...values.slice(3, 6)), new Vec3(...values.slice(6)))
+    }
+    boundary() {
+      return Array.from(this._raw().boundary(), line => Array.from({ length: line.length / 2 },
+        (_, index) => new Point2(line[index * 2], line[index * 2 + 1])))
+    }
+    pointNormal(point) {
+      const values = nativeCall(() => this._raw().pointNormal(point.x, point.y))
+      return { point: new Point3(...values.slice(0, 3)), normal: new Vec3(...values.slice(3)) }
+    }
+    project(point) { return new Point2(...nativeCall(() => this._raw().project(point.x, point.y, point.z))) }
+    liftCurve(curve) {
+      return new TrimmedCurve3(nativeCall(() => this._raw().liftCurve(instance(curve, TrimmedCurve2, 'curve')._dto())))
+    }
+    tessellateCurve(curve, options) {
+      const value = tessellation(options)
+      const raw = nativeCall(() => this._raw().tessellateCurve(instance(curve, TrimmedCurve2, 'curve')._dto(),
+        value.chordTolerance, value.angularTolerance, value.maximumDepth))
+      try { return new Polyline(Array.from(raw.parameters), triples(raw.points, Point3)) }
+      finally { free(raw) }
+    }
+    tessellateProfile(profile, options) {
+      const value = tessellation(options)
+      return nativeCall(() => mesh(this._raw().tessellateProfile(profileDto(instance(profile, Profile, 'profile')),
+        value.chordTolerance, value.angularTolerance, value.maximumDepth)))
+    }
+    extrude(profile, start, end) {
+      return nativeCall(() => new Compound(this._raw().extrude(profileDto(instance(profile, Profile, 'profile')), start, end)))
     }
   }
 

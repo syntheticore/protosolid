@@ -710,7 +710,7 @@
             ? new THREE.Vector3().setFromMatrixPosition(worldTransform(component).multiply(item.frameA))
             : new THREE.Vector3()
         } else if(item instanceof SketchElement || item instanceof ProjectedPoint) {
-          center = item.center().clone().applyMatrix4(item.sketch.workplane)
+          center = item.sketch.pointInComponent(item.center())
         } else {
           center = item.center()
         }

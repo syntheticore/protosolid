@@ -35,7 +35,7 @@ export class HandleReference extends Reference {
   locate() {
     const elem = this.curveReference.getItem()
     const point = elem?.handles()[this.index]
-    this.item = point && new THREE.Matrix4().setPosition(point.clone().applyMatrix4(elem.sketch.workplane))
+    this.item = point && new THREE.Matrix4().setPosition(elem.sketch.pointInComponent(point))
   }
 
   update(tree) {
@@ -158,8 +158,7 @@ function measurements(item) {
   }
 
   // Sketch elements, in the space of their component
-  const workplane = item.sketch.workplane
-  const placed = point => () => point.clone().applyMatrix4(workplane)
+  const placed = point => () => item.sketch.pointInComponent(point)
 
   if(item instanceof SketchPoint || item instanceof ProjectedPoint) return position(placed(item.point))
 

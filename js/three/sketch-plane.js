@@ -158,6 +158,10 @@ export default class SketchPlane extends THREE.Object3D {
       gridMaterial(1),
     )
     this.add(this.grid)
+    this.outline = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({
+      color: 0x8a939b, transparent: true, opacity: 0.8, depthTest: false, depthWrite: false,
+    }))
+    this.add(this.outline)
     this.lastSize = null
 
     // Axis Helper
@@ -184,6 +188,12 @@ export default class SketchPlane extends THREE.Object3D {
 
   setSketch(sketch) {
     this.sketch = sketch
+    this.outline.geometry.dispose()
+    const positions = sketch?.surfaceSketch?.boundary().flatMap(line =>
+      line.slice(1).flatMap(({ x, y }, index) => [line[index].x, line[index].y, 0, x, y, 0]))
+    this.outline.visible = !!positions?.length
+    this.outline.geometry = new THREE.BufferGeometry()
+    if(this.outline.visible) this.outline.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     this.maskSignature = null
     this.updateMask()
   }

@@ -6,8 +6,8 @@ use crate::{Point2, Point3, Vec3};
 
 use super::polygon::ordered;
 use super::{
-    nearest_uv, BodyId, Diagnostic, DiagnosticKind, Edge, EdgeId, FaceId, FaceOrientation, Kernel, KernelError,
-    KernelResult, LoopId, ModelTolerance, ShellId,
+    nearest_uv, BodyId, Curve3, Diagnostic, DiagnosticKind, EdgeId, FaceId, FaceOrientation,
+    Kernel, KernelError, KernelResult, LoopId, ModelTolerance, ParameterRange, ShellId,
 };
 use crate::{geometry_error, invalid, topology_error};
 
@@ -51,22 +51,16 @@ impl Default for TessellationOptions {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct EdgePolyline {
-    parameters: Vec<f64>,
-    points: Vec<Point3>,
-}
-
 /// Retain boundary samples across face calls on the same BREP state. Only
 /// the most recent error policy is retained, bounding storage by its edges.
 #[derive(Debug, Default)]
 pub(super) struct TessellationCache {
     options: Option<TessellationOptions>,
-    edges: BTreeMap<EdgeId, EdgePolyline>,
+    edges: BTreeMap<EdgeId, Polyline>,
 }
 
 impl TessellationCache {
-    fn edges(&mut self, options: TessellationOptions) -> &mut BTreeMap<EdgeId, EdgePolyline> {
+    fn edges(&mut self, options: TessellationOptions) -> &mut BTreeMap<EdgeId, Polyline> {
         if self.options != Some(options) {
             self.edges.clear();
             self.options = Some(options);
@@ -230,11 +224,8 @@ impl Kernel {
         options: TessellationOptions,
     ) -> KernelResult<Polyline> {
         options.validate_against(self.tolerance())?;
-        let sampled = sample_edge(self.topology().edge(edge)?, options)?;
-        Ok(Polyline {
-            parameters: sampled.parameters,
-            points: sampled.points,
-        })
+        let edge = self.topology().edge(edge)?;
+        tessellate_curve(edge.curve(), edge.range(), options)
     }
 
     pub fn tessellate_body(
@@ -276,7 +267,7 @@ impl Kernel {
         &self,
         shell: ShellId,
         options: TessellationOptions,
-        cache: &mut BTreeMap<EdgeId, EdgePolyline>,
+        cache: &mut BTreeMap<EdgeId, Polyline>,
     ) -> KernelResult<TriangleMesh> {
         let mut mesh = TriangleMesh::default();
         for face in self.topology().shell(shell)?.faces() {
@@ -289,7 +280,7 @@ impl Kernel {
         &self,
         face_id: FaceId,
         options: TessellationOptions,
-        cache: &mut BTreeMap<EdgeId, EdgePolyline>,
+        cache: &mut BTreeMap<EdgeId, Polyline>,
     ) -> KernelResult<TriangleMesh> {
         let face = self.topology().face(face_id)?;
         // Boundary samples lie on their edges; imported or healed entities
@@ -466,7 +457,7 @@ impl Kernel {
         &self,
         loop_id: LoopId,
         options: TessellationOptions,
-        cache: &mut BTreeMap<EdgeId, EdgePolyline>,
+        cache: &mut BTreeMap<EdgeId, Polyline>,
     ) -> KernelResult<Vec<BoundaryVertex>> {
         let loop_value = self.topology().loop_(loop_id)?;
         let first = loop_value.first().ok_or_else(|| {
@@ -567,7 +558,7 @@ impl Kernel {
         &self,
         edge_id: EdgeId,
         options: TessellationOptions,
-    ) -> KernelResult<EdgePolyline> {
+    ) -> KernelResult<Polyline> {
         let edge = self.topology().edge(edge_id)?;
         let mut branches = Vec::new();
         for coedge_id in edge.coedges() {
@@ -588,7 +579,7 @@ impl Kernel {
             }
             branches.push(rolling_ball_branch(face.surface(), &samples)?);
         }
-        sample_edge_with_surface_constraint(edge, options, &|first, last| {
+        sample_curve(edge.curve(), edge.range(), options, &|first, last| {
             let mut chord_error = 0.0_f64;
             let mut angular_error = 0.0_f64;
             for (coedge_id, branch) in edge.coedges().iter().zip(&branches) {
@@ -1046,7 +1037,7 @@ fn finish_surface_triangulation(
         normals.push(normal);
     }
     // Coarse triangles can span more than half a curved support. Their flat
-    // normals do not determine the winding of the refined surface patches.
+    // normals do not determine the winding of the refined triangles.
     // Keep the chart winding during subdivision and orient the final mesh.
     triangles.retain(|triangle| !uv_triangle_is_degenerate(*triangle, &uvs));
     refine_surface_triangles(
@@ -1082,6 +1073,61 @@ fn finish_surface_triangulation(
         triangle_faces: vec![face_id; triangles.len()],
         triangles,
     })
+}
+
+pub(super) fn tessellate_surface_region(
+    region: &super::sew::BrepPatch,
+    face_id: FaceId,
+    tolerance: ModelTolerance,
+    options: TessellationOptions,
+) -> KernelResult<TriangleMesh> {
+    options.validate_against(tolerance)?;
+    let mut uvs = Vec::new();
+    let mut positions = Vec::new();
+    let mut boundary_edges = BTreeSet::new();
+    let mut holes = Vec::new();
+    for (index, ring) in region.loops.iter().enumerate() {
+        let first = uvs.len();
+        if index > 0 {
+            holes.push(first);
+        }
+        for segment in &ring.segments {
+            let polyline = sample_curve(&segment.curve, segment.range, options, &|a, b| {
+                let uv = |t| segment.pcurve.first_order(t).map(|value| value.0);
+                let a = uv(a)?;
+                let b = uv(b)?;
+                let first = region.surface.normal(a.x, a.y)?;
+                let second = region.surface.normal(b.x, b.y)?;
+                Ok((0.0, first.angle(second).0 * 0.5))
+            })?;
+            let count = polyline.parameters.len() - 1;
+            for (parameter, point) in polyline.parameters.into_iter().zip(polyline.points).take(count) {
+                uvs.push(segment.pcurve.first_order(parameter)?.0);
+                positions.push(point);
+            }
+        }
+        for i in first..uvs.len() {
+            boundary_edges.insert(ordered(i, if i + 1 == uvs.len() { first } else { i + 1 }));
+        }
+    }
+    let flat_uv = uvs.iter().flat_map(|uv| [uv.x, uv.y]).collect::<Vec<_>>();
+    let indices = earcutr::earcut(&flat_uv, &holes, 2);
+    if indices.is_empty() {
+        return Err(geometry_error("surface sketch region could not be triangulated"));
+    }
+    finish_surface_triangulation(
+        &region.surface, region.orientation, face_id, tolerance, tolerance.linear, options,
+        SurfaceTriangulationSeed {
+            uvs, positions, boundary_edges,
+            triangles: indices.chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect(),
+        },
+    )
+}
+
+pub(super) fn tessellate_curve(
+    curve: &Curve3, range: ParameterRange, options: TessellationOptions,
+) -> KernelResult<Polyline> {
+    sample_curve(curve, range, options, &|_, _| Ok((0.0, 0.0)))
 }
 
 /// Subdivide a surface isoparametric interval until both exact boundary
@@ -1692,23 +1738,20 @@ impl TessellationOptions {
     }
 }
 
-fn sample_edge(edge: &Edge, options: TessellationOptions) -> KernelResult<EdgePolyline> {
-    sample_edge_with_surface_constraint(edge, options, &|_, _| Ok((0.0, 0.0)))
-}
-
-fn sample_edge_with_surface_constraint(
-    edge: &Edge,
+fn sample_curve(
+    curve: &Curve3,
+    range: ParameterRange,
     options: TessellationOptions,
     surface_error: &dyn Fn(f64, f64) -> KernelResult<(f64, f64)>,
-) -> KernelResult<EdgePolyline> {
-    let start = curve_sample(edge.curve(), edge.range().start)?;
-    let end = curve_sample(edge.curve(), edge.range().end)?;
-    let mut samples = vec![(edge.range().start, start.point)];
+) -> KernelResult<Polyline> {
+    let start = curve_sample(curve, range.start)?;
+    let end = curve_sample(curve, range.end)?;
+    let mut samples = vec![(range.start, start.point)];
     sample_interval(
-        edge,
-        edge.range().start,
+        curve,
+        range.start,
         start,
-        edge.range().end,
+        range.end,
         end,
         0,
         options,
@@ -1716,12 +1759,12 @@ fn sample_edge_with_surface_constraint(
         &mut samples,
     )?;
     let (parameters, points): (Vec<_>, Vec<_>) = samples.into_iter().unzip();
-    Ok(EdgePolyline { parameters, points })
+    Ok(Polyline { parameters, points })
 }
 
 #[allow(clippy::too_many_arguments)]
 fn sample_interval(
-    edge: &Edge,
+    curve: &Curve3,
     start_parameter: f64,
     start: CurveSample,
     end_parameter: f64,
@@ -1732,18 +1775,18 @@ fn sample_interval(
     output: &mut Vec<(f64, Point3)>,
 ) -> KernelResult<()> {
     let middle_parameter = (start_parameter + end_parameter) * 0.5;
-    let middle = curve_sample(edge.curve(), middle_parameter)?;
+    let middle = curve_sample(curve, middle_parameter)?;
     let first_quarter_parameter = (start_parameter + middle_parameter) * 0.5;
     let third_quarter_parameter = (middle_parameter + end_parameter) * 0.5;
-    let first_quarter = curve_sample(edge.curve(), first_quarter_parameter)?;
-    let third_quarter = curve_sample(edge.curve(), third_quarter_parameter)?;
+    let first_quarter = curve_sample(curve, first_quarter_parameter)?;
+    let third_quarter = curve_sample(curve, third_quarter_parameter)?;
     let chord_middle = start.point + (end.point - start.point) * 0.5;
     let chord_first_quarter = start.point + (end.point - start.point) * 0.25;
     let chord_third_quarter = start.point + (end.point - start.point) * 0.75;
     // Dyadic samples alone alias with periodic curves: on a helix spanning a
     // multiple of four turns, every quarter lies on the chord.
     let off_grid = curve_sample(
-        edge.curve(),
+        curve,
         start_parameter + (end_parameter - start_parameter) * OFF_GRID_FRACTION,
     )?;
     let chord_off_grid = start.point + (end.point - start.point) * OFF_GRID_FRACTION;
@@ -1787,7 +1830,7 @@ fn sample_interval(
         ));
     }
     sample_interval(
-        edge,
+        curve,
         start_parameter,
         start,
         middle_parameter,
@@ -1798,7 +1841,7 @@ fn sample_interval(
         output,
     )?;
     sample_interval(
-        edge,
+        curve,
         middle_parameter,
         middle,
         end_parameter,

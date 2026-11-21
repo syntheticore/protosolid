@@ -11,6 +11,7 @@ export function inputReference(type, item) {
   if(type == 'face') return item.faceReference()
   if(type == 'edge') return item.edgeReference()
   if(type == 'plane') return item.planarReference()
+  if(type == 'sketchSupport') return item.faceReference ? item.faceReference() : item.planarReference()
   if(type == 'axis') return item.axialReference()
   if(type == 'path') return item.pathReference()
   if(type == 'curve') return new CurveReference(item)

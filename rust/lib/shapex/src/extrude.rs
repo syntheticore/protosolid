@@ -744,7 +744,7 @@ fn prepared_part_count(wire: &Wire2) -> usize {
     }
 }
 
-fn prepared_wire_segments(wire: &Wire2) -> KernelResult<Vec<TrimmedCurve2>> {
+pub(super) fn prepared_wire_segments(wire: &Wire2) -> KernelResult<Vec<TrimmedCurve2>> {
     let [segment] = wire.segments() else {
         return Ok(wire.segments().to_vec());
     };
@@ -760,7 +760,7 @@ fn prepared_wire_segments(wire: &Wire2) -> KernelResult<Vec<TrimmedCurve2>> {
 }
 
 /// The source `(segment, part)` of every prepared wire segment.
-fn prepared_wire_segment_sources(wire: &Wire2) -> Vec<(usize, usize)> {
+pub(super) fn prepared_wire_segment_sources(wire: &Wire2) -> Vec<(usize, usize)> {
     match prepared_part_count(wire) {
         1 => (0..wire.segments().len()).map(|segment| (segment, 0)).collect(),
         parts => (0..parts).map(|part| (0, part)).collect(),

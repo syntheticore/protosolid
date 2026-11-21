@@ -12,7 +12,7 @@ use shapex::{
     RigidTransform3, Surface3, SurfaceChart,
     ChamferMode, Compound, ConstructionBranch, CreationRole, EdgeHandle, FaceHandle, FilletOptions, Matrix3,
     ModelTolerance, Plane3, Point2, Point3, Profile, ProfileBoundary, Resolution, ShellJoin, Solid, SplitKeep,
-    StepAssembly, StepLengthUnit, StepOccurrence, StepProduct,
+    StepAssembly, StepLengthUnit, StepOccurrence, StepProduct, SurfaceSketch,
     TessellationOptions, TriangleMesh, TrimmedCurve2, TrimmedCurve3, Vec2, Vec3, VertexHandle, Wire2, Wire3,
 };
 use wasm_bindgen::prelude::*;
@@ -717,12 +717,75 @@ impl NativeFace {
         f64_array(&values)
     }
 
+    #[wasm_bindgen(js_name = surfaceSketch)]
+    pub fn surface_sketch(&self) -> Result<NativeSurfaceSketch, JsValue> {
+        self.inner.surface_sketch().map(|inner| NativeSurfaceSketch { inner }).map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = boundaryEdges)]
     pub fn boundary_edges(&self) -> Result<NativeFaceEdges, JsValue> {
         self.inner
             .boundary_edges()
             .map(|edges| NativeFaceEdges { edges })
             .map_err(js_error)
+    }
+}
+
+#[wasm_bindgen(js_name = NativeSurfaceSketch)]
+pub struct NativeSurfaceSketch {
+    inner: SurfaceSketch,
+}
+
+#[wasm_bindgen(js_class = NativeSurfaceSketch)]
+impl NativeSurfaceSketch {
+    #[wasm_bindgen(js_name = editPlane)]
+    pub fn edit_plane(&self) -> Float64Array {
+        let plane = self.inner.edit_plane();
+        f64_array(&[point_values(plane.origin()), vector_values(plane.u()), vector_values(plane.v())].concat())
+    }
+
+    pub fn boundary(&self) -> js_sys::Array {
+        self.inner.boundary().iter().map(|line| {
+            let points = line.iter().flat_map(|point| [point.x, point.y]).collect::<Vec<_>>();
+            JsValue::from(f64_array(&points))
+        }).collect()
+    }
+
+    #[wasm_bindgen(js_name = pointNormal)]
+    pub fn point_normal(&self, x: f64, y: f64) -> Result<Float64Array, JsValue> {
+        let (point, normal) = self.inner.point_normal(Point2::new(x, y)).map_err(js_error)?;
+        Ok(f64_array(&[point_values(point), vector_values(normal)].concat()))
+    }
+
+    pub fn project(&self, x: f64, y: f64, z: f64) -> Result<Float64Array, JsValue> {
+        let point = self.inner.project(Point3::new(x, y, z)).map_err(js_error)?;
+        Ok(f64_array(&[point.x, point.y]))
+    }
+
+    #[wasm_bindgen(js_name = liftCurve)]
+    pub fn lift_curve(&self, description: JsValue) -> Result<NativeCurve3, JsValue> {
+        let curve = from_js::<TrimmedCurveDto>(description)?.build()?;
+        self.inner.lift_curve(&curve).map(|curve| NativeCurve3::wrap(&curve)).map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = tessellateCurve)]
+    pub fn tessellate_curve(&self, description: JsValue, linear: f64, angular: f64, depth: u8) -> Result<NativePolyline, JsValue> {
+        let curve = from_js::<TrimmedCurveDto>(description)?.build()?;
+        let options = tessellation_options(linear, angular, depth)?;
+        self.inner.tessellate_curve(&curve, options).map(|line| NativePolyline {
+            parameters: line.parameters,
+            points: line.points.into_iter().flat_map(point_values).collect(),
+        }).map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = tessellateProfile)]
+    pub fn tessellate_profile(&self, description: JsValue, linear: f64, angular: f64, depth: u8) -> Result<NativeMesh, JsValue> {
+        let options = tessellation_options(linear, angular, depth)?;
+        self.inner.tessellate_profile(&profile(description)?, options).map(Into::into).map_err(js_error)
+    }
+
+    pub fn extrude(&self, description: JsValue, start: f64, end: f64) -> Result<NativeCompound, JsValue> {
+        self.inner.extrude(&profile(description)?, start, end).map(|inner| NativeCompound { inner }).map_err(js_error)
     }
 }
 

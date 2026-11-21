@@ -3,11 +3,11 @@ import { markRaw, toRaw } from 'vue'
 
 import { Component, ComponentDefinition, createComponentInstance } from './component.js'
 import { Sketch } from './sketch.js'
-import { Compound, Profile, boundingSphere, chamferReferenceFaces, importedCompound, namedBody } from './geom3d.js'
+import { Compound, Face, Profile, boundingSphere, chamferReferenceFaces, importedCompound, namedBody } from './geom3d.js'
 import { SketchElement } from './geom2d.js'
 import { cylinderFrame, standardPitch, threadGroove } from './thread.js'
 import { shapex, modelTolerance, matrixFromTransform, planeFromMatrix, point2, threeVector } from './shapex.js'
-import { PatternInputReference } from './references.js'
+import { FaceReference, PatternInputReference, PlanarReference } from './references.js'
 import { PlaneHelper, AxisHelper, PointHelper } from './helpers.js'
 import { EPSILON, normalFromMatrix, parseHsl, rad, rotationFromNormal } from './utils.js'
 import { loadFile } from '../utils.js'
@@ -149,7 +149,12 @@ export class Feature {
       const { references, error } = this.resolveInputReferences(key, tree)
       let items = references.flatMap(ref => ref.getItems())
       if(error) errors.push(error)
-      if(setting.type == 'profile') items = items.map(profile => this.profileInComponent(profile, profilePlacementTree))
+      if(setting.type == 'profile') {
+        if(items.some(profile => !this.acceptsProfile(profile))) {
+          errors.push({ type: 'error', msg: 'This feature requires planar sketch profiles' })
+        }
+        items = items.map(profile => this.profileInComponent(profile, profilePlacementTree))
+      }
       // Saved selections of separate patches may resolve to the same cell.
       if(setting.multi && (setting.type == 'face' || setting.type == 'edge')) items = [...new Set(items)]
       results[key] = setting.multi ? items : items[0]
@@ -176,13 +181,11 @@ export class Feature {
 
   needsPicker(setting, includeOptionals) {
     setting = this.settings[setting]
-    return this.isSettingVisible(setting) && ['profile', 'curve', 'path', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].some(type =>
-      type == setting.type && (!setting.optional || includeOptionals)
-    )
+    return this.isSettingVisible(setting) && this.isPickerSetting(setting) && (!setting.optional || includeOptionals)
   }
 
   isPickerSetting(setting) {
-    return ['profile', 'curve', 'path', 'axis', 'plane', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].includes(setting.type)
+    return ['profile', 'curve', 'path', 'axis', 'plane', 'sketchSupport', 'face', 'edge', 'solid', 'point', 'componentRef', 'patternInput', 'joint'].includes(setting.type)
   }
 
   isSettingVisible(setting) {
@@ -237,7 +240,12 @@ export class Feature {
 
   modifiedComponents() { return [this.componentId] }
 
+  acceptsProfile(profile) {
+    return !profile.sketch.surfaceSketch
+  }
+
   acceptsInput(item) {
+    if(item instanceof Profile && !this.acceptsProfile(item)) return false
     const componentId = inputComponentId(item)
     if(!componentId || componentId == this.componentId) return true
     if(!(item instanceof Profile)) return false
@@ -1665,8 +1673,8 @@ export class CreateSketchFeature extends Feature {
   constructor(doc) {
     super(doc, false, 'Sketch', {
       plane: {
-        title: 'Plane',
-        type: 'plane',
+        title: 'Plane or face',
+        type: 'sketchSupport',
         autoConfirm: true,
       },
     })
@@ -1677,19 +1685,17 @@ export class CreateSketchFeature extends Feature {
     this.sketch.creator = this
   }
 
-  // A sketch may use planar geometry from any visible component as its support.
-  // The plane picker already limits candidates to planar faces and helpers.
-  acceptsInput() { return true }
+  acceptsInput(item) { return item instanceof PlaneHelper || item instanceof Face }
 
   updateFeature(tree, references) {
-    let plane = references.plane
-    const sourceId = referenceComponentId(this.plane())
-    const source = sourceId && tree.findChild(sourceId)
+    const source = tree.findChild(referenceComponentId(this.plane()))
     const target = tree.findChild(this.componentOccurrenceId) || tree.findChild(this.componentId)
-    if(source && target && source != target) {
-      plane = relativeComponentTransform(source, target).multiply(plane)
+    try {
+      this.sketch.setSupport(references.plane, relativeComponentTransform(source, target))
+    } catch(err) {
+      this.error = featureError(err, 'The sketch face could not be unwrapped')
+      return
     }
-    this.sketch.workplane = plane
     // Solving can create curve references before the sketch's UI is mounted.
     this.sketch.component = tree.findChild(this.componentId)
     this.sketch.component.sketches.push(this.sketch)
@@ -1715,6 +1721,10 @@ export class CreateSketchFeature extends Feature {
   }
 
   static undump(dump, context) {
+    const { plane } = dump.values
+    if(plane instanceof PlanarReference && plane.item instanceof FaceReference) {
+      dump = { ...dump, values: { ...dump.values, plane: plane.item } }
+    }
     const feature = super.undump(dump, context)
     feature.sketch = dump.sketch
     feature.sketch.creator = feature
@@ -2787,6 +2797,9 @@ Serialize.register(PlaceFeature, 'ImportFeature')
 
 export class ExtrudeFeature extends SolidFeature {
   static icon = 'extrude'
+
+  acceptsProfile() { return true }
+
   constructor(doc) {
     super(doc, true, 'Extrusion', {
       extent: {
@@ -2817,7 +2830,7 @@ export class ExtrudeFeature extends SolidFeature {
         title: '(Axis)',
         type: 'axis',
         optional: true,
-        when: feature => feature.extent == 'distance',
+        when: feature => feature.extent == 'distance' && !feature.hasSurfaceProfiles(),
       },
       distance: {
         title: 'Distance',
@@ -2852,6 +2865,23 @@ export class ExtrudeFeature extends SolidFeature {
     this.endOffset = 0
     this.side = 'forward'
     this.sideChangedByUser = false
+  }
+
+  hasSurfaceProfiles() {
+    return this.profiles?.().some(reference => reference.getItem()?.sketch.surfaceSketch)
+  }
+
+  get extent() {
+    return this.hasSurfaceProfiles() ? 'distance' : this.requestedExtent
+  }
+
+  set extent(value) {
+    this.requestedExtent = value
+  }
+
+  settingOptions(key) {
+    const options = this.settings[key].options
+    return key == 'extent' && this.hasSurfaceProfiles() ? { distance: options.distance } : options
   }
 
   settingChanged(key, value) {
@@ -2919,7 +2949,7 @@ export class ExtrudeFeature extends SolidFeature {
     return {
       distance: {
         center,
-        direction: (this.axis && this.axis()) || profile.normal(),
+        direction: (this.isSettingVisible(this.settings.axis) && this.axis && this.axis()) || profile.normal(),
         distance: this.distance,
         side: this.side != 'reverse',
         cb: (dist, side) => {
@@ -3692,7 +3722,7 @@ export class WebFeature extends SolidFeature {
 
   acceptsInput(item) {
     return super.acceptsInput(item) &&
-      (!(item instanceof SketchElement) || !!item.geom && !item.isClosed() && item.endpoints().length == 2)
+      (!(item instanceof SketchElement) || !item.sketch.surfaceSketch && !!item.geom && !item.isClosed() && item.endpoints().length == 2)
   }
 
   updateFeature(tree, references) {
@@ -3704,7 +3734,9 @@ export class WebFeature extends SolidFeature {
       if(!(this.depth > 0)) fail('Depth must be positive')
       const elems = references.curves
       const sketch = elems[0].sketch
-      if(elems.some(elem => elem.sketch !== sketch)) fail('Web curves must lie in one sketch')
+      if(sketch.surfaceSketch || elems.some(elem => elem.sketch !== sketch)) {
+        fail('Web curves must lie in one planar sketch')
+      }
 
       const offsets = {
         center: [this.thickness / 2, -this.thickness / 2],

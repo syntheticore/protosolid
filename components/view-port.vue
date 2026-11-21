@@ -321,6 +321,7 @@
     EdgePickTool,
     FacePickTool,
     PlanePickTool,
+    SketchSupportPickTool,
     AxisPickTool,
     SolidPickTool,
     PointPickTool,
@@ -407,17 +408,8 @@
         this.activateTool(ManipulationTool)
       },
 
-      'document.activeSketch': function(sketch) {
-        // Show sketch plane
-        if(sketch) {
-          const plane = worldTransform(this.document.activeComponent).multiply(sketch.workplane)
-          this.snapper.planeTransform = plane
-          this.renderer.sketchPlane.setPlane(plane)
-        }
-        this.renderer.sketchPlane.setSketch(sketch)
-        this.renderer.sketchPlane.visible = !!sketch
-        this.updateSketchSectionSide()
-        this.renderer.render()
+      sketchEditingFrame: function() {
+        this.updateSketchEditingPlane()
       },
 
       sketchSection: function() {
@@ -464,13 +456,21 @@
         return this.document.activeSketch ? worldTransform(this.document.activeComponent) : null
       },
 
+      sketchEditingFrame: function() {
+        const sketch = this.document.activeSketch
+        return sketch && {
+          sketch,
+          plane: this.activeComponentTransform.clone().multiply(sketch.workplane),
+        }
+      },
+
       // No other sketch tool is in use
       sketchManipulation: function() {
         return !!this.document.activeSketch && this.activeTool instanceof ManipulationTool
       },
 
       sketchSectionPlane: function() {
-        if(!this.sketchSection || !this.document.activeSketch) return null
+        if(!this.sketchSection || !this.document.activeSketch || this.document.activeSketch.surfaceSketch) return null
         return worldTransform(this.document.activeComponent).multiply(this.document.activeSketch.workplane)
       },
 
@@ -539,7 +539,6 @@
     mounted: function() {
       // Renderer
       this.renderer = new Renderer(this.$el.querySelector('canvas'))
-      this.renderer.sketchPlane.setSketch(this.document.activeSketch)
       this.renderer.setDisplayMode(this.displayMode)
       this.renderer.setProjectionMode(this.projectionMode)
       this.renderer.on('before-render', () => this.syncSelectionTransformGizmo())
@@ -563,6 +562,7 @@
         this.guides = guides
         this.snapAnchor = anchor
       })
+      if(this.sketchEditingFrame) this.updateSketchEditingPlane()
 
       // Events
       this.bus.on('pick', (type, pickerCoords, color, acceptsInput, references) => {
@@ -575,6 +575,7 @@
           edge: EdgePickTool,
           face: FacePickTool,
           plane: PlanePickTool,
+          sketchSupport: SketchSupportPickTool,
           solid: SolidPickTool,
           patternInput: PatternInputPickTool,
           point: PointPickTool,
@@ -670,6 +671,18 @@
     },
 
     methods: {
+      updateSketchEditingPlane: function() {
+        const frame = this.sketchEditingFrame
+        if(frame) {
+          this.snapper.planeTransform = frame.plane
+          this.renderer.sketchPlane.setPlane(frame.plane)
+        }
+        this.renderer.sketchPlane.setSketch(frame?.sketch)
+        this.renderer.sketchPlane.visible = !!frame
+        this.updateSketchSectionSide()
+        this.renderer.render()
+      },
+
       sketchClipboard: function(action) {
         const sketch = this.document.activeSketch
         if(!sketch || this.document.isRegenerating) return
@@ -909,9 +922,16 @@
           doc.cameraViewApplied(view.position, view.target)
         })
         doc.on('look-at', (plane, zoomToSketch=false) => setTimeout(() => {
-          this.renderer.lookAt(plane)
           const sketch = this.document.activeSketch
-          if(zoomToSketch && sketch.elements.length) this.zoomToFit(sketch.elements)
+          if(zoomToSketch && sketch?.surfaceSketch) {
+            this.renderer.lookAt(worldTransform(this.document.activeComponent).multiply(plane))
+            const outline = this.renderer.sketchPlane.outline
+            outline.updateWorldMatrix(true, false)
+            this.renderer.zoomToFit([outline])
+          } else {
+            this.renderer.lookAt(plane)
+            if(zoomToSketch && sketch?.elements.length) this.zoomToFit(sketch.elements)
+          }
         }))
         doc.on('regenerated', this.updateExportPreview)
       },

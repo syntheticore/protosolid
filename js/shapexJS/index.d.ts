@@ -364,8 +364,20 @@ export interface Face extends NativeValue {
   id(): string
   orientation(): 'forward' | 'reversed'
   surface(): { kind: string, value?: Plane3, axis?: Axis3, radialAxes?: readonly [Vec3, Vec3], center?: Point3 }
+  surfaceSketch(): SurfaceSketch
   boundaryEdges(): Edge[]
   tessellate(options?: TessellationOptions): TriangleMesh
+}
+
+export interface SurfaceSketch extends NativeValue {
+  editPlane(): Plane3
+  boundary(): Point2[][]
+  pointNormal(point: Point2): { point: Point3, normal: Vec3 }
+  project(point: Point3): Point2
+  liftCurve(curve: TrimmedCurve2): TrimmedCurve3
+  tessellateCurve(curve: TrimmedCurve2, options?: TessellationOptions): Polyline
+  tessellateProfile(profile: Profile, options?: TessellationOptions): TriangleMesh
+  extrude(profile: Profile, start: number, end: number): Compound
 }
 
 export interface Edge extends NativeValue {

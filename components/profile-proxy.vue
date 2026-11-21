@@ -5,19 +5,18 @@
   import * as THREE from 'three'
   import materials from '../js/materials.js'
 
-  const props = defineProps(['component', 'profile', 'parentHighlighted', 'parentSelected', 'parentTransform'])
-  const emit = defineEmits([])
+  const props = defineProps(['component', 'profile', 'flat', 'parentHighlighted', 'parentSelected', 'parentTransform'])
 
   const highlight = inject('highlight')
   const renderNeeded = inject('render-needed')
 
   const highlighted = computed(() => props.parentHighlighted || props.parentSelected || props.profile == highlight.value )
 
-  const mesh = window.alcRenderer.convertMesh(props.profile.tesselate(), getMaterial())
-  mesh.applyMatrix4(props.profile.sketch.workplane)
+  const wrapped = props.profile.sketch.surfaceSketch && !props.flat
+  const mesh = window.alcRenderer.convertMesh(props.profile.tesselate(props.flat), getMaterial())
   mesh.alcTypes = ['profile']
   mesh.alcObject = props.profile
-  window.alcRenderer.offsetSketchObject(mesh)
+  if(!wrapped) window.alcRenderer.offsetSketchObject(mesh)
   props.profile.mesh = () => mesh
   props.profile.component = props.component
   window.alcRenderer.add(mesh, true)
@@ -29,8 +28,9 @@
     renderNeeded.value = true
   })
 
-  watch(() => props.parentTransform, () => {
-    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4()).multiply(props.profile.sketch.workplane)
+  watch([() => props.parentTransform, () => props.profile.sketch.workplane], () => {
+    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4())
+    if(!wrapped) mesh.matrix.multiply(props.profile.sketch.workplane)
     mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
     renderNeeded.value = true
   }, { immediate: true })
@@ -42,7 +42,7 @@
       materials.region
   }
 
-  onUnmounted(() => {
+  onBeforeUnmount(() => {
     window.alcRenderer.remove(mesh)
     props.profile.mesh = null
     renderNeeded.value = true

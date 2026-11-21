@@ -13,7 +13,7 @@ import { relativeComponentTransform } from './assembly.js'
 import Expression from './expression.js'
 import { solveDrag, validGeometry } from './sketch-drag.js'
 import { solveSystem } from './sketch-solver.js'
-import { shapex as sx, transformFromMatrix, planeFromMatrix, point2, threeVector, modelTolerance, consumeEntityIds } from './shapex.js'
+import { shapex as sx, transformFromMatrix, planeFromMatrix, point2, point3, threeVector, modelTolerance, consumeEntityIds } from './shapex.js'
 import { isModelingFailure, ModelingError, fail } from './errors.js'
 
 function sameCurve(left, right) {
@@ -71,11 +71,36 @@ export class Sketch {
     this.constraints = []
     this.projections = []
     this.workplane = new THREE.Matrix4()
+    this.surfaceSketch = null
+    this.surfacePlacement = null
     this.history = null
     // this.componentId = componentId
   }
 
   typename() { return 'Sketch' }
+
+  setSupport(support, placement) {
+    const plane = support instanceof Face ? support.getPlane() : support
+    if(plane) {
+      this.workplane = placement.clone().multiply(plane)
+      this.surfacePlacement = null
+      this.surfaceSketch = null
+    } else {
+      const surface = markRaw(support.geom().surfaceSketch())
+      const frame = surface.editPlane()
+      const x = threeVector(frame.u()), y = threeVector(frame.v())
+      this.workplane = placement.clone().multiply(new THREE.Matrix4().makeBasis(x, y, x.clone().cross(y))
+        .setPosition(threeVector(frame.origin())))
+      this.surfacePlacement = placement
+      this.surfaceSketch = surface
+    }
+  }
+
+  pointInComponent(point) {
+    return this.surfaceSketch ?
+      threeVector(this.surfaceSketch.pointNormal(point2(point)).point).applyMatrix4(this.surfacePlacement) :
+      point.clone().applyMatrix4(this.workplane)
+  }
 
   startHistory() {
     this.history = { states: [this.historySnapshot()], index: 0 }
@@ -1376,13 +1401,19 @@ export class Projection {
   // Spatial position of a point item in its component
   itemPoint(item) {
     return this.itemRef instanceof ElemRef ?
-      item.handles()[this.itemRef.index].clone().applyMatrix4(item.sketch.workplane) :
+      item.sketch.pointInComponent(item.handles()[this.itemRef.index]) :
       new THREE.Vector3().setFromMatrixPosition(item.getPoint())
   }
 
   // Express a point of the source component in sketch coordinates
   sketchPoint(point, relative) {
-    point.applyMatrix4(relative).applyMatrix4(this.sketch.workplane.clone().invert())
+    point.applyMatrix4(relative)
+    if(this.sketch.surfaceSketch) {
+      point.applyMatrix4(this.sketch.surfacePlacement.clone().invert())
+      const { x, y } = this.sketch.surfaceSketch.project(point3(point))
+      return new THREE.Vector3(x, y, 0)
+    }
+    point.applyMatrix4(this.sketch.workplane.clone().invert())
     point.z = 0
     return point
   }
@@ -1392,6 +1423,7 @@ export class Projection {
       const id = this.itemRef instanceof ElemRef ? this.id + '/' + this.itemRef.index + '/projected' : this.outputId(0)
       return [new ProjectedPoint(this.sketchPoint(this.itemPoint(item), relative), id)]
     }
+    if(this.sketch.surfaceSketch) fail('Curve projection requires a planar sketch')
     const geometry = item instanceof Edge || item instanceof SketchElement ? spatialCurve(item) : item.geom()
     const result = geometry.transformed(transformFromMatrix(relative))
       .projectedOnto(planeFromMatrix(this.sketch.workplane))
@@ -1468,6 +1500,7 @@ export class Intersection extends Projection {
   failureMessage() { return 'This geometry does not intersect the sketch plane' }
 
   computeOutputs(item, relative) {
+    if(this.sketch.surfaceSketch) fail('Intersection projection requires a planar sketch')
     const results = item instanceof Face ? this.faceSection(item, relative) :
       item instanceof Edge ? this.edgeCrossings(item, relative) :
       this.curveCrossings(item, relative)
@@ -1503,8 +1536,11 @@ export class Intersection extends Projection {
   // are bracketed by sampling the distance to the plane along the edge and
   // refined on the exact curve. Extrema of the distance catch tangent contacts.
   edgeCrossings(edge, relative) {
-    const curve = edge.geom().trimmedCurve()
-    // This sketch's plane, expressed in the edge's component
+    return this.spatialCrossings(edge.geom().trimmedCurve(), relative, edge.tesselate().length)
+  }
+
+  spatialCrossings(curve, relative, samplesCount) {
+    // This sketch's plane, expressed in the source component
     const local = relative.clone().invert().multiply(this.sketch.workplane)
     const normal = new THREE.Vector3().setFromMatrixColumn(local, 2).normalize()
     const origin = new THREE.Vector3().setFromMatrixPosition(local)
@@ -1513,7 +1549,7 @@ export class Intersection extends Projection {
     const onPlane = value => Math.abs(value) <= modelTolerance.linear
 
     const { start, end } = curve.range()
-    const count = Math.max(64, edge.tesselate().length * 4)
+    const count = Math.max(64, samplesCount * 4)
     const samples = Array.from({ length: count + 1 }, (_, i) => start + (end - start) * i / count)
     const values = samples.map(distance)
     if(values.every(onPlane)) {
@@ -1538,6 +1574,7 @@ export class Intersection extends Projection {
   // Points where a sketch element crosses this sketch's plane, or the parts
   // of it lying in the plane
   curveCrossings(elem, relative) {
+    if(elem.sketch.surfaceSketch) return this.spatialCrossings(spatialCurve(elem), relative, elem.surfacePath().length)
     const source = relative.clone().multiply(elem.sketch.workplane)
     // This sketch's plane, expressed in the source sketch
     const local = source.clone().invert().multiply(this.sketch.workplane)

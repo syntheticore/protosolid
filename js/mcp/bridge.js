@@ -21,7 +21,7 @@ const instructions = `ProtoSolid is a parametric CAD application. You edit the u
 features are added to a timeline at its marker, and the model is regenerated from the timeline.
 Start with get_document. Use get_body to find faces and edges, get_sketch for sketch geometry and profiles, \
 and get_feature for the settings of feature types and existing features.
-To model, add a sketch on an origin plane or planar face with create_feature (type sketch), draw and dimension it, \
+To model, add a sketch on an origin plane or model face with create_feature (type sketch), draw and dimension it, \
 then create solid features such as extrude or revolve from its profiles. Refine with fillet, chamfer, shell and others. \
 Change existing work with edit_feature and edit_sketch, which regenerate everything after it.
 Lengths are in mm and angles in degrees. Settings and dimensions also accept expressions with units and parameters, like "40mm" or "width / 2". \

@@ -442,13 +442,8 @@ function describeConstraint(constraint) {
 }
 
 function profileArea(profile) {
-  const positions = profile.tesselate().positions
-  let area = 0
-  for(let i = 0; i < positions.length; i += 9) {
-    const [ax, ay, , bx, by, , cx, cy] = positions.slice(i, i + 9)
-    area += Math.abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay)) / 2
-  }
-  return area
+  const [outer, ...holes] = profile.rings.map(ring => Math.abs(ring.geom().signedArea()))
+  return holes.reduce((area, hole) => area - hole, outer)
 }
 
 export function describeSketch(doc, sketch, tree = doc.top()) {
@@ -462,6 +457,7 @@ export function describeSketch(doc, sketch, tree = doc.top()) {
     name: component ? sketchTitle(component, sketch) : 'Sketch',
     feature: `feature:${sketch.creator.id}`,
     component: component && itemId(component),
+    coordinateSystem: sketch.surfaceSketch ? 'surface' : 'plane',
     workplane: {
       origin: vector(new THREE.Vector3().setFromMatrixPosition(workplane)),
       xAxis: axis(0),

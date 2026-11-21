@@ -4,7 +4,7 @@ import Serialize from './serialize.js'
 import { makeID } from './id.js'
 import { AxialReference, CurveReference, PointReference } from './references.js'
 import { EPSILON, arrayRange, rotationFromNormal } from './utils.js'
-import { shapex as sx, point2, modelTolerance, sketchTessellationOptions } from './shapex.js'
+import { shapex as sx, point2, threeVector, modelTolerance, sketchTessellationOptions } from './shapex.js'
 import { isModelingFailure } from './errors.js'
 
 const vector = point => new THREE.Vector3(point.x, point.y, 0)
@@ -83,7 +83,12 @@ export class SketchElement {
 
   // Polyline in component space
   getPath() {
+    if(this.sketch.surfaceSketch) return this.surfacePath().map(point => point.applyMatrix4(this.sketch.surfacePlacement))
     return this.tesselate().map(([x, y]) => new THREE.Vector3(x, y, 0).applyMatrix4(this.sketch.workplane))
+  }
+
+  surfacePath() {
+    return this.sketch.surfaceSketch.tessellateCurve(this.geom(), sketchTessellationOptions).points.map(threeVector)
   }
 
   intersect(others) {
@@ -155,7 +160,7 @@ export class SketchPoint extends SketchElement {
   }
 
   getPoint() {
-    return new THREE.Matrix4().setPosition(this.point.clone().applyMatrix4(this.sketch.workplane))
+    return new THREE.Matrix4().setPosition(this.sketch.pointInComponent(this.point))
   }
 
   dump() {

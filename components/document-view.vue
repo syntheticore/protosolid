@@ -130,7 +130,7 @@
             @unhover="previewColorMode = null"
           )
 
-        .display-row(v-if="document.activeSketch")
+        .display-row(v-if="document.activeSketch && !document.activeSketch.surfaceSketch")
           label.display-toggle(title="Section the model at the active sketch plane")
             ToggleSwitch(v-model="sketchSection")
             span Section

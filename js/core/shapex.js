@@ -99,12 +99,15 @@ export function tessellateMesh(geometry, options = {}) {
     options.angularTolerance ?? tessellationOptions.angularTolerance,
     options.maximumDepth ?? tessellationOptions.maximumDepth,
   ) : tessellationOptions
-  const mesh = geometry.tessellate(settings)
+  return { ...meshBuffers(geometry.tessellate(settings)), chordTolerance: settings.chordTolerance }
+}
+
+export function meshBuffers(mesh) {
   const positions = []
   const normals = []
   for(const triangle of mesh.triangles) for(const index of triangle) {
     positions.push(...mesh.positions[index].toArray())
     normals.push(...mesh.normals[index].toArray())
   }
-  return { positions, normals, chordTolerance: settings.chordTolerance }
+  return { positions, normals }
 }

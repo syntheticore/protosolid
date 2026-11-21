@@ -123,7 +123,9 @@ function sheetSection(points, thickness, radius, tag) {
 function chainPoints(lines) {
   if(lines.some(line => !(line instanceof Line))) fail('Contours may only consist of straight lines')
   const sketch = lines[0].sketch
-  if(lines.some(line => line.sketch !== sketch)) fail('Contour lines must lie in one sketch')
+  if(sketch.surfaceSketch || lines.some(line => line.sketch !== sketch)) {
+    fail('Contour lines must lie in one planar sketch')
+  }
 
   const close = (p, q) => p.distanceTo(q) <= modelTolerance.linear
   const ends = lines.map(line => line.endpoints().map(point => v2(point.x, point.y)))
@@ -792,7 +794,7 @@ function sheetThickness(face) {
 function bendFrame(face, line, flip) {
   const plane = face.getPlane()
   if(!plane) fail('Bends need a planar face')
-  if(!(line instanceof Line)) fail('Bend lines must be straight')
+  if(!(line instanceof Line) || line.sketch.surfaceSketch) fail('Bends need a straight line in a planar sketch')
   const normal = normalFromMatrix(plane)
   const origin = new THREE.Vector3().setFromMatrixPosition(plane)
   const [start, end] = line.endpoints().map(point => new THREE.Vector3(point.x, point.y, 0).applyMatrix4(line.sketch.workplane))

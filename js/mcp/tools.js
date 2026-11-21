@@ -41,6 +41,7 @@ const pickerTypes = {
   path: 'sketch curve or model edge',
   axis: 'straight edge, cylindrical face, axis (helper:…) or sketch line',
   plane: 'planar face or plane (helper:…)',
+  sketchSupport: 'model face (face:…) or construction plane (helper:…)',
   face: 'face (face:…)',
   edge: 'edge (edge:…)',
   solid: 'body (body:…)',
@@ -356,7 +357,7 @@ export const tools = [
     title: 'Get sketch',
     readOnly: true,
     description: 'Elements, constraints, projections and closed profiles of a sketch, with its workplane. ' +
-      'Element coordinates are 2D on the workplane, whose origin and axes are given in component space.',
+      'Element coordinates and profile areas use the 2D sketch coordinate system. The workplane gives the flat editing frame in component space.',
     inputSchema: {
       type: 'object',
       properties: { sketch: { type: 'string', description: 'Sketch id, like sketch:id-7' } },
@@ -427,7 +428,7 @@ export const tools = [
     description: 'Adds a feature at the timeline marker with the given settings and regenerates the model. ' +
       'Fails without changes when inputs are missing or the feature cannot be built. ' +
       'Solid features join, cut, intersect or create bodies in their component depending on "operation". ' +
-      'Sketches take a plane or planar face as "plane" and can be drawn right away with "operations". ' +
+      'Sketches take a construction plane or model face as "plane" and can be drawn right away with "operations". ' +
       itemIdHelp,
     inputSchema: {
       type: 'object',

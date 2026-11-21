@@ -253,6 +253,9 @@ impl FaceHandle {
         let boundary = super::trim::face_boundary_curves(self.state.topology(), self.face, self.state.tolerance())?;
         super::trim::face_parameter_bounds(&boundary, self.state.tolerance())
     }
+    pub fn surface_sketch(&self) -> KernelResult<super::SurfaceSketch> {
+        super::SurfaceSketch::new(self.state.topology(), self.face, self.state.tolerance())
+    }
     pub fn boundary_edges(&self) -> KernelResult<Vec<EdgeHandle>> {
         self.state
             .topology()

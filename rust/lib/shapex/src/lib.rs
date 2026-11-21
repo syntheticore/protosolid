@@ -47,6 +47,7 @@ mod profile;
 mod section;
 mod sew;
 mod step;
+mod surface_sketch;
 mod sweep;
 mod sweep_limits;
 mod revolve_loft;
@@ -95,6 +96,7 @@ pub use naming::PersistentId;
 #[cfg(test)]
 pub(crate) use polyhedron::PolyhedralMesh;
 pub use profile::Profile;
+pub use surface_sketch::SurfaceSketch;
 pub use tessellation::{Polyline, Tessellate, TessellationOptions, TriangleMesh};
 pub use tolerance::ModelTolerance;
 pub use topology::{

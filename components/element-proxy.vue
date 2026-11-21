@@ -9,9 +9,9 @@
   import { curvatureSamples, toothScale, combLines } from '../js/core/curvature.js'
   import { ScreenPointObject } from '../js/three/helper-objects.js'
   import HiddenLine from '../js/three/hidden-line.js'
+  import { point2, threeVector } from '../js/core/shapex.js'
 
-  const props = defineProps(['document', 'component', 'element', 'displayMode', 'activeTool', 'showSplineControls', 'parentHighlighted', 'parentSelected', 'parentTransform'])
-  const emit = defineEmits([])
+  const props = defineProps(['document', 'component', 'element', 'displayMode', 'activeTool', 'editing', 'parentHighlighted', 'parentSelected', 'parentTransform'])
 
   const highlight = inject('highlight')
   const renderNeeded = inject('render-needed')
@@ -27,6 +27,7 @@
     !props.element.projection && props.element.fullyConstrained
   )
   const brokenProjection = computed(() => !!props.element.projection?.error)
+  const surface = computed(() => !props.editing && props.element.sketch.surfaceSketch)
 
   let mesh
   let hiddenMesh
@@ -55,12 +56,13 @@
     if(props.element instanceof SketchPoint) {
       mesh = new ScreenPointObject(26)
     } else if(props.element instanceof SketchText) {
-      mesh = window.alcRenderer.convertLines(props.element.polylines(), materials.line)
+      const lines = surface.value ? props.element.curves().map(curve => curve.surfacePath().map(point => point.toArray())) : props.element.polylines()
+      mesh = window.alcRenderer.convertLines(lines, materials.line)
     } else {
-      const vertices = props.element.tesselate()
+      const vertices = surface.value ? props.element.geom && props.element.surfacePath() : props.element.tesselate()
       if(!vertices) return
       mesh = window.alcRenderer.convertLine(vertices, materials.line)
-      if(props.showSplineControls && props.element instanceof Spline) {
+      if(props.editing && props.element instanceof Spline) {
         controlMesh = window.alcRenderer.convertLine(
           props.element.handles().map(point => point.toArray()),
           materials.splineControlLine,
@@ -68,7 +70,7 @@
         controlMesh.renderOrder = -1
         window.alcRenderer.add(controlMesh, true)
       }
-      if(props.element instanceof Spline && props.element.showCurvature) {
+      if(!surface.value && props.element instanceof Spline && props.element.showCurvature) {
         const samples = curvatureSamples(props.element.geom(), new THREE.Matrix4(), 64)
         const { teeth, envelopes } = combLines([samples], toothScale(samples, 1))
         combMesh = new THREE.Group()
@@ -84,15 +86,15 @@
     mesh.alcTypes = props.element instanceof SketchPoint ?
       ['point']
       :
-      props.element instanceof SketchText ? ['text'] : ['curve', 'path', props.element.getAxis && 'axis']
+      props.element instanceof SketchText ? ['text'] : ['curve', 'path', !props.element.sketch.surfaceSketch && props.element.getAxis && 'axis']
     mesh.material = getMaterial()
     mesh.alcObject = props.element
     if(!(props.element instanceof SketchPoint)) {
-      window.alcRenderer.offsetSketchObject(mesh)
+      if(!surface.value) window.alcRenderer.offsetSketchObject(mesh)
       if(mesh.isLine2) {
         hiddenMesh = new HiddenLine(mesh)
         hiddenMesh.visible = props.displayMode == 'hiddenLines'
-        window.alcRenderer.offsetSketchObject(hiddenMesh)
+        if(!surface.value) window.alcRenderer.offsetSketchObject(hiddenMesh)
         mesh.add(hiddenMesh)
       }
     }
@@ -105,7 +107,7 @@
   }
 
   watch(() => props.element, renderElement, { immediate: true, deep: 1 })
-  watch(() => props.showSplineControls, renderElement)
+  watch([surface, () => props.editing], renderElement)
 
   watch([highlighted, selected, toolSelected, fullyConstrained, brokenProjection, () => props.displayMode], () => {
     // Zero-length drawing elements have no mesh, but their reactive selection
@@ -123,7 +125,8 @@
   }, { immediate: true })
 
   function updateTransform() {
-    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4()).multiply(props.element.sketch.workplane)
+    const { workplane, surfacePlacement } = props.element.sketch
+    mesh.matrix.copy(props.parentTransform || new THREE.Matrix4()).multiply(surface.value ? surfacePlacement : workplane)
     if(controlMesh) {
       controlMesh.matrix.copy(mesh.matrix)
       controlMesh.matrix.decompose(controlMesh.position, controlMesh.quaternion, controlMesh.scale)
@@ -133,11 +136,8 @@
       combMesh.matrix.decompose(combMesh.position, combMesh.quaternion, combMesh.scale)
     }
     if(props.element instanceof SketchPoint) {
-      mesh.matrix.multiply(new THREE.Matrix4().makeTranslation(
-        props.element.point.x,
-        props.element.point.y,
-        props.element.point.z,
-      ))
+      const point = surface.value ? threeVector(surface.value.pointNormal(point2(props.element.point)).point) : props.element.point
+      mesh.matrix.multiply(new THREE.Matrix4().makeTranslation(point.x, point.y, point.z))
     }
     mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
   }

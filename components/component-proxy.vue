@@ -2,7 +2,7 @@
 
   //- Solids
 
-  template(v-for="solid in compound ? compound.solids() : []")
+  template(v-for="solid in compound && !editingSurfaceChart ? compound.solids() : []")
 
     SolidProxy(
       v-if="!component.isItemHidden(solid.id) || solid.id == highlight?.id"
@@ -25,7 +25,7 @@
   template(v-for="sketch in component.sketches")
 
     SketchProxy(
-      v-if="!component.creator.itemsHidden[sketch.id] || sketch == highlight || sketch.creator == highlight"
+      v-if="(!editingSurfaceChart || sketch == document.activeSketch) && (!component.creator.itemsHidden[sketch.id] || sketch == highlight || sketch.creator == highlight)"
       :key="sketch.id"
       :document="document"
       :component="component"
@@ -144,6 +144,7 @@
   const selected = computed(() => props.parentSelected || props.document.selection.has(props.component) )
   const projecting = computed(() => props.activeTool instanceof ProjectionTool )
   const projectingPoints = computed(() => props.activeTool instanceof ProjectTool )
+  const editingSurfaceChart = computed(() => !!props.document.activeSketch?.surfaceSketch && !projecting.value)
   const referencedItemIds = computed(() => new Set((props.document.activeFeature?.referencedItems() || [])
     .filter(item => item.componentId == props.component.id)
     .map(item => item.itemId)))

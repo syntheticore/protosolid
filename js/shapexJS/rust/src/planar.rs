@@ -384,7 +384,7 @@ impl NativeCurve3 {
     pub(super) fn segment(&self) -> Result<TrimmedCurve3, JsValue> {
         TrimmedCurve3::new(self.inner.clone(), self.range).map_err(js_error)
     }
-    fn wrap(segment: &TrimmedCurve3) -> Self {
+    pub(super) fn wrap(segment: &TrimmedCurve3) -> Self {
         Self { inner: segment.curve().clone(), range: segment.range() }
     }
 }

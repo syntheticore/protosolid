@@ -8,7 +8,7 @@
     :element="elem"
     :display-mode="displayMode"
     :active-tool="activeTool"
-    :show-spline-controls="active"
+    :editing="active"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
     :parent-transform="parentTransform"
@@ -16,9 +16,10 @@
 
   ProfileProxy(
     v-for="profile in profiles"
-    :key="profile.id"
+    :key="profile.id + (active && sketch.surfaceSketch ? '/flat' : '')"
     :component="component"
     :profile="profile"
+    :flat="active"
     :parent-highlighted="highlighted"
     :parent-selected="selected"
     :parent-transform="parentTransform"

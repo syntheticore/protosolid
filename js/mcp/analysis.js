@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import { Face, Edge, Vertex, Solid } from '../core/geom3d.js'
+import { Face, Edge, Vertex, Solid, Profile } from '../core/geom3d.js'
 import { measureOptions, measureValue, acceptsMeasure } from '../core/measures.js'
 import { ConstructionHelper } from '../core/helpers.js'
 import { SectionView } from '../core/component.js'
@@ -113,10 +113,17 @@ function geometry(doc, id) {
     item.faces().forEach(face => addTriangles(face.tesselate().positions, transform))
     result.points.push(...result.triangles.flat())
     result.center = item.center().applyMatrix4(transform)
+  } else if(item instanceof Profile) {
+    const transform = toWorld(sketchComponent(tree, item.sketch.id).id)
+    if(!item.sketch.surfaceSketch) transform.multiply(item.workplane)
+    addTriangles(item.tesselate().positions, transform)
+    result.points.push(...result.triangles.flat())
   } else if(item.sketch) {
-    const transform = toWorld(sketchComponent(tree, item.sketch.id).id).multiply(item.sketch.workplane)
-    const samples = item.point ? [item.point] : item.tesselate?.() || item.handles()
-    const points = samples.map(point => new THREE.Vector3(point.x ?? point[0], point.y ?? point[1], 0).applyMatrix4(transform))
+    const transform = toWorld(sketchComponent(tree, item.sketch.id).id)
+    const samples = item.geom && item.getPath ? item.getPath() :
+      (item.point ? [item.point] : item.tesselate?.() || item.handles()).map(point =>
+        item.sketch.pointInComponent(new THREE.Vector3(point.x ?? point[0], point.y ?? point[1], 0)))
+    const points = samples.map(point => point.applyMatrix4(transform))
     if(points.length == 1) result.point = points[0]
     addPolyline(points)
   } else {

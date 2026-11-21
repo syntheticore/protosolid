@@ -4305,6 +4305,111 @@ export class MoveFeature extends SolidFeature {
 Serialize.register(MoveFeature, 'MoveFeature')
 
 
+// Moves bodies so a plane, axis or point on them lands on another one
+export class AlignFeature extends Feature {
+  static icon = 'align'
+  constructor(doc) {
+    const is = type => feature => feature.alignType == type
+    const directed = feature => feature.alignType != 'point'
+    super(doc, false, 'Align', {
+      solids: {
+        title: 'Bodies',
+        type: 'solid',
+        multi: true,
+      },
+      alignType: {
+        title: 'Type',
+        type: 'enum',
+        options: {
+          plane: { title: 'Plane', icon: 'layer-group' },
+          axis: { title: 'Axis', icon: 'arrows-alt-v' },
+          point: { title: 'Point', icon: 'crosshairs' },
+        },
+      },
+      fromPlane: { title: 'From', type: 'plane', when: is('plane') },
+      toPlane: { title: 'To', type: 'plane', when: is('plane') },
+      fromAxis: { title: 'From', type: 'axis', when: is('axis') },
+      toAxis: { title: 'To', type: 'axis', when: is('axis') },
+      fromPoint: { title: 'From', type: 'point', when: is('point') },
+      toPoint: { title: 'To', type: 'point', when: is('point') },
+      flip: { title: 'Flip', type: 'bool', when: directed },
+      offset: { title: 'Offset', type: 'length', allowNegative: true, when: directed },
+      angle: { title: 'Angle', type: 'angle', allowNegative: true, when: directed },
+    })
+
+    this.solids = null
+    this.alignType = 'plane'
+    this.fromPlane = this.toPlane = null
+    this.fromAxis = this.toAxis = null
+    this.fromPoint = this.toPoint = null
+    this.flip = false
+    this.offset = 0
+    this.angle = 0
+  }
+
+  inputKeys() {
+    const type = this.alignType[0].toUpperCase() + this.alignType.slice(1)
+    return [`from${type}`, `to${type}`]
+  }
+
+  // Only local bodies can be moved, alignment geometry may come from anywhere
+  acceptsInput(item) {
+    const type = item?.typename?.()
+    return type != 'Component' && (type != 'Solid' || super.acceptsInput(item))
+  }
+
+  // Frame of an input in the coordinates of the feature component
+  localFrame(tree, key, frame) {
+    const comp = tree.findChild(this.componentId)
+    const source = tree.findChild(referenceComponentId(this[key]()))
+    if(!source || source == comp) return frame.clone()
+    const target = tree.findChild(this.componentOccurrenceId) || comp
+    return relativeComponentTransform(source, target).multiply(frame)
+  }
+
+  // Planes face each other unless flipped, axes point the same way unless flipped
+  alignment(from, to) {
+    const fromPosition = new THREE.Vector3().setFromMatrixPosition(from)
+    const toPosition = new THREE.Vector3().setFromMatrixPosition(to)
+    if(this.alignType == 'point') {
+      return new THREE.Matrix4().makeTranslation(toPosition.sub(fromPosition))
+    }
+
+    const normal = normalFromMatrix(to)
+    const target = normal.clone().multiplyScalar((this.alignType == 'plane') != this.flip ? -1 : 1)
+    const rotation = new THREE.Quaternion().setFromUnitVectors(normalFromMatrix(from), target)
+    // Planes only close their gap, axes only their offset across
+    const delta = toPosition.sub(fromPosition)
+    const along = target.clone().multiplyScalar(delta.dot(target))
+    if(this.alignType == 'plane') delta.copy(along)
+    else delta.sub(along)
+    // Turn the from geometry onto the target direction and spin it about the
+    // target normal, all about its own origin, which then moves onto the target.
+    const pivot = fromPosition.clone().add(delta).addScaledVector(normal, this.offset)
+    return new THREE.Matrix4().makeTranslation(pivot)
+      .multiply(new THREE.Matrix4().makeRotationAxis(normal, rad(this.angle)))
+      .multiply(new THREE.Matrix4().makeRotationFromQuaternion(rotation))
+      .multiply(new THREE.Matrix4().makeTranslation(fromPosition.negate()))
+  }
+
+  updateFeature(tree, references) {
+    const comp = tree.findChild(this.componentId)
+    const [fromKey, toKey] = this.inputKeys()
+    try {
+      const transform = this.alignment(
+        this.localFrame(tree, fromKey, references[fromKey]),
+        this.localFrame(tree, toKey, references[toKey]),
+      )
+      const moved = comp.compound.subset(references.solids).transform(transform)
+      const remaining = comp.compound.removeShapes(references.solids)
+      comp.compound = remaining.solids().length ? remaining.merge([moved]) : moved
+    } catch(err) { this.error = featureError(err, 'Bodies could not be aligned') }
+  }
+}
+
+Serialize.register(AlignFeature, 'AlignFeature')
+
+
 export class ReplaceFeature extends SolidFeature {
   static icon = 'exchange-alt'
   static modifiedFaceInputs = ['face']

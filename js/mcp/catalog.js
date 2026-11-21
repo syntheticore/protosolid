@@ -17,6 +17,7 @@ import {
   OffsetFeature,
   BooleanFeature,
   MoveFeature,
+  AlignFeature,
   FilletFeature,
   ChamferFeature,
   ReplaceFeature,
@@ -57,6 +58,7 @@ export const featureTypes = {
   offset: OffsetFeature,
   boolean: BooleanFeature,
   move: MoveFeature,
+  align: AlignFeature,
   fillet: FilletFeature,
   chamfer: ChamferFeature,
   replace: ReplaceFeature,
@@ -117,6 +119,11 @@ export const settingNotes = {
     restY: 'Moves component 2 along the joint plane Y axis from where the joint aligned it',
     minAngle: 'Ranges of a full turn or more do not limit rotation',
     maxTilt: 'Largest angle the ball joint Z axis of component 2 may swing away from its aligned direction',
+  },
+  align: {
+    flip: 'Planes face each other by default, flipped they face the same way. Axes point the same way by default.',
+    offset: 'Moves the bodies along the normal of the target plane or axis',
+    angle: 'Turns the bodies about the normal of the target plane or axis',
   },
   web: {
     curves: 'Open sketch curves of one sketch. Connected curves form mitered chains.',

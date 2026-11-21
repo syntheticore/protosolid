@@ -307,6 +307,7 @@
     SplitFeature,
     BooleanFeature,
     MoveFeature,
+    AlignFeature,
     ReplaceFeature,
     LoftFeature,
     PatternFeature,
@@ -532,7 +533,7 @@
               { title: 'Split', feature: SplitFeature },
               { title: 'Replace', feature: ReplaceFeature },
               { title: 'Dissolve', feature: DissolveFeature },
-              { title: 'Align', icon: 'align' },
+              { title: 'Align', feature: AlignFeature },
             ],
           },
           {

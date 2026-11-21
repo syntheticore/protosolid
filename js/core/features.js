@@ -2846,6 +2846,18 @@ export class ExtrudeFeature extends SolidFeature {
     if(key == 'operation' && value == 'cut' && !this.sideChangedByUser) this.side = 'reverse'
   }
 
+  // Extruding into the body cuts, extruding back out joins again
+  matchOperationToSide(forward) {
+    const hasBody = this.document.top(this.document.timeline.features.indexOf(this)).findChild(this.componentId).compound.solids().length
+    if(hasBody && this.operation == (forward ? 'cut' : 'join')) this.operation = forward ? 'join' : 'cut'
+  }
+
+  pickedInput(key, _reference, item) {
+    const profile = key == 'limitFace' && this.profiles?.().at(-1)?.getItem()
+    if(!profile) return
+    this.matchOperationToSide(item.center().sub(profile.center()).dot(profile.normal()) >= 0)
+  }
+
   getValues() {
     return { ...super.getValues(), sideChangedByUser: this.sideChangedByUser }
   }
@@ -2898,9 +2910,7 @@ export class ExtrudeFeature extends SolidFeature {
             const direction = side ? 'forward' : 'reverse'
             if(this.side != direction) {
               this.sideChangedByUser = true
-              // Dragging into the body cuts, dragging back out joins again
-              const hasBody = this.document.top(this.document.timeline.features.indexOf(this)).findChild(this.componentId).compound.solids().length
-              if(hasBody && this.operation == (side ? 'cut' : 'join')) this.operation = side ? 'join' : 'cut'
+              this.matchOperationToSide(side)
             }
             this.side = direction
           }

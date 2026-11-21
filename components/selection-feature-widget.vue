@@ -20,7 +20,17 @@
             :disabled="document.isRegenerating"
             @click="document.selection.only(item.solid)"
           )
-            Icon(icon="layer-group" fixed-width)
+            Icon(icon="cube" fixed-width)
+
+        .column(v-if="canActivate")
+          button(
+            type="button"
+            title="Activate Component"
+            aria-label="Activate Component"
+            :disabled="document.isRegenerating"
+            @click="activateComponent"
+          )
+            Icon(icon="check-circle" fixed-width)
 
         //- Each feature with the sketches it consumes stacked below
         .column(v-for="stack in stacks" :key="stack.feature.id")
@@ -152,7 +162,7 @@
   // Corners of the stacks' union, clockwise from the top left,
   // with the arrow on the top edge
   const corners = computed(() => {
-    const heights = [1, ...stacks.value.map(stack => 1 + stack.sketches.length)].map(rows => rows * rowHeight)
+    const heights = [1, ...canActivate.value ? [1] : [], ...stacks.value.map(stack => 1 + stack.sketches.length)].map(rows => rows * rowHeight)
     const width = heights.length * columnWidth
     const corners = [[0, 0, radius], [11, 0, 0], [18, -7, 0], [25, 0, 0], [width, 0, radius], [width, heights.at(-1), radius]]
     for(let i = heights.length - 1; i > 0; i--) {
@@ -188,6 +198,20 @@
   // Border centered half a pixel outside the buttons
   const shape = computed(() => outline(corners.value, 0.5))
   const clip = computed(() => outline(corners.value, 0))
+
+  const component = computed(() => {
+    const occurrence = props.item.solid.component
+    return props.document.getComponent(occurrence.sourceId()) || occurrence
+  })
+
+  const canActivate = computed(() =>
+    !component.value.readOnly && toRaw(component.value) !== toRaw(props.document.activeComponent))
+
+  async function activateComponent() {
+    // Exiting restores the component that was active before editing.
+    await props.document.cancelFeature()
+    props.document.activateComponent(component.value)
+  }
 
   function clearHighlight() {
     const shown = stacks.value.flatMap(stack => [stack.feature, ...stack.sketches.map(sketch => sketch.creator)])

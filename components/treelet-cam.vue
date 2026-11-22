@@ -85,9 +85,6 @@
               span.value {{ setup.result.holes.filter(hole => drillFits(hole, operation)).length }} of {{ setup.result.holes.length }}
               span Holes
 
-        fieldset(v-if="!setup.operations.length")
-          p.hint Add operations from the Milling tab
-
         fieldset(:class="{ collapsed: collapsed.has('post') }")
 
           h3.section(@click="toggleSection('post')")
@@ -177,10 +174,6 @@
   .readout .value
     text-align: right
     color: bright1()
-
-  .hint
-    font-size: 12px
-    color: bright2()
 
 </style>
 

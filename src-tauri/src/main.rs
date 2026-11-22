@@ -142,7 +142,8 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
-        .hidden_title(true);
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(14.0, 22.0));
     #[cfg(windows)]
     let builder = builder.decorations(false);
     let builder = with_background(builder);
@@ -212,7 +213,13 @@ fn show_preferences(app: &AppHandle, section: Option<String>) -> tauri::Result<(
     if let Some(main) = app.get_webview_window(MAIN) {
         builder = builder.parent(&main)?;
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true);
+    }
+    #[cfg(windows)]
     {
         builder = builder.decorations(false);
     }

@@ -2632,6 +2632,7 @@ dependencies = [
  "base64 0.22.1",
  "gtk",
  "percent-encoding",
+ "png",
  "serde",
  "serde_json",
  "tauri",

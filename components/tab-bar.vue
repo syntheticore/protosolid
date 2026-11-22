@@ -78,7 +78,7 @@
 
     [data-platform="darwin"] &
       border-radius: 4px 4px 0px 0px
-      padding-left: 74px
+      padding-left: 86px
 
     > *
       flex: 0 0 auto

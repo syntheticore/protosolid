@@ -7,6 +7,8 @@ use tauri::menu::{
     Menu, MenuBuilder, MenuItem, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
 };
 use tauri::{AppHandle, Emitter, Manager, Wry};
+#[cfg(target_os = "macos")]
+use tauri::{image::Image, menu::AboutMetadata};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::MAIN;
@@ -99,10 +101,21 @@ pub fn build(app: &AppHandle) -> tauri::Result<AppMenu> {
         .build()?;
 
     let mut menu = MenuBuilder::new(app);
-    if mac {
+    #[cfg(target_os = "macos")]
+    {
+        let artwork = include_bytes!("../icons/128x128.png");
+        let mut reader = png::Decoder::new(std::io::Cursor::new(artwork))
+            .read_info()
+            .unwrap();
+        let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
+        let icon = reader.next_frame(&mut rgba).unwrap();
         menu = menu.item(
             &SubmenuBuilder::new(app, "ProtoSolid")
-                .about(None)
+                .about(Some(AboutMetadata {
+                    icon: Some(Image::new_owned(rgba, icon.width, icon.height)),
+                    copyright: Some("© 2026 Björn Breitgoff".into()),
+                    ..Default::default()
+                }))
                 .separator()
                 .item(&item(app, "preferences", "Settings...", "CmdOrCtrl+,")?)
                 .separator()

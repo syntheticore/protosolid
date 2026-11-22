@@ -5,6 +5,7 @@
     .drag-region(data-tauri-drag-region)
 
     button.window-close(
+      v-if="!macos"
       title="Close settings"
       aria-label="Close settings"
       @click="close"
@@ -416,7 +417,7 @@
       border-color: bright2(0.7)
 
     section
-      padding: contentInset contentInset 24px
+      padding: 32px contentInset 24px
       overflow: auto
 
       > *
@@ -548,6 +549,7 @@
         activeSection: new URLSearchParams(window.location.search).get('section') || 'appearance',
         isHighDPI: window.devicePixelRatio > 1,
         linux: window.platform == 'linux',
+        macos: window.platform == 'darwin',
         restartRequired: false,
         sections: [
           { id: 'appearance', title: 'Appearance', icon: 'desktop' },

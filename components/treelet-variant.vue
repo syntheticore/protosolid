@@ -93,12 +93,17 @@
     font-weight: bold
     min-width: 0
 
-    :deep(.trigger)
+    // Specific enough to outrank the bordered, blurry and expanded trigger styles of ComboBox
+    .variant-picker &.variant-option :deep(.trigger)
       color: inherit
       background: transparent
       border: 0
-      padding-top: 0
-      padding-bottom: 0
+      box-shadow: none
+      isolation: auto
+      padding: 0 5px
+
+      &::after
+        display: none
 
     :deep(.expander)
       padding: 0

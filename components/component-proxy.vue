@@ -5,7 +5,7 @@
   template(v-for="solid in compound && !editingSurfaceChart ? compound.solids() : []")
 
     SolidProxy(
-      v-if="!component.isItemHidden(solid.id) || solid.id == highlight?.id"
+      v-if="showsSolid(solid)"
       :solid="solid"
       :key="solid.id"
       :document="document"
@@ -25,7 +25,7 @@
   template(v-for="sketch in component.sketches")
 
     SketchProxy(
-      v-if="(!editingSurfaceChart || sketch == document.activeSketch) && (!component.creator.itemsHidden[sketch.id] || sketch == highlight || sketch.creator == highlight)"
+      v-if="(!editingSurfaceChart || sketch == document.activeSketch) && (isSketchHighlighted(sketch) || !onlyHighlighted && !component.creator.itemsHidden[sketch.id])"
       :key="sketch.id"
       :document="document"
       :component="component"
@@ -52,7 +52,7 @@
   template(v-for="helper in component.helpers")
 
     HelperProxy(
-      v-if="!((document.activeMerge || document.activeSimulation || document.camMode) && helper.isStandard()) &&(isHelperHighlighted(helper) || !component.isItemHidden(helper.id) && (component.id === document.activeComponent?.id || referencedItemIds.has(helper.id) || document.activeFeature instanceof JointFeature || (projectingPoints && helper instanceof PointHelper)))"
+      v-if="!((document.activeMerge || document.activeSimulation || document.camMode) && helper.isStandard()) && (isHelperHighlighted(helper) || !onlyHighlighted && !component.isItemHidden(helper.id) && (component.id === document.activeComponent?.id || referencedItemIds.has(helper.id) || document.activeFeature instanceof JointFeature || (projectingPoints && helper instanceof PointHelper)))"
       :key="helper.id"
       :document="document"
       :component="component"
@@ -67,7 +67,7 @@
   template(v-for="canvas in component.creator.canvases")
 
     CanvasProxy(
-      v-if="!canvas.hidden"
+      v-if="!onlyHighlighted && !canvas.hidden"
       :key="canvas.id"
       :document="document"
       :component="component"
@@ -82,7 +82,7 @@
   template(v-for="section in component.creator.sectionViews")
 
     SectionProxy(
-      v-if="!section.hidden"
+      v-if="!onlyHighlighted && !section.hidden"
       :key="section.id"
       :document="document"
       :component="component"
@@ -95,10 +95,11 @@
   template(v-for="child in component.children")
 
     ComponentProxy(
-      v-if="!child.creator.hidden"
+      v-if="!onlyHighlighted && !child.creator.hidden || containsHighlight(child)"
       :key="child.id"
       :document="document"
       :component="child"
+      :only-highlighted="(onlyHighlighted || child.creator.hidden) && child != highlight"
       :display-mode="displayMode"
       :color-mode="colorMode"
       :parent-active="active"
@@ -132,7 +133,7 @@
   import SectionCaps from '../js/three/section-caps.js'
   import materials from '../js/materials.js'
 
-  const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform', 'sectionPlane', 'sectionSide'])
+  const props = defineProps(['document', 'component', 'displayMode', 'colorMode', 'activeHandle', 'activeTool', 'parentActive', 'parentHighlighted', 'parentSelected', 'parentTransform', 'sectionPlane', 'sectionSide', 'onlyHighlighted'])
   const emit = defineEmits(['handleMouseDown', 'handleMouseUp', 'handleMouseMove', 'handleMouseLeave', 'handlePointerDown', 'handleWheel', 'dimensionMouseUp', 'dimensionMouseDown', 'dimensionMouseMove'])
   // defineOptions({ inheritAttrs: false })
 
@@ -207,7 +208,7 @@
   let sectionCaps = null
 
   const sectionFaces = computed(() => (model.value?.solids() || [])
-    .filter(solid => !props.component.isItemHidden(solid.id))
+    .filter(showsSolid)
     .flatMap(solid => solid.faces()))
 
   // The cut's outline looks like the component's other edges
@@ -268,9 +269,32 @@
     })
   }
 
-  // Hovered helpers show even when hidden or outside the active component
+  // Hovered items show even when hidden themselves or inside hidden
+  // components. Hidden components containing the hovered item only show that.
+  function showsSolid(solid) {
+    return isSolidHighlighted(solid) || !props.onlyHighlighted && !props.component.isItemHidden(solid.id)
+  }
+
+  function isSolidHighlighted(solid) {
+    return solid.id == highlight.value?.id
+  }
+
+  function isSketchHighlighted(sketch) {
+    return sketch == highlight.value || sketch.creator == highlight.value
+  }
+
+  // Hovered helpers also show outside the active component
   function isHelperHighlighted(helper) {
     return helper == highlight.value || helper.id == highlight.value?.helperId
+  }
+
+  function containsHighlight(comp) {
+    if(!highlight.value) return false
+    return comp == highlight.value ||
+      comp.compound.solids().some(isSolidHighlighted) ||
+      comp.sketches.some(isSketchHighlighted) ||
+      comp.helpers.some(isHelperHighlighted) ||
+      comp.children.some(containsHighlight)
   }
 
   function getSections(comp) {

@@ -44,12 +44,24 @@
     display: flex
     flex-direction: column
 
+    // Linux windows are transparent, so the page can follow the rounded corners of the GTK decorations,
+    // which also draw the window's edge. The radius matches Windows 11 and the decorations in main.rs.
+    [data-platform="linux"] &
+      background: var(--body-bg)
+
+      &:not(.fullscreen):not(.maximized)
+        border-radius: 8px
+
   .tab-bar
     height: 38px
 
     // Tauri keeps the top pixel row of windowed frameless windows for the system border on Windows 11
     [data-platform="win32"] #app:not(.fullscreen):not(.maximized) &
       height: 37px
+
+    // Leaves the same 3px around the menu button as on Windows, whose border covers the top pixel row
+    [data-platform="linux"] #app:not(.fullscreen):not(.maximized) &
+      height: 36px
 
     .fullscreen &
     [data-platform="win32"] .maximized &

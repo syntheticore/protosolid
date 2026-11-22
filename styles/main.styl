@@ -11,6 +11,15 @@ body
   // Helvetica Neue ships with macOS only, other platforms get the bundled Inter
   font-family: "HelveticaNeue-Light", "Helvetica Neue Light", "Helvetica Neue", Helvetica, "Inter Variable", Arial, "Lucida Grande", sans-serif;
 
+  &[data-platform="linux"]
+    // Fontconfig substitutes another font for Helvetica, whose metrics and weight differ from Inter
+    font-family: "Inter Variable", sans-serif
+    // WebKitGTK smears text in layers with transparent backgrounds, like the blurred overlays.
+    // Text elsewhere looks the same either way.
+    -webkit-font-smoothing: antialiased
+    // The app draws its own background inside the rounded window border
+    background: transparent
+
   &[data-platform="darwin"]
 
     &[data-dark-mode]

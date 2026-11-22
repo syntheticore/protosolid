@@ -42,6 +42,9 @@
     color: white
     font-family: "Helvetica Neue", Helvetica, "Inter Variable", Arial, sans-serif
     font-size: 11px
+
+    [data-platform="linux"] &
+      font-family: "Inter Variable", sans-serif
     font-weight: 700
     cursor: default
     transition: background 0.25s

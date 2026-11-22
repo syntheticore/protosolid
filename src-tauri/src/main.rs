@@ -16,7 +16,7 @@ use tauri::window::Color;
 use tauri::RunEvent;
 use tauri::{
     AppHandle, Emitter, EventTarget, Manager, Theme, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder, Window, WindowEvent,
+    WebviewWindowBuilder, Window, WindowEvent, Wry,
 };
 
 use mcp::Mcp;
@@ -25,6 +25,7 @@ pub const MAIN: &str = "main";
 const PREFERENCES: &str = "preferences";
 const SPLASH: &str = "splash";
 
+#[cfg(not(target_os = "linux"))]
 const BACKGROUND: Color = Color(0x1c, 0x21, 0x27, 0xff);
 
 // The theme chosen in the preferences, None follows the system
@@ -59,7 +60,64 @@ fn emit_dark_mode(app: &AppHandle) {
             .next()
             .and_then(|window| window.theme().ok())
     });
-    app.emit("dark-mode", [theme == Some(Theme::Dark)]).unwrap();
+    let dark = theme == Some(Theme::Dark);
+    app.emit("dark-mode", [dark]).unwrap();
+    #[cfg(target_os = "linux")]
+    app.run_on_main_thread(move || style_decorations(dark)).unwrap();
+}
+
+// Linux windows are transparent, so the page can round its corners to match the window decorations
+fn with_background<'a>(
+    builder: WebviewWindowBuilder<'a, Wry, AppHandle>,
+) -> WebviewWindowBuilder<'a, Wry, AppHandle> {
+    #[cfg(target_os = "linux")]
+    return builder.background_color(Color(0, 0, 0, 0));
+    #[cfg(not(target_os = "linux"))]
+    builder.background_color(BACKGROUND)
+}
+
+// An empty title bar keeps GTK's client side decorations without their title bar,
+// which give the window the border, shadow and resize edges of other apps
+#[cfg(target_os = "linux")]
+fn client_decorations(window: &WebviewWindow) -> tauri::Result<()> {
+    let window_ = window.clone();
+    window.run_on_main_thread(move || {
+        use gtk::prelude::*;
+        window_
+            .gtk_window()
+            .unwrap()
+            .set_titlebar(Some(&gtk::EventBox::new()));
+    })
+}
+
+#[cfg(target_os = "linux")]
+thread_local! {
+    static DECORATION_STYLE: gtk::CssProvider = {
+        let provider = gtk::CssProvider::new();
+        gtk::StyleContext::add_provider_for_screen(
+            &gtk::gdk::Screen::default().unwrap(),
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        provider
+    };
+}
+
+// Decorations of libadwaita apps: all corners rounded, a faint outline slightly brighter than the
+// page in the dark theme and darker in the light one, and a soft shadow instead of the dark ring
+// of GTK 3. The outline is opaque, as it lies outside the page. The radius matches app.vue.
+#[cfg(target_os = "linux")]
+fn style_decorations(dark: bool) {
+    use gtk::prelude::*;
+    let outline = if dark { "rgb(66, 71, 78)" } else { "rgb(200, 203, 207)" };
+    let css = format!(
+        "window:not(.maximized):not(.fullscreen):not(.tiled):not(.tiled-top):not(.tiled-bottom)\
+         :not(.tiled-left):not(.tiled-right) decoration {{\
+           border-radius: 8px;\
+           box-shadow: 0 0 0 1px {outline}, 0 1px 14px rgba(0, 0, 0, 0.4);\
+         }}"
+    );
+    DECORATION_STYLE.with(|provider| provider.load_from_data(css.as_bytes()).unwrap());
 }
 
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
@@ -67,7 +125,6 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .title("ProtoSolid")
         .inner_size(1250.0, 850.0)
         .min_inner_size(1000.0, 450.0)
-        .background_color(BACKGROUND)
         .theme(theme_source(app))
         .visible(false)
         // Tauri's file drop handling would swallow the page's own drag and drop on Windows
@@ -86,16 +143,32 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
     let builder = builder.decorations(false);
+    let builder = with_background(builder);
 
     let window = builder.build()?;
+    #[cfg(target_os = "linux")]
+    client_decorations(&window)?;
 
     // The frameless window draws its own menu, the native one only provides shortcuts
     #[cfg(not(target_os = "macos"))]
     {
         window.set_menu(app.state::<menu::AppMenu>().menu.clone())?;
         window.hide_menu()?;
+    }
+    // Showing a GTK window shows all of its children, which would bring the hidden menu bar back
+    #[cfg(target_os = "linux")]
+    {
+        let window = window.clone();
+        app.run_on_main_thread(move || {
+            use gtk::prelude::*;
+            for child in window.default_vbox().unwrap().children() {
+                if child.is::<gtk::MenuBar>() {
+                    child.set_no_show_all(true);
+                }
+            }
+        })?;
     }
     #[cfg(target_os = "macos")]
     let _ = window;
@@ -125,8 +198,6 @@ fn show_preferences(app: &AppHandle, section: Option<String>) -> tauri::Result<(
         .min_inner_size(680.0, 560.0)
         .center()
         .resizable(false)
-        .decorations(false)
-        .background_color(BACKGROUND)
         .theme(theme_source(app))
         .visible(false)
         // Tauri's file drop handling would swallow the page's own drag and drop on Windows
@@ -141,7 +212,15 @@ fn show_preferences(app: &AppHandle, section: Option<String>) -> tauri::Result<(
     if let Some(main) = app.get_webview_window(MAIN) {
         builder = builder.parent(&main)?;
     }
-    builder.build()?;
+    #[cfg(not(target_os = "linux"))]
+    {
+        builder = builder.decorations(false);
+    }
+    let window = with_background(builder).build()?;
+    #[cfg(target_os = "linux")]
+    client_decorations(&window)?;
+    #[cfg(not(target_os = "linux"))]
+    let _ = window;
     Ok(())
 }
 

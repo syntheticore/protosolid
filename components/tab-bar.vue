@@ -22,7 +22,27 @@
 
     .grab-handle.fixed(data-tauri-drag-region)
 
-    .window-controls
+    //- Linux draws the thin symbols of GNOME's title bars
+    .window-controls(v-if="linux")
+
+      button(@click="minimize")
+        svg(viewBox="0 0 16 16")
+          path(d="M4.5 8.5h7")
+
+      button(v-if="maximized" @click="unmaximize")
+        svg(viewBox="0 0 16 16")
+          rect(x="4.5" y="6.5" width="5" height="5" rx="1")
+          path(d="M6.5 4.5h4a1 1 0 0 1 1 1v4")
+
+      button(v-else @click="maximize")
+        svg(viewBox="0 0 16 16")
+          rect(x="4.5" y="4.5" width="7" height="7" rx="1")
+
+      button(@click="close")
+        svg(viewBox="0 0 16 16")
+          path(d="M5 5l6 6M11 5l-6 6")
+
+    .window-controls(v-else)
 
       button(@click="minimize")
         Icon(icon="window-minimize")
@@ -88,6 +108,9 @@
     [data-platform="win32"] #app:not(.fullscreen):not(.maximized) &
       margin-top: 4px
 
+    [data-platform="linux"] #app:not(.fullscreen):not(.maximized) &
+      margin-top: 3px
+
     :deep(.button)
       border-radius: 4px
 
@@ -118,6 +141,7 @@
       display: none
 
       [data-platform="win32"] &
+      [data-platform="linux"] &
         display: block
 
   .menu-button
@@ -151,6 +175,34 @@
           background: #b70f0f
           color: white
 
+    // Round buttons like the title bars of GNOME apps
+    [data-platform="linux"] &
+      display: flex
+      align-items: center
+      gap: 12px
+      padding: 0 10px 0 2px
+
+      button
+        width: 24px
+        height: 24px
+        padding: 0
+        border-radius: 50%
+        background: tint(10%)
+
+        svg
+          display: block
+          width: 16px
+          height: 16px
+          margin: auto
+          fill: none
+          stroke: currentColor
+          stroke-width: 1.2
+          stroke-linecap: round
+
+        &:hover
+          background: tint(18%)
+          color: var(--fg)
+
 </style>
 
 
@@ -163,6 +215,12 @@
       documents: Array,
       activeDocument: Object,
       maximized: Boolean,
+    },
+
+    data() {
+      return {
+        linux: window.platform == 'linux',
+      }
     },
 
     methods: {

@@ -9,7 +9,10 @@
       aria-label="Close settings"
       @click="close"
     )
-      Icon(icon="window-close")
+      //- The thin cross of GNOME's title bars, like the main window's
+      svg(v-if="linux" viewBox="0 0 16 16")
+        path(d="M5 5l6 6M11 5l-6 6")
+      Icon(v-else icon="window-close")
 
     aside.sidebar
 
@@ -338,6 +341,29 @@
       color: white
       background: #b70f0f
 
+    // Round like the window buttons of the main window, at the same distance from the window edge
+    [data-platform="linux"] &
+      top: 6px
+      right: 10px
+      width: 24px
+      height: 24px
+      border-radius: 50%
+      background: tint(10%)
+
+      svg
+        display: block
+        width: 16px
+        height: 16px
+        margin: auto
+        fill: none
+        stroke: currentColor
+        stroke-width: 1.2
+        stroke-linecap: round
+
+      &:hover
+        color: var(--fg)
+        background: tint(18%)
+
   .sidebar
     background: dark2(1.25)
     border-right: 1px solid dark1()
@@ -521,6 +547,7 @@
         preferences,
         activeSection: new URLSearchParams(window.location.search).get('section') || 'appearance',
         isHighDPI: window.devicePixelRatio > 1,
+        linux: window.platform == 'linux',
         restartRequired: false,
         sections: [
           { id: 'appearance', title: 'Appearance', icon: 'desktop' },

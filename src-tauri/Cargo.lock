@@ -2630,6 +2630,7 @@ name = "protosolid"
 version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
+ "gtk",
  "percent-encoding",
  "serde",
  "serde_json",

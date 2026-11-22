@@ -424,7 +424,7 @@
         previewDisplayMode: null,
         colorMode: 'material',
         previewColorMode: null,
-        sketchSection: false,
+        sketchSection: true,
         showConstraintMarkers: true,
         previewOnHover: preferences.previewOnHover,
         alwaysShowSideLabels: preferences.alwaysShowSideLabels,
